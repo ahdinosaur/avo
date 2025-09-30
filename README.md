@@ -48,7 +48,7 @@ To describe what you see:
 - The block defines parameters that it expects to receive
 - The block defines a `setup` function, which return a list of modules to install.
   - These modules can be defined in other places, in which case they are called.
-  - There is a limited set of "core" modules, which are called like any other module.
+  - There is a limited set of core operations, which are called like any other module.
 
 Not shown but should be included:
 
@@ -59,8 +59,10 @@ Not shown but should be included:
 As for the execution:
 
 - Given the inputs, the outputs should construct a tree.
-  - The branches are user modules, the leaves are core modules.
+  - The branches are user modules, the leaves are core operations.
 - Then the tree can be constructed into a graph, where nodes are ordered based on parent-child or dependency relationships.
+  - This is a causality graph, so nodes that could happen at the same time should be grouped together.
+  - Each core operation should then be able to reduce a group of operations at the same causality into a single operation.
 - Then you should be able to view the tree in something like [ratatui](https://ratatui.rs/)
   - See the progress of each node
   - See the output of each leaf
