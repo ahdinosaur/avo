@@ -23,18 +23,15 @@ struct BlockCall {
 type ParamTypes = HashMap<String, ParamType>;
 type ParamValues = HashMap<String, ParamValue>;
 
-struct BlockDefinition<BlocksFn>
-where
-    BlocksFn: Fn(ParamValues) -> Vec<BlockCall>,
-{
+struct BlockDefinition {
     name: String,
     version: Version,
     params: ParamTypes,
-    blocks: BlocksFn,
+    blocks: Box<dyn Fn(ParamValues) -> Vec<BlockCall>>,
 }
 
 enum Operator {
-    Block(BlockDefinition<Box<dyn Fn(ParamValues) -> Vec<BlockCall>>>),
+    Block(BlockDefinition),
     Core(CoreOperator),
 }
 
