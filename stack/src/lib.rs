@@ -16,7 +16,7 @@ enum ParamValue {
 }
 
 struct BlockCall {
-    operator: PathBuf,
+    operator: Operator,
     params: HashMap<String, ParamValue>,
 }
 
