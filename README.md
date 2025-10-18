@@ -15,7 +15,7 @@ See also:
 - [comtrya](https://github.com/comtrya/comtrya)
 - (legacy) [boxen](https://github.com/boxen/boxen)
 
-## Design sketch
+## Mutable (impure) configuration
 
 Using [the Rimu language](https://rimu.dev), describe a "configuration block":
 
@@ -66,6 +66,10 @@ As for the execution:
 - Then you should be able to view the tree in something like [ratatui](https://ratatui.rs/)
   - See the progress of each node
   - See the output of each leaf
+
+## Immutable (pure) packages
+
+We could also have a 
 
 ## Personal history
 
