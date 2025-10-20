@@ -1,0 +1,13 @@
+name: example
+
+params:
+  whatever:
+    type: boolean
+
+setup: (params) =>
+  - module: ./stuff
+    params:
+      stuff: true
+  - module: @core/pkg
+    params:
+      package: nvim
