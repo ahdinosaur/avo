@@ -564,7 +564,7 @@ dependencies = [
 [[package]]
 name = "rimu"
 version = "0.2.0"
-source = "git+https://github.com/ahdinosaur/rimu?branch=url-source-id#52ee7dc6b1f200ba8186006b2578dca6394aecaa"
+source = "git+https://github.com/ahdinosaur/rimu?branch=url-source-id#47b1dbe3dc5bde50bdbfc6e83a06b47c792c7a05"
 dependencies = [
  "rimu-ast",
  "rimu-eval",
@@ -577,7 +577,7 @@ dependencies = [
 [[package]]
 name = "rimu-ast"
 version = "0.2.0"
-source = "git+https://github.com/ahdinosaur/rimu?branch=url-source-id#52ee7dc6b1f200ba8186006b2578dca6394aecaa"
+source = "git+https://github.com/ahdinosaur/rimu?branch=url-source-id#47b1dbe3dc5bde50bdbfc6e83a06b47c792c7a05"
 dependencies = [
  "indexmap",
  "rimu-meta",
@@ -587,7 +587,7 @@ dependencies = [
 [[package]]
 name = "rimu-eval"
 version = "0.2.0"
-source = "git+https://github.com/ahdinosaur/rimu?branch=url-source-id#52ee7dc6b1f200ba8186006b2578dca6394aecaa"
+source = "git+https://github.com/ahdinosaur/rimu?branch=url-source-id#47b1dbe3dc5bde50bdbfc6e83a06b47c792c7a05"
 dependencies = [
  "indexmap",
  "rimu-ast",
@@ -601,7 +601,7 @@ dependencies = [
 [[package]]
 name = "rimu-meta"
 version = "0.2.0"
-source = "git+https://github.com/ahdinosaur/rimu?branch=url-source-id#52ee7dc6b1f200ba8186006b2578dca6394aecaa"
+source = "git+https://github.com/ahdinosaur/rimu?branch=url-source-id#47b1dbe3dc5bde50bdbfc6e83a06b47c792c7a05"
 dependencies = [
  "ariadne",
  "chumsky",
@@ -613,7 +613,7 @@ dependencies = [
 [[package]]
 name = "rimu-parse"
 version = "0.2.0"
-source = "git+https://github.com/ahdinosaur/rimu?branch=url-source-id#52ee7dc6b1f200ba8186006b2578dca6394aecaa"
+source = "git+https://github.com/ahdinosaur/rimu?branch=url-source-id#47b1dbe3dc5bde50bdbfc6e83a06b47c792c7a05"
 dependencies = [
  "chumsky",
  "indexmap",
@@ -627,7 +627,7 @@ dependencies = [
 [[package]]
 name = "rimu-stdlib"
 version = "0.2.0"
-source = "git+https://github.com/ahdinosaur/rimu?branch=url-source-id#52ee7dc6b1f200ba8186006b2578dca6394aecaa"
+source = "git+https://github.com/ahdinosaur/rimu?branch=url-source-id#47b1dbe3dc5bde50bdbfc6e83a06b47c792c7a05"
 dependencies = [
  "rimu-eval",
  "rimu-meta",
@@ -639,7 +639,7 @@ dependencies = [
 [[package]]
 name = "rimu-value"
 version = "0.2.0"
-source = "git+https://github.com/ahdinosaur/rimu?branch=url-source-id#52ee7dc6b1f200ba8186006b2578dca6394aecaa"
+source = "git+https://github.com/ahdinosaur/rimu?branch=url-source-id#47b1dbe3dc5bde50bdbfc6e83a06b47c792c7a05"
 dependencies = [
  "indexmap",
  "rimu-ast",

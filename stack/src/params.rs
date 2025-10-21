@@ -1,5 +1,7 @@
 use indexmap::IndexMap;
-use rimu::Number;
+use rimu::{Number, Spanned};
+
+pub struct ParamName(String);
 
 pub enum ParamType {
     Boolean,
@@ -18,5 +20,5 @@ pub enum ParamValue {
     Object(IndexMap<String, ParamValue>),
 }
 
-pub struct ParamTypes(IndexMap<String, ParamType>);
-pub struct ParamValues(IndexMap<String, ParamValue>);
+pub struct ParamTypes(IndexMap<Spanned<ParamName>, Spanned<ParamType>>);
+pub struct ParamValues(IndexMap<Spanned<ParamName>, Spanned<ParamValue>>);

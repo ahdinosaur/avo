@@ -1,28 +1,72 @@
 use std::path::PathBuf;
 
+use rimu::{Function, Spanned, Value};
+
 use crate::{
     operator::Operator,
     params::{ParamTypes, ParamValues},
 };
 
 pub struct Name(String);
-pub struct Version(String);
+
+pub enum IntoNameError {
+    NotAString,
+}
+
+impl TryFrom<Value> for Name {
+    type Error = IntoNameError;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        let Value::String(string) = value else {
+            return Err(IntoNameError::NotAString);
+        };
+        Ok(Name(string))
+    }
+}
 
 pub struct BlockCallRef {
-    op: PathBuf,
-    params: ParamValues,
+    op: Spanned<PathBuf>,
+    params: Spanned<ParamValues>,
 }
 
 pub struct BlockCall {
-    op: Operator,
-    params: ParamValues,
+    op: Spanned<Operator>,
+    params: Spanned<ParamValues>,
 }
 
-pub type BlocksFn = Box<dyn Fn(ParamValues) -> Vec<BlockCallRef>>;
+pub struct BlocksFunction(Function);
+// Box<dyn Fn(ParamValues) -> Spanned<Vec<BlockCallRef>>>;
 
 pub struct BlockDefinition {
-    name: Name,
-    version: Version,
-    params: ParamTypes,
-    blocks: BlocksFn,
+    name: Option<Spanned<Name>>,
+    params: Option<Spanned<ParamTypes>>,
+    blocks: Spanned<BlocksFunction>,
 }
+
+pub enum IntoBlockDefinitionError {
+    NotAnObject,
+    Name(IntoNameError),
+    Params(IntoParamsError),
+    Blocks(IntoBlocksFunctionError),
+}
+
+impl TryFrom<Value> for BlockDefinition {
+    type Error = IntoBlockDefinitionError;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        let Value::Object(object) = value else {
+            return Err(IntoBlockDefinitionError::NotAnObject);
+        };
+
+        let name = object
+            .get("name")
+            .map(|name| {
+                let (name, name_span) = name.take();
+                let name: Name = name.try_into().map_err(IntoBlockDefinitionError::Name)?;
+                Ok(Spanned::new(name, name_span))
+            })
+            .transpose()?;
+    }
+}
+
+pub type SpannedBlockDefinition = Spanned<BlockDefinition>;
