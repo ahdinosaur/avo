@@ -2,10 +2,7 @@ use std::path::PathBuf;
 
 use rimu::{Function, Spanned, Value};
 
-use crate::{
-    operator::Operator,
-    params::{ParamTypes, ParamValues},
-};
+use crate::params::{ParamTypes, ParamValues};
 
 pub struct Name(String);
 
@@ -26,11 +23,6 @@ impl TryFrom<Value> for Name {
 
 pub struct BlockCallRef {
     op: Spanned<PathBuf>,
-    params: Spanned<ParamValues>,
-}
-
-pub struct BlockCall {
-    op: Spanned<Operator>,
     params: Spanned<ParamValues>,
 }
 
