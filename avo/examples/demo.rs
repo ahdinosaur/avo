@@ -15,7 +15,5 @@ async fn main() {
 
     let operation = plan(plan_id, params).await.expect("Failed to plan");
 
-    println!("{:?}", operation);
-
     apply(operation).await.expect("Failed to apply");
 }

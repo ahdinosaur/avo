@@ -42,14 +42,17 @@ pub async fn plan(
     plan_id: PlanId,
     params: Spanned<ParamValues>,
 ) -> Result<OperationTree, PlanError> {
+    println!("Plan ---");
     let mut store = create_store();
     let operations = plan_recursive(plan_id, params, &mut store).await?;
-    Ok(OperationTree::Branch {
+    let operation = OperationTree::Branch {
         id: None,
         before: vec![],
         after: vec![],
         children: operations,
-    })
+    };
+    println!("Operation: {:?}", operation);
+    Ok(operation)
 }
 
 pub async fn plan_recursive(
@@ -195,13 +198,16 @@ pub enum ApplyError {
 }
 
 pub async fn apply(operation: OperationTree) -> Result<OperationEpochsGrouped, ApplyError> {
+    println!("Apply ---");
     let epochs = operation.into_epochs().map_err(ApplyError::Epoch)?;
-    let grouped = epochs.group();
-    grouped
+    println!("Epochs: {:?}", epochs);
+    let epochs_grouped = epochs.group();
+    println!("Epoch grouped: {:?}", epochs_grouped);
+    epochs_grouped
         .apply_all()
         .await
         .map_err(ApplyError::OperationGroupApply)?;
-    Ok(grouped)
+    Ok(epochs_grouped)
 }
 
 #[cfg(test)]
