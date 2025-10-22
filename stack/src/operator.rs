@@ -1,86 +1,92 @@
-use std::{collections::HashMap, convert::Infallible};
+use std::collections::HashMap;
 
-use crate::block::BlockDefinition;
+// - Start with a tree of operations
+// - Then reduce into a flat list of operations
+// - Then section operations into temporal epochs.
+// - Then group operations of same kind and epoch into single operation.
 
-pub trait OperationTrait {
+pub trait OperationTrait: Into<Operation> {
     fn kind() -> OperationKind;
 
-    type Group: Into<OperationGroup>;
+    type Group: OperationGroupTrait;
     fn group(ops: impl IntoIterator<Item = Self>) -> Self::Group;
+}
 
+pub trait OperationGroupTrait: Into<OperationGroup> {
     type Error;
     fn apply(&self) -> Result<(), Self::Error>;
 }
 
 pub enum OperationKind {
-    Block,
     Package,
-    Command,
 }
 
 pub enum Operation {
-    Block(BlockOperation),
     Package(PackageOperation),
-    Command(CommandOperation),
 }
 
 pub enum OperationGroup {
-    Block(BlockOperationGroup),
     Package(PackageOperationGroup),
-    Command(CommandOperationGroup),
 }
 
 fn group_by_kind<Ops>(ops: Ops) -> HashMap<OperationKind, OperationGroup> {}
 
-pub struct BlockOperation {
-    operations: Vec<Operation>,
+pub struct PackageOperation {
+    packages: Vec<String>,
 }
-
-impl OperationTrait for BlockOperation {
-    type Error = Infallible;
-    fn union(a: Self, b: Self) -> Self {
-        todo!()
-    }
-    fn apply(&self) -> Self {
-        todo!()
+impl From<PackageOperation> for Operation {
+    fn from(value: PackageOperation) -> Self {
+        Operation::Package(value)
     }
 }
 
-pub struct PackageOperation {}
+pub struct PackageOperationGroup {
+    packages: Vec<String>,
+}
+impl From<PackageOperationGroup> for OperationGroup {
+    fn from(value: PackageOperationGroup) -> Self {
+        OperationGroup::Package(value)
+    }
+}
 
 impl OperationTrait for PackageOperation {
-    type Error = Infallible;
-    fn union(a: Self, b: Self) -> Self {
-        todo!()
+    fn kind() -> OperationKind {
+        OperationKind::Package
     }
-    fn apply(&self) -> Self {
-        todo!()
+    type Group = PackageOperationGroup;
+    fn group(ops: impl IntoIterator<Item = Self>) -> Self::Group {
+        let packages = ops
+            .into_iter()
+            .flat_map(|op| op.packages.into_iter())
+            .collect();
+        PackageOperationGroup { packages }
     }
 }
 
-pub struct CommandOperation {}
-
-impl OperationTrait for CommandOperation {
-    type Error = Infallible;
-    fn union(a: Self, b: Self) -> Self {
-        todo!()
-    }
-    fn apply(&self) -> Self {
+impl OperationGroupTrait for PackageOperationGroup {
+    type Error = ();
+    fn apply(&self) -> Result<(), Self::Error> {
         todo!()
     }
 }
 
 pub struct OperationId(String);
 
-// Flat list of operations.
 pub struct OperationEvent {
     id: Option<OperationId>,
-    operation: Box<Operation>,
+    operation: Operation,
     before: Vec<OperationId>,
     after: Vec<OperationId>,
 }
 
-pub struct OperationEvents(Vec<OperationEvents>);
+// Tree of operations
+pub enum OperationEventTree {
+    Branch(Vec<OperationEvent>),
+    Leaf(OperationEvent),
+}
+
+// Flat list of operations.
+pub struct OperationEventList(Vec<OperationEvent>);
 
 // Operations that happen at the same time (causal "sameness").
 pub struct OperationEpoch {
@@ -88,6 +94,7 @@ pub struct OperationEpoch {
 }
 pub struct OperationEpocs(Vec<OperationEpoch>);
 
+// Operations at the same time, minimized as a group.
 pub struct OperationEpochGrouped {
     operations: HashMap<OperationKind, OperationGroup>,
 }
