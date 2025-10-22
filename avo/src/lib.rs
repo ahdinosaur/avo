@@ -29,7 +29,8 @@ pub fn create_store() -> Store {
     Store::new(cache_dir.to_path_buf())
 }
 
-enum PlanError {
+#[derive(Debug)]
+pub enum PlanError {
     Parse(ParseError),
     Eval(EvalError),
 }
@@ -38,8 +39,7 @@ pub async fn plan(
     plan_id: PlanId,
     params: Spanned<ParamValues>,
 ) -> Result<Vec<OperationTree>, PlanError> {
-    let cache_dir = PathBuf::new();
-    let store_item_id: StoreItemId = plan_id.into();
+    let store_item_id: StoreItemId = plan_id.clone().into();
     let store = create_store();
     let bytes = store
         .read(&store_item_id)
@@ -48,12 +48,18 @@ pub async fn plan(
     let code = String::from_utf8(bytes).expect("Failed to convert bytes to string");
     let plan = parse(&code, plan_id).map_err(PlanError::Parse)?;
     let plan_actions = evaluate(plan, params).map_err(PlanError::Eval)?;
-    let operations = Vec::with_capacity(plan_actions.len());
+    let mut operations = Vec::with_capacity(plan_actions.len());
     for plan_action in plan_actions {
-        operations.push(plan_item_to_operation(plan_action).await?)
+        operations.push(
+            Box::pin(plan_item_to_operation(plan_action))
+                .await
+                .expect("TODO"),
+        )
     }
     Ok(operations)
 }
+
+#[derive(Debug)]
 pub enum FromPlanItemToOperationError {
     MissingParam { name: String },
 }
@@ -61,47 +67,56 @@ pub enum FromPlanItemToOperationError {
 async fn plan_item_to_operation(
     plan_action: Spanned<PlanAction>,
 ) -> Result<OperationTree, FromPlanItemToOperationError> {
-    let (plan_action, plan_action_span) = plan_action.take();
-    let id = plan_action
-        .id
-        .map(|id| OperationId::new(id.into_inner()))
+    let (plan_action, _plan_action_span) = plan_action.take();
 
-    let before = plan_action
-        .before
-        .iter()
+    let PlanAction {
+        id,
+        ref module,
+        params,
+        before,
+        after,
+    } = plan_action;
+
+    let id = id.map(|id| OperationId::new(id.into_inner()));
+
+    let before = before
+        .into_iter()
         .map(|v| v.into_inner())
         .map(OperationId::new)
         .collect();
-    let after = plan_action
-        .after
-        .iter()
+    let after = after
+        .into_iter()
         .map(|v| v.into_inner())
         .map(OperationId::new)
         .collect();
 
-    if let Some(core_module_id) = plan_action.core_module_id() {
-        let (params, params_span) = plan_action
-            .params
-            .expect("Failed to get params from PlanAction")
-            .take();
+    if let Some(core_module_id) = PlanAction::is_core_module(module) {
+        let (params, _params_span) = params.expect("Failed to get params from PlanAction").take();
         let operation = match core_module_id {
             "pkg" => {
                 let packages = params
                     .get("packages")
                     .expect("Failed to get packages from @core/pkg params")
-                .into_inner();
+                    .clone()
+                    .into_inner();
 
                 let Value::List(packages) = packages else {
                     panic!("Packages is not a list");
-                }
-                let packages = packages.into_iter().map(|package| {
-                    let Value::String(package) = package else {
-                        panic!("Package is not a string");
-                    };
-                    package
-                }).collect();
+                };
+                let packages = packages
+                    .into_iter()
+                    .map(|package| {
+                        let Value::String(package) = package.into_inner() else {
+                            panic!("Package is not a string");
+                        };
+                        package
+                    })
+                    .collect();
 
                 Operation::Package(PackageOperation::new(packages))
+            }
+            _ => {
+                panic!("Unexpected core module");
             }
         };
         Ok(OperationTree::Leaf {
@@ -111,13 +126,11 @@ async fn plan_item_to_operation(
             after,
         })
     } else {
-        let params = plan_action
-            .params
-            .expect("Failed to get params from PlanAction");
+        let params = params.expect("Failed to get params from PlanAction");
         let module = plan_action.module.into_inner();
         let path = PathBuf::from_str(&module).expect("Failed to convert module to path");
         let plan_id = PlanId::Path(path);
-        let children = plan(plan_id, params).await;
+        let children = plan(plan_id, params).await.expect("TODO");
         Ok(OperationTree::Branch {
             id,
             children,
@@ -127,10 +140,11 @@ async fn plan_item_to_operation(
     }
 }
 
-enum EvalError {
-    Call(rimu::EvalError),
+#[derive(Debug)]
+pub enum EvalError {
+    Call(Box<rimu::EvalError>),
     ReturnedNotList,
-    InvalidPlanAction(Spanned<IntoPlanActionError>),
+    InvalidPlanAction(Box<Spanned<IntoPlanActionError>>),
 }
 
 fn evaluate(
@@ -141,14 +155,16 @@ fn evaluate(
     let (params, params_span) = params.take();
     let args = vec![Spanned::new(params.into_rimu(), params_span)];
     let (setup, setup_span) = block_definition.setup.take();
-    let result = call(setup_span, setup.0, &args).map_err(EvalError::Call)?;
+    let result =
+        call(setup_span, setup.0, &args).map_err(|error| EvalError::Call(Box::new(error)))?;
     let (result, _result_span) = result.take();
     let Value::List(items) = result else {
         return Err(EvalError::ReturnedNotList);
     };
     let mut out = Vec::with_capacity(items.len());
     for item in items {
-        let call = PlanAction::from_rimu_spanned(item).map_err(EvalError::InvalidPlanAction)?;
+        let call = PlanAction::from_rimu_spanned(item)
+            .map_err(|error| EvalError::InvalidPlanAction(Box::new(error)))?;
         out.push(call)
     }
     Ok(out)

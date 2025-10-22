@@ -56,8 +56,8 @@ pub struct PlanAction {
 }
 
 impl PlanAction {
-    pub fn core_module_id(&self) -> Option<&str> {
-        self.module.inner().strip_prefix("@core/")
+    pub fn is_core_module(module: &Spanned<String>) -> Option<&str> {
+        module.inner().strip_prefix("@core/")
     }
 }
 

@@ -25,6 +25,7 @@ impl From<PlanId> for StoreItemId {
     }
 }
 
+#[derive(Debug)]
 pub enum SourceIdFromPlanIdError {
     Path(SourceIdFromPathError),
 }
@@ -44,6 +45,7 @@ impl TryFrom<PlanId> for SourceId {
     }
 }
 
+#[derive(Debug)]
 pub enum ParseError {
     IncorrectPlanId {
         block_id: PlanId,
