@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use rimu::{Function, Spanned, Value};
 
 use crate::{
-    params::{ParamTypes, ParamValues},
+    params::{IntoParamTypesError, ParamTypes, ParamValues},
     FromRimu,
 };
 
@@ -34,7 +34,22 @@ pub struct BlockCallRef {
 
 #[derive(Debug, Clone)]
 pub struct BlocksFunction(Function);
-// Box<dyn Fn(ParamValues) -> Spanned<Vec<BlockCallRef>>>;
+
+#[derive(Debug, Clone)]
+pub enum IntoBlocksFunctionError {
+    NotAFunction,
+}
+
+impl FromRimu for BlocksFunction {
+    type Error = IntoBlocksFunctionError;
+
+    fn from_rimu(value: Value) -> Result<Self, Self::Error> {
+        let Value::Function(func) = value else {
+            return Err(IntoBlocksFunctionError::NotAFunction);
+        };
+        Ok(BlocksFunction(func))
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct BlockDefinition {
@@ -47,15 +62,16 @@ pub struct BlockDefinition {
 pub enum IntoBlockDefinitionError {
     NotAnObject,
     Name(Spanned<IntoNameError>),
-    Params(Spanned<IntoParamsError>),
-    Blocks(IntoBlocksFunctionError),
+    Params(Spanned<IntoParamTypesError>),
+    BlocksMissing,
+    Blocks(Spanned<IntoBlocksFunctionError>),
 }
 
 impl FromRimu for BlockDefinition {
     type Error = IntoBlockDefinitionError;
 
     fn from_rimu(value: Value) -> Result<Self, Self::Error> {
-        let Value::Object(object) = value else {
+        let Value::Object(mut object) = value else {
             return Err(IntoBlockDefinitionError::NotAnObject);
         };
 
@@ -66,10 +82,23 @@ impl FromRimu for BlockDefinition {
 
         let params = object
             .swap_remove("params")
-            .map(|name| {
-                ParamTypes::from_rimu_spanned(name).map_err(IntoBlockDefinitionError::Params)
+            .map(|params| {
+                ParamTypes::from_rimu_spanned(params).map_err(IntoBlockDefinitionError::Params)
             })
             .transpose()?;
+
+        let blocks_sp = object
+            .swap_remove("blocks")
+            .ok_or(IntoBlockDefinitionError::BlocksMissing)?;
+
+        let blocks = BlocksFunction::from_rimu_spanned(blocks_sp)
+            .map_err(|error| IntoBlockDefinitionError::Blocks(error))?;
+
+        Ok(BlockDefinition {
+            name,
+            params,
+            blocks,
+        })
     }
 }
 
