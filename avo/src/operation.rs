@@ -4,6 +4,8 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use async_trait::async_trait;
+
 /// A single operation type should define:
 /// - what "kind" it is
 /// - how to group many single operations into a grouped operation
@@ -15,9 +17,10 @@ pub trait OperationTrait: Into<Operation> {
 }
 
 /// A grouped operation knows how to apply itself.
+#[async_trait]
 pub trait OperationGroupTrait: Into<OperationGroup> {
     type Error;
-    fn apply(&self) -> Result<(), Self::Error>;
+    async fn apply(&self) -> Result<(), Self::Error>;
 }
 
 /// The kind/class of an operation. Used for grouping.
@@ -102,9 +105,10 @@ impl OperationTrait for PackageOperation {
     }
 }
 
+#[async_trait]
 impl OperationGroupTrait for PackageOperationGroup {
     type Error = ();
-    fn apply(&self) -> Result<(), Self::Error> {
+    async fn apply(&self) -> Result<(), Self::Error> {
         // MVP: just print what we would do.
         if self.packages.is_empty() {
             println!("[pkg] nothing to do");
@@ -123,9 +127,11 @@ pub enum OperationGroupApplyError {
 
 impl OperationGroup {
     /// Apply this grouped operation.
-    pub fn apply(&self) -> Result<(), OperationGroupApplyError> {
+    pub async fn apply(&self) -> Result<(), OperationGroupApplyError> {
         match self {
-            OperationGroup::Package(g) => g.apply().map_err(OperationGroupApplyError::Package),
+            OperationGroup::Package(g) => {
+                g.apply().await.map_err(OperationGroupApplyError::Package)
+            }
         }
     }
 }
@@ -421,11 +427,11 @@ pub struct OperationEpochsGrouped(pub Vec<OperationEpochGrouped>);
 impl OperationEpochsGrouped {
     /// Apply all grouped operations epoch-by-epoch (in order).
     /// Stops at first error.
-    pub fn apply_all(&self) -> Result<(), OperationGroupApplyError> {
+    pub async fn apply_all(&self) -> Result<(), OperationGroupApplyError> {
         for epoch in &self.0 {
             // Order among kinds within an epoch is unspecified by design.
             for group in epoch.operations.values() {
-                group.apply()?;
+                group.apply().await?;
             }
         }
         Ok(())

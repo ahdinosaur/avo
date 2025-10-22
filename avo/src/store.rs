@@ -8,7 +8,7 @@ pub trait SubStore {
     type Error: Debug;
 
     fn new(cache_dir: PathBuf) -> Self;
-    async fn read(&self, id: &Self::ItemId) -> Result<Vec<u8>, Self::Error>;
+    async fn read(&mut self, id: &Self::ItemId) -> Result<Vec<u8>, Self::Error>;
 }
 
 #[derive(Debug, Clone)]
@@ -33,7 +33,7 @@ impl Store {
         }
     }
 
-    pub async fn read(&self, id: &StoreItemId) -> Result<Vec<u8>, StoreError> {
+    pub async fn read(&mut self, id: &StoreItemId) -> Result<Vec<u8>, StoreError> {
         match id {
             StoreItemId::LocalFile(id) => self
                 .local_file_store
@@ -56,7 +56,7 @@ impl SubStore for LocalFileStore {
         Self
     }
 
-    async fn read(&self, id: &Self::ItemId) -> Result<Vec<u8>, Self::Error> {
+    async fn read(&mut self, id: &Self::ItemId) -> Result<Vec<u8>, Self::Error> {
         tokio::fs::read(id).await
     }
 }

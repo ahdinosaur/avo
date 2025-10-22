@@ -15,7 +15,10 @@ use rimu::{call, Spanned, Value};
 pub use rimu_interop::FromRimu;
 
 use crate::{
-    operation::{Operation, OperationId, OperationTree, PackageOperation},
+    operation::{
+        EpochError, Operation, OperationEpochsGrouped, OperationGroupApplyError, OperationId,
+        OperationTree, PackageOperation,
+    },
     params::ParamValues,
     parser::{parse, ParseError, PlanId},
     plan::{IntoPlanActionError, Plan, PlanAction},
@@ -38,9 +41,23 @@ pub enum PlanError {
 pub async fn plan(
     plan_id: PlanId,
     params: Spanned<ParamValues>,
+) -> Result<OperationTree, PlanError> {
+    let mut store = create_store();
+    let operations = plan_recursive(plan_id, params, &mut store).await?;
+    Ok(OperationTree::Branch {
+        id: None,
+        before: vec![],
+        after: vec![],
+        children: operations,
+    })
+}
+
+pub async fn plan_recursive(
+    plan_id: PlanId,
+    params: Spanned<ParamValues>,
+    store: &mut Store,
 ) -> Result<Vec<OperationTree>, PlanError> {
     let store_item_id: StoreItemId = plan_id.clone().into();
-    let store = create_store();
     let bytes = store
         .read(&store_item_id)
         .await
@@ -51,7 +68,7 @@ pub async fn plan(
     let mut operations = Vec::with_capacity(plan_actions.len());
     for plan_action in plan_actions {
         operations.push(
-            Box::pin(plan_item_to_operation(plan_action))
+            Box::pin(plan_item_to_operation(plan_action, store))
                 .await
                 .expect("TODO"),
         )
@@ -66,6 +83,7 @@ pub enum FromPlanItemToOperationError {
 
 async fn plan_item_to_operation(
     plan_action: Spanned<PlanAction>,
+    store: &mut Store,
 ) -> Result<OperationTree, FromPlanItemToOperationError> {
     let (plan_action, _plan_action_span) = plan_action.take();
 
@@ -130,7 +148,7 @@ async fn plan_item_to_operation(
         let module = plan_action.module.into_inner();
         let path = PathBuf::from_str(&module).expect("Failed to convert module to path");
         let plan_id = PlanId::Path(path);
-        let children = plan(plan_id, params).await.expect("TODO");
+        let children = plan_recursive(plan_id, params, store).await.expect("TODO");
         Ok(OperationTree::Branch {
             id,
             children,
@@ -168,6 +186,22 @@ fn evaluate(
         out.push(call)
     }
     Ok(out)
+}
+
+#[derive(Debug)]
+pub enum ApplyError {
+    Epoch(EpochError),
+    OperationGroupApply(OperationGroupApplyError),
+}
+
+pub async fn apply(operation: OperationTree) -> Result<OperationEpochsGrouped, ApplyError> {
+    let epochs = operation.into_epochs().map_err(ApplyError::Epoch)?;
+    let grouped = epochs.group();
+    grouped
+        .apply_all()
+        .await
+        .map_err(ApplyError::OperationGroupApply)?;
+    Ok(grouped)
 }
 
 #[cfg(test)]

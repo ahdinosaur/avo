@@ -1,4 +1,4 @@
-use avo::{params::ParamValues, parser::PlanId, plan, FromRimu};
+use avo::{apply, params::ParamValues, parser::PlanId, plan, FromRimu};
 use indexmap::IndexMap;
 use rimu::{SourceId, Span, Spanned, Value};
 use std::env;
@@ -13,7 +13,9 @@ async fn main() {
     ))
     .expect("Failed to create params");
 
-    let operations = plan(plan_id, params).await.expect("Failed to plan");
+    let operation = plan(plan_id, params).await.expect("Failed to plan");
 
-    println!("{:?}", operations);
+    println!("{:?}", operation);
+
+    apply(operation).await.expect("Failed to apply");
 }
