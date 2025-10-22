@@ -11,33 +11,31 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-pub enum BlockId {
+pub enum PlanId {
     Path(PathBuf),
     Git(Url, PathBuf),
 }
 
-impl From<BlockId> for StoreItemId {
-    fn from(value: BlockId) -> Self {
+impl From<PlanId> for StoreItemId {
+    fn from(value: PlanId) -> Self {
         match value {
-            BlockId::Path(path) => StoreItemId::LocalFile(path),
-            BlockId::Git(_url, _path) => todo!(),
+            PlanId::Path(path) => StoreItemId::LocalFile(path),
+            PlanId::Git(_url, _path) => todo!(),
         }
     }
 }
 
-pub enum SourceIdFromBlockIdError {
+pub enum SourceIdFromPlanIdError {
     Path(SourceIdFromPathError),
 }
 
-impl TryFrom<BlockId> for SourceId {
-    type Error = SourceIdFromBlockIdError;
+impl TryFrom<PlanId> for SourceId {
+    type Error = SourceIdFromPlanIdError;
 
-    fn try_from(value: BlockId) -> Result<Self, Self::Error> {
+    fn try_from(value: PlanId) -> Result<Self, Self::Error> {
         match value {
-            BlockId::Path(path) => {
-                SourceId::from_path(path).map_err(SourceIdFromBlockIdError::Path)
-            }
-            BlockId::Git(mut url, path) => {
+            PlanId::Path(path) => SourceId::from_path(path).map_err(SourceIdFromPlanIdError::Path),
+            PlanId::Git(mut url, path) => {
                 url.query_pairs_mut()
                     .append_pair("path", &path.to_string_lossy());
                 Ok(SourceId::Url(url))
@@ -47,9 +45,9 @@ impl TryFrom<BlockId> for SourceId {
 }
 
 pub enum ParseError {
-    IncorrectBlockId {
-        block_id: BlockId,
-        error: Box<SourceIdFromBlockIdError>,
+    IncorrectPlanId {
+        block_id: PlanId,
+        error: Box<SourceIdFromPlanIdError>,
     },
     RimuParse(Vec<rimu::ParseError>),
     NoCode,
@@ -57,11 +55,11 @@ pub enum ParseError {
     IntoPlan(Box<Spanned<IntoPlanError>>),
 }
 
-pub fn parse(code: &str, block_id: BlockId) -> Result<Spanned<Plan>, ParseError> {
+pub fn parse(code: &str, block_id: PlanId) -> Result<Spanned<Plan>, ParseError> {
     let source_id = block_id
         .clone()
         .try_into()
-        .map_err(|error| ParseError::IncorrectBlockId {
+        .map_err(|error| ParseError::IncorrectPlanId {
             block_id,
             error: Box::new(error),
         })?;

@@ -138,6 +138,6 @@ impl FromRimu for ParamTypes {
 
 impl ParamValues {
     pub fn get(&self, key: &str) -> Option<&Spanned<Value>> {
-        self.0.get(key.to_string())
+        self.0.get(key)
     }
 }

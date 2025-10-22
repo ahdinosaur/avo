@@ -1,12 +1,8 @@
 //! - Start with a tree of operations
-//! - Then reduce into a flat list of operations
 //! - Then section operations into temporal epochs
 //! - Then group operations of same kind and epoch into single operation.
 
-use std::{
-    collections::{HashMap, VecDeque},
-    iter::once,
-};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 /// A single operation type should define:
 /// - what "kind" it is
@@ -70,7 +66,7 @@ pub struct PackageOperation {
     packages: Vec<String>,
 }
 impl PackageOperation {
-    fn new(packages: Vec<String>) -> Self {
+    pub fn new(packages: Vec<String>) -> Self {
         Self { packages }
     }
 }
@@ -138,45 +134,30 @@ impl OperationGroup {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct OperationId(String);
 
-/// A single scheduled operation event with optional ID and
-/// explicit "before" and "after" constraints.
-#[derive(Debug, Clone)]
-pub struct OperationEvent {
-    pub id: Option<OperationId>,
-    pub operation: Operation,
-    pub before: Vec<OperationId>,
-    pub after: Vec<OperationId>,
-}
-
-/// A lightweight "tree" root. This is where you start:
-/// - put many events in a branch, or
-/// - a single event as a leaf.
-#[derive(Debug, Clone)]
-pub enum OperationEventTree {
-    Branch(Vec<OperationEventTree>),
-    Leaf(OperationEvent),
-}
-
-impl OperationEventTree {
-    /// Step 1: Flatten the tree into an iterator.
-    pub fn into_list(self) -> OperationEventList {
-        fn tree_to_iter(tree: OperationEventTree) -> Box<dyn Iterator<Item = OperationEvent>> {
-            match tree {
-                OperationEventTree::Branch(branch) => {
-                    Box::new(branch.into_iter().flat_map(tree_to_iter))
-                }
-                OperationEventTree::Leaf(op) => Box::new(once(op)),
-            }
-        }
-
-        let ops = tree_to_iter(self);
-        OperationEventList(ops.collect())
+impl OperationId {
+    pub fn new(operation_id: String) -> Self {
+        Self(operation_id)
     }
 }
 
-/// A flat list of operation events (with dependencies).
+/// A tree of operation events. Both branches and leaves carry identifiers
+/// and dependency constraints. Branch-level constraints apply to the entire
+/// subtree of that branch.
 #[derive(Debug, Clone)]
-pub struct OperationEventList(pub Vec<OperationEvent>);
+pub enum OperationTree {
+    Branch {
+        id: Option<OperationId>,
+        before: Vec<OperationId>,
+        after: Vec<OperationId>,
+        children: Vec<OperationTree>,
+    },
+    Leaf {
+        id: Option<OperationId>,
+        operation: Operation,
+        before: Vec<OperationId>,
+        after: Vec<OperationId>,
+    },
+}
 
 /// Errors computing epochs (e.g., dependency issues).
 #[derive(Debug, Clone)]
@@ -187,51 +168,179 @@ pub enum EpochError {
     CycleDetected { remaining: usize },
 }
 
-impl OperationEventList {
-    /// Step 2 -> 3: Build temporal epochs from dependency constraints.
+/// Operations that happen at the same time (causal "sameness").
+/// Each epoch can be processed in parallel, but epochs must respect order.
+#[derive(Debug, Clone)]
+pub struct OperationEpoch {
+    pub operations: Vec<Operation>,
+}
+
+/// A sequence of epochs in execution order.
+#[derive(Debug, Clone)]
+pub struct OperationEpocs(pub Vec<OperationEpoch>);
+
+impl OperationTree {
+    /// Build temporal epochs from dependency constraints represented in the
+    /// tree. Branch-level constraints are inherited by all descendant leaves.
     ///
     /// Uses Kahn's algorithm to layer nodes (events) by in-degree.
     /// - "before": X.before contains Y => Y must run before X (edge: Y -> X)
     /// - "after": X.after contains Y => X must run before Y (edge: X -> Y)
+    /// - Branch ids reference the set of all descendant leaf operations.
     pub fn into_epochs(self) -> Result<OperationEpocs, EpochError> {
-        let events = self.0;
-        let n = events.len();
+        // First, collect leaves with inherited constraints, and build a map
+        // from every id (branch or leaf) to the set of leaf indices it refers to.
+        #[derive(Debug)]
+        struct CollectedLeaf {
+            operation: Operation,
+            before: Vec<OperationId>,
+            after: Vec<OperationId>,
+        }
 
-        // Map id -> index, ensure uniqueness
-        let mut id_to_index: HashMap<OperationId, usize> = HashMap::new();
-        for (i, ev) in events.iter().enumerate() {
-            if let Some(id) = &ev.id
-                && id_to_index.insert(id.clone(), i).is_some()
-            {
-                return Err(EpochError::DuplicateId(id.0.clone()));
+        let mut leaves: Vec<CollectedLeaf> = Vec::new();
+        let mut id_to_leaves: HashMap<OperationId, Vec<usize>> = HashMap::new();
+        let mut seen_ids: HashSet<OperationId> = HashSet::new();
+
+        fn collect_recursive(
+            node: OperationTree,
+            ancestor_before: &mut Vec<OperationId>,
+            ancestor_after: &mut Vec<OperationId>,
+            active_branch_ids: &mut Vec<OperationId>,
+            seen_ids: &mut HashSet<OperationId>,
+            id_to_leaves: &mut HashMap<OperationId, Vec<usize>>,
+            leaves: &mut Vec<CollectedLeaf>,
+        ) -> Result<(), EpochError> {
+            match node {
+                OperationTree::Branch {
+                    id,
+                    before,
+                    after,
+                    children,
+                } => {
+                    // Apply branch-level constraints to descendants.
+                    let before_len = ancestor_before.len();
+                    ancestor_before.extend(before.into_iter());
+
+                    let after_len = ancestor_after.len();
+                    ancestor_after.extend(after.into_iter());
+
+                    // Track branch id for expansion and uniqueness.
+                    let pushed_branch_id = if let Some(branch_id) = id {
+                        if !seen_ids.insert(branch_id.clone()) {
+                            return Err(EpochError::DuplicateId(branch_id.0));
+                        }
+                        id_to_leaves.entry(branch_id.clone()).or_default();
+                        active_branch_ids.push(branch_id);
+                        true
+                    } else {
+                        false
+                    };
+
+                    for child in children {
+                        collect_recursive(
+                            child,
+                            ancestor_before,
+                            ancestor_after,
+                            active_branch_ids,
+                            seen_ids,
+                            id_to_leaves,
+                            leaves,
+                        )?;
+                    }
+
+                    // Restore stacks.
+                    ancestor_before.truncate(before_len);
+                    ancestor_after.truncate(after_len);
+                    if pushed_branch_id {
+                        active_branch_ids.pop();
+                    }
+                    Ok(())
+                }
+                OperationTree::Leaf {
+                    id,
+                    operation,
+                    before,
+                    after,
+                } => {
+                    // Effective constraints = ancestor constraints + local.
+                    let mut effective_before: Vec<OperationId> = Vec::new();
+                    effective_before.extend(ancestor_before.iter().cloned());
+                    effective_before.extend(before.into_iter());
+
+                    let mut effective_after: Vec<OperationId> = Vec::new();
+                    effective_after.extend(ancestor_after.iter().cloned());
+                    effective_after.extend(after.into_iter());
+
+                    let index = leaves.len();
+                    leaves.push(CollectedLeaf {
+                        operation,
+                        before: effective_before,
+                        after: effective_after,
+                    });
+
+                    // Map this leaf under all active branch ids.
+                    for branch_id in active_branch_ids.iter() {
+                        if let Some(v) = id_to_leaves.get_mut(branch_id) {
+                            v.push(index);
+                        }
+                    }
+
+                    // Uniqueness for leaf id, and map it to this leaf.
+                    if let Some(leaf_id) = id {
+                        if !seen_ids.insert(leaf_id.clone()) {
+                            return Err(EpochError::DuplicateId(leaf_id.0));
+                        }
+                        id_to_leaves.insert(leaf_id, vec![index]);
+                    }
+
+                    Ok(())
+                }
             }
         }
 
-        // Build adjacency and in-degrees
-        let mut outgoing: Vec<Vec<usize>> = vec![Vec::new(); n];
-        let mut indeg: Vec<usize> = vec![0; n];
+        let mut ancestor_before: Vec<OperationId> = Vec::new();
+        let mut ancestor_after: Vec<OperationId> = Vec::new();
+        let mut active_branch_ids: Vec<OperationId> = Vec::new();
+        collect_recursive(
+            self,
+            &mut ancestor_before,
+            &mut ancestor_after,
+            &mut active_branch_ids,
+            &mut seen_ids,
+            &mut id_to_leaves,
+            &mut leaves,
+        )?;
 
-        for (i, ev) in events.iter().enumerate() {
-            // "before": listed ids must happen before 'i'. Edge: before_id -> i
-            for b in &ev.before {
-                let Some(&src) = id_to_index.get(b) else {
-                    return Err(EpochError::UnknownBeforeRef(b.0.clone()));
+        let n = leaves.len();
+        let mut outgoing: Vec<Vec<usize>> = vec![Vec::new(); n];
+        let mut indegree: Vec<usize> = vec![0; n];
+
+        // Build adjacency expanding ids to the set of leaf indices they denote.
+        for (i, leaf) in leaves.iter().enumerate() {
+            // "before": Y in before => Y -> i
+            for id in &leaf.before {
+                let Some(targets) = id_to_leaves.get(id) else {
+                    return Err(EpochError::UnknownBeforeRef(id.0.clone()));
                 };
-                outgoing[src].push(i);
-                indeg[i] += 1;
+                for &j in targets {
+                    outgoing[j].push(i);
+                    indegree[i] += 1;
+                }
             }
-            // "after": listed ids must happen after 'i'. Edge: i -> after_id
-            for a in &ev.after {
-                let Some(&dst) = id_to_index.get(a) else {
-                    return Err(EpochError::UnknownAfterRef(a.0.clone()));
+            // "after": Y in after => i -> Y
+            for id in &leaf.after {
+                let Some(targets) = id_to_leaves.get(id) else {
+                    return Err(EpochError::UnknownAfterRef(id.0.clone()));
                 };
-                outgoing[i].push(dst);
-                indeg[dst] += 1;
+                for &j in targets {
+                    outgoing[i].push(j);
+                    indegree[j] += 1;
+                }
             }
         }
 
         // Kahn's layering: collect zero in-degree nodes per wave (epoch)
-        let mut queue: VecDeque<usize> = indeg
+        let mut queue: VecDeque<usize> = indegree
             .iter()
             .enumerate()
             .filter_map(|(i, &d)| (d == 0).then_some(i))
@@ -239,7 +348,7 @@ impl OperationEventList {
 
         let mut seen = 0usize;
         let mut epochs: Vec<OperationEpoch> = Vec::new();
-        let mut indeg_mut = indeg;
+        let mut indegree_mut = indegree;
 
         while !queue.is_empty() {
             // One wave/epoch = everything zero-indegree at this step.
@@ -249,7 +358,7 @@ impl OperationEventList {
             // Deterministic order within epoch by original index.
             let mut ops: Vec<Operation> = Vec::with_capacity(current_wave.len());
             for i in current_wave.iter().copied() {
-                ops.push(events[i].operation.clone());
+                ops.push(leaves[i].operation.clone());
             }
             epochs.push(OperationEpoch { operations: ops });
 
@@ -257,8 +366,8 @@ impl OperationEventList {
             let mut next_wave: Vec<usize> = Vec::new();
             for i in current_wave {
                 for &j in &outgoing[i] {
-                    indeg_mut[j] -= 1;
-                    if indeg_mut[j] == 0 {
+                    indegree_mut[j] -= 1;
+                    if indegree_mut[j] == 0 {
                         next_wave.push(j);
                     }
                 }
@@ -276,17 +385,6 @@ impl OperationEventList {
         Ok(OperationEpocs(epochs))
     }
 }
-
-/// Operations that happen at the same time (causal "sameness").
-/// Each epoch can be processed in parallel, but epochs must respect order.
-#[derive(Debug, Clone)]
-pub struct OperationEpoch {
-    pub operations: Vec<Operation>,
-}
-
-/// A sequence of epochs in execution order.
-#[derive(Debug, Clone)]
-pub struct OperationEpocs(pub Vec<OperationEpoch>);
 
 impl OperationEpoch {
     /// Step 4 (per-epoch): group operations by kind and reduce to grouped ops.
