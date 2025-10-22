@@ -225,10 +225,10 @@ impl OperationTree {
                 } => {
                     // Apply branch-level constraints to descendants.
                     let before_len = ancestor_before.len();
-                    ancestor_before.extend(before.into_iter());
+                    ancestor_before.extend(before);
 
                     let after_len = ancestor_after.len();
-                    ancestor_after.extend(after.into_iter());
+                    ancestor_after.extend(after);
 
                     // Track branch id for expansion and uniqueness.
                     let pushed_branch_id = if let Some(branch_id) = id {
@@ -271,11 +271,11 @@ impl OperationTree {
                     // Effective constraints = ancestor constraints + local.
                     let mut effective_before: Vec<OperationId> = Vec::new();
                     effective_before.extend(ancestor_before.iter().cloned());
-                    effective_before.extend(before.into_iter());
+                    effective_before.extend(before);
 
                     let mut effective_after: Vec<OperationId> = Vec::new();
                     effective_after.extend(ancestor_after.iter().cloned());
-                    effective_after.extend(after.into_iter());
+                    effective_after.extend(after);
 
                     let index = leaves.len();
                     leaves.push(CollectedLeaf {
