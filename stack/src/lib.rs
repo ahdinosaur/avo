@@ -1,14 +1,14 @@
 #![allow(dead_code)]
 
 pub mod block;
-mod from_rimu;
-pub mod operator;
+pub mod operation;
 pub mod params;
 pub mod parser;
+mod rimu_interop;
 pub mod store;
 pub mod system;
 
-pub use from_rimu::FromRimu;
+pub use rimu_interop::FromRimu;
 
 #[cfg(test)]
 mod tests {

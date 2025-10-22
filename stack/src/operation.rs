@@ -104,7 +104,13 @@ impl OperationTrait for PackageOperation {
 impl OperationGroupTrait for PackageOperationGroup {
     type Error = ();
     fn apply(&self) -> Result<(), Self::Error> {
-        todo!()
+        // MVP: just print what we would do.
+        if self.packages.is_empty() {
+            println!("[pkg] nothing to do");
+        } else {
+            println!("[pkg] install: {}", self.packages.join(", "));
+        }
+        Ok(())
     }
 }
 
@@ -289,13 +295,13 @@ impl OperationEpoch {
 
 impl OperationEpocs {
     /// Step 4 (all epochs): group by kind within each epoch.
-    pub fn group(self) -> OperationEpocsGrouped {
+    pub fn group(self) -> OperationEpochsGrouped {
         let grouped_epochs = self
             .0
             .into_iter()
             .map(OperationEpoch::group)
             .collect::<Vec<_>>();
-        OperationEpocsGrouped(grouped_epochs)
+        OperationEpochsGrouped(grouped_epochs)
     }
 }
 
@@ -307,9 +313,9 @@ pub struct OperationEpochGrouped {
 
 /// Grouped epochs in execution order.
 #[derive(Debug, Clone)]
-pub struct OperationEpocsGrouped(pub Vec<OperationEpochGrouped>);
+pub struct OperationEpochsGrouped(pub Vec<OperationEpochGrouped>);
 
-impl OperationEpocsGrouped {
+impl OperationEpochsGrouped {
     /// Apply all grouped operations epoch-by-epoch (in order).
     /// Stops at first error.
     pub fn apply_all(&self) -> Result<(), OperationGroupApplyError> {

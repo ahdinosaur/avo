@@ -1,10 +1,9 @@
+//! Parameter schemas and values.
+
 use indexmap::IndexMap;
-use rimu::{Number, Span, Spanned, Value};
+use rimu::{Span, Spanned, Value};
 
 use crate::FromRimu;
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ParamName(String);
 
 #[derive(Debug, Clone)]
 pub enum ParamType {
@@ -15,20 +14,33 @@ pub enum ParamType {
     Object { value: Box<Spanned<ParamType>> },
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum ParamValue {
-    Boolean(bool),
-    String(String),
-    Number(Number),
-    List(Vec<Spanned<ParamValue>>),
-    Object(IndexMap<String, Spanned<ParamValue>>),
+#[derive(Debug, Clone)]
+pub struct ParamTypes(IndexMap<String, Spanned<ParamType>>);
+
+#[derive(Debug, Clone)]
+pub struct ParamValues(IndexMap<String, Spanned<Value>>);
+
+#[derive(Debug, Clone)]
+pub enum IntoParamValuesError {
+    NotAnObject,
 }
 
-#[derive(Debug, Clone)]
-pub struct ParamTypes(pub IndexMap<ParamName, Spanned<ParamType>>);
+impl FromRimu for ParamValues {
+    type Error = IntoParamValuesError;
 
-#[derive(Debug, Clone)]
-pub struct ParamValues(pub IndexMap<ParamName, Spanned<ParamValue>>);
+    fn from_rimu(value: Value) -> Result<Self, Self::Error> {
+        let Value::Object(object) = value else {
+            return Err(IntoParamValuesError::NotAnObject);
+        };
+        Ok(ParamValues(object))
+    }
+}
+
+impl ParamValues {
+    pub fn into_rimu(self) -> Value {
+        Value::Object(self.0)
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum IntoParamTypeError {
@@ -53,8 +65,8 @@ impl FromRimu for ParamType {
         let Some(typ) = object.get("type") else {
             return Err(IntoParamTypeError::HasNoType);
         };
-
         let (typ, typ_span) = typ.clone().take();
+
         let Value::String(typ) = typ else {
             return Err(IntoParamTypeError::TypeNotAString { span: typ_span });
         };
@@ -89,51 +101,6 @@ impl FromRimu for ParamType {
 }
 
 #[derive(Debug, Clone)]
-pub enum IntoParamValueError {
-    UnsupportedValueKind,
-    ListItem(Box<Spanned<IntoParamValueError>>),
-    ObjectValue {
-        key: String,
-        source: Box<Spanned<IntoParamValueError>>,
-    },
-}
-
-impl FromRimu for ParamValue {
-    type Error = IntoParamValueError;
-
-    fn from_rimu(value: Value) -> Result<Self, Self::Error> {
-        match value {
-            Value::Boolean(b) => Ok(ParamValue::Boolean(b)),
-            Value::String(s) => Ok(ParamValue::String(s)),
-            Value::Number(n) => Ok(ParamValue::Number(n)),
-            Value::List(items) => {
-                let mut out = Vec::with_capacity(items.len());
-                for item in items {
-                    let item = ParamValue::from_rimu_spanned(item)
-                        .map_err(|error| IntoParamValueError::ListItem(Box::new(error)))?;
-                    out.push(item);
-                }
-                Ok(ParamValue::List(out))
-            }
-            Value::Object(map) => {
-                let mut out = IndexMap::with_capacity(map.len());
-                for (key, value) in map {
-                    let value = ParamValue::from_rimu_spanned(value).map_err(|error| {
-                        IntoParamValueError::ObjectValue {
-                            key: key.clone(),
-                            source: Box::new(error),
-                        }
-                    })?;
-                    out.insert(key, value);
-                }
-                Ok(ParamValue::Object(out))
-            }
-            _ => Err(IntoParamValueError::UnsupportedValueKind),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
 pub enum IntoParamTypesError {
     NotAnObject,
     Entry {
@@ -150,7 +117,7 @@ impl FromRimu for ParamTypes {
             return Err(IntoParamTypesError::NotAnObject);
         };
 
-        let mut out: IndexMap<ParamName, Spanned<ParamType>> = IndexMap::with_capacity(map.len());
+        let mut out: IndexMap<String, Spanned<ParamType>> = IndexMap::with_capacity(map.len());
 
         for (key, value) in map {
             let typ = match ParamType::from_rimu_spanned(value) {
@@ -162,47 +129,9 @@ impl FromRimu for ParamTypes {
                     })
                 }
             };
-
-            out.insert(ParamName(key), typ);
+            out.insert(key, typ);
         }
 
         Ok(ParamTypes(out))
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum IntoParamValuesError {
-    NotAnObject,
-    Entry {
-        key: String,
-        error: Box<Spanned<IntoParamValueError>>,
-    },
-}
-
-impl FromRimu for ParamValues {
-    type Error = IntoParamValuesError;
-
-    fn from_rimu(value: Value) -> Result<Self, Self::Error> {
-        let Value::Object(map) = value else {
-            return Err(IntoParamValuesError::NotAnObject);
-        };
-
-        let mut out: IndexMap<ParamName, Spanned<ParamValue>> = IndexMap::with_capacity(map.len());
-
-        for (key, value) in map {
-            let value = match ParamValue::from_rimu_spanned(value) {
-                Ok(value) => value,
-                Err(error) => {
-                    return Err(IntoParamValuesError::Entry {
-                        key: key.clone(),
-                        error: Box::new(error),
-                    })
-                }
-            };
-
-            out.insert(ParamName(key), value);
-        }
-
-        Ok(ParamValues(out))
     }
 }
