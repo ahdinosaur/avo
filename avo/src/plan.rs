@@ -47,7 +47,7 @@ impl FromRimu for Version {
 /// Example:
 ///   { module: "@core/pkg", id: "install-nvim", params: { package: "nvim" } }
 #[derive(Debug, Clone)]
-pub struct PlanItem {
+pub struct PlanAction {
     pub id: Option<Spanned<String>>,
     pub module: Spanned<String>,
     pub params: Option<Spanned<ParamValues>>,
@@ -55,8 +55,14 @@ pub struct PlanItem {
     pub after: Vec<Spanned<String>>,
 }
 
+impl PlanAction {
+    pub fn core_module_id(&self) -> Option<&str> {
+        self.module.inner().strip_prefix("@core/")
+    }
+}
+
 #[derive(Debug, Clone)]
-pub enum IntoPlanItemError {
+pub enum IntoPlanActionError {
     NotAnObject,
     ModuleMissing,
     ModuleNotAString { span: Span },
@@ -68,12 +74,12 @@ pub enum IntoPlanItemError {
     AfterItemNotAString { item_span: Span },
 }
 
-impl FromRimu for PlanItem {
-    type Error = IntoPlanItemError;
+impl FromRimu for PlanAction {
+    type Error = IntoPlanActionError;
 
     fn from_rimu(value: Value) -> Result<Self, Self::Error> {
         let Value::Object(mut object) = value else {
-            return Err(IntoPlanItemError::NotAnObject);
+            return Err(IntoPlanActionError::NotAnObject);
         };
 
         let module = match object.swap_remove("module") {
@@ -82,11 +88,11 @@ impl FromRimu for PlanItem {
                 match val {
                     Value::String(s) => Spanned::new(s, span),
                     _ => {
-                        return Err(IntoPlanItemError::ModuleNotAString { span });
+                        return Err(IntoPlanActionError::ModuleNotAString { span });
                     }
                 }
             }
-            None => return Err(IntoPlanItemError::ModuleMissing),
+            None => return Err(IntoPlanActionError::ModuleMissing),
         };
 
         let id = object
@@ -95,14 +101,14 @@ impl FromRimu for PlanItem {
                 let (val, span) = sp.clone().take();
                 match val {
                     Value::String(s) => Ok(Spanned::new(s, span)),
-                    _ => Err(IntoPlanItemError::IdNotAString { span }),
+                    _ => Err(IntoPlanActionError::IdNotAString { span }),
                 }
             })
             .transpose()?;
 
         let params = object
             .swap_remove("params")
-            .map(|sp| ParamValues::from_rimu_spanned(sp).map_err(IntoPlanItemError::Params))
+            .map(|sp| ParamValues::from_rimu_spanned(sp).map_err(IntoPlanActionError::Params))
             .transpose()?;
 
         let before = match object.swap_remove("before") {
@@ -117,7 +123,7 @@ impl FromRimu for PlanItem {
                             match ival {
                                 Value::String(s) => out.push(Spanned::new(s, ispan)),
                                 _ => {
-                                    return Err(IntoPlanItemError::BeforeItemNotAString {
+                                    return Err(IntoPlanActionError::BeforeItemNotAString {
                                         item_span: ispan,
                                     })
                                 }
@@ -125,7 +131,7 @@ impl FromRimu for PlanItem {
                         }
                         out
                     }
-                    _ => return Err(IntoPlanItemError::BeforeNotAList { span }),
+                    _ => return Err(IntoPlanActionError::BeforeNotAList { span }),
                 }
             }
         };
@@ -142,7 +148,7 @@ impl FromRimu for PlanItem {
                             match ival {
                                 Value::String(s) => out.push(Spanned::new(s, ispan)),
                                 _ => {
-                                    return Err(IntoPlanItemError::AfterItemNotAString {
+                                    return Err(IntoPlanActionError::AfterItemNotAString {
                                         item_span: ispan,
                                     })
                                 }
@@ -150,12 +156,12 @@ impl FromRimu for PlanItem {
                         }
                         out
                     }
-                    _ => return Err(IntoPlanItemError::AfterNotAList { span }),
+                    _ => return Err(IntoPlanActionError::AfterNotAList { span }),
                 }
             }
         };
 
-        Ok(PlanItem {
+        Ok(PlanAction {
             id,
             module,
             params,
@@ -189,7 +195,7 @@ pub struct Plan {
     pub name: Option<Spanned<Name>>,
     pub version: Option<Spanned<Version>>,
     pub params: Option<Spanned<ParamTypes>>,
-    /// setup: (params, system) => list of PlanItem
+    /// setup: (params, system) => list of PlanAction
     pub setup: Spanned<SetupFunction>,
 }
 

@@ -69,6 +69,11 @@ pub fn group_by_kind(
 pub struct PackageOperation {
     packages: Vec<String>,
 }
+impl PackageOperation {
+    fn new(packages: Vec<String>) -> Self {
+        Self { packages }
+    }
+}
 impl From<PackageOperation> for Operation {
     fn from(value: PackageOperation) -> Self {
         Operation::Package(value)
