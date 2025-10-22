@@ -1,9 +1,9 @@
 #![allow(dead_code)]
 
-pub mod block;
 pub mod operation;
 pub mod params;
 pub mod parser;
+pub mod plan;
 mod rimu_interop;
 pub mod store;
 pub mod system;
@@ -15,10 +15,10 @@ use rimu::{call, Spanned, Value};
 pub use rimu_interop::FromRimu;
 
 use crate::{
-    block::{BlockCallRef, BlockDefinition, IntoBlockCallRefError},
     operation::OperationEventTree,
     params::ParamValues,
     parser::{parse, BlockId, ParseError},
+    plan::{IntoPlanItemError, Plan, PlanItem},
     store::{Store, StoreItemId},
 };
 
@@ -52,28 +52,27 @@ pub async fn plan(
 }
 
 enum EvalError {
-    SetupReturnedNotList,
-    SetupCall(rimu::EvalError),
-    SetupListItemNotBlockCallRef(Spanned<IntoBlockCallRefError>),
+    Call(rimu::EvalError),
+    ReturnedNotList,
+    InvalidPlanItem(Spanned<IntoPlanItemError>),
 }
 
 fn evaluate(
-    block_definition: Spanned<BlockDefinition>,
+    block_definition: Spanned<Plan>,
     params: Spanned<ParamValues>,
-) -> Result<Vec<Spanned<BlockCallRef>>, EvalError> {
+) -> Result<Vec<Spanned<PlanItem>>, EvalError> {
     let (block_definition, _block_definition_span) = block_definition.take();
     let (params, params_span) = params.take();
     let args = vec![Spanned::new(params.into_rimu(), params_span)];
     let (setup, setup_span) = block_definition.setup.take();
-    let result = call(setup_span, setup.0, &args).map_err(EvalError::SetupCall)?;
+    let result = call(setup_span, setup.0, &args).map_err(EvalError::Call)?;
     let (result, _result_span) = result.take();
     let Value::List(items) = result else {
-        return Err(EvalError::SetupReturnedNotList);
+        return Err(EvalError::ReturnedNotList);
     };
     let mut out = Vec::with_capacity(items.len());
     for item in items {
-        let call = BlockCallRef::from_rimu_spanned(item)
-            .map_err(EvalError::SetupListItemNotBlockCallRef)?;
+        let call = PlanItem::from_rimu_spanned(item).map_err(EvalError::InvalidPlanItem)?;
         out.push(call)
     }
     Ok(out)

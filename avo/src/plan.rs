@@ -47,7 +47,7 @@ impl FromRimu for Version {
 /// Example:
 ///   { module: "@core/pkg", id: "install-nvim", params: { package: "nvim" } }
 #[derive(Debug, Clone)]
-pub struct BlockCallRef {
+pub struct PlanItem {
     pub id: Option<Spanned<String>>,
     pub module: Spanned<String>,
     pub params: Option<Spanned<ParamValues>>,
@@ -56,7 +56,7 @@ pub struct BlockCallRef {
 }
 
 #[derive(Debug, Clone)]
-pub enum IntoBlockCallRefError {
+pub enum IntoPlanItemError {
     NotAnObject,
     ModuleMissing,
     ModuleNotAString { span: Span },
@@ -68,12 +68,12 @@ pub enum IntoBlockCallRefError {
     AfterItemNotAString { item_span: Span },
 }
 
-impl FromRimu for BlockCallRef {
-    type Error = IntoBlockCallRefError;
+impl FromRimu for PlanItem {
+    type Error = IntoPlanItemError;
 
     fn from_rimu(value: Value) -> Result<Self, Self::Error> {
         let Value::Object(mut object) = value else {
-            return Err(IntoBlockCallRefError::NotAnObject);
+            return Err(IntoPlanItemError::NotAnObject);
         };
 
         let module = match object.swap_remove("module") {
@@ -82,11 +82,11 @@ impl FromRimu for BlockCallRef {
                 match val {
                     Value::String(s) => Spanned::new(s, span),
                     _ => {
-                        return Err(IntoBlockCallRefError::ModuleNotAString { span });
+                        return Err(IntoPlanItemError::ModuleNotAString { span });
                     }
                 }
             }
-            None => return Err(IntoBlockCallRefError::ModuleMissing),
+            None => return Err(IntoPlanItemError::ModuleMissing),
         };
 
         let id = object
@@ -95,14 +95,14 @@ impl FromRimu for BlockCallRef {
                 let (val, span) = sp.clone().take();
                 match val {
                     Value::String(s) => Ok(Spanned::new(s, span)),
-                    _ => Err(IntoBlockCallRefError::IdNotAString { span }),
+                    _ => Err(IntoPlanItemError::IdNotAString { span }),
                 }
             })
             .transpose()?;
 
         let params = object
             .swap_remove("params")
-            .map(|sp| ParamValues::from_rimu_spanned(sp).map_err(IntoBlockCallRefError::Params))
+            .map(|sp| ParamValues::from_rimu_spanned(sp).map_err(IntoPlanItemError::Params))
             .transpose()?;
 
         let before = match object.swap_remove("before") {
@@ -117,7 +117,7 @@ impl FromRimu for BlockCallRef {
                             match ival {
                                 Value::String(s) => out.push(Spanned::new(s, ispan)),
                                 _ => {
-                                    return Err(IntoBlockCallRefError::BeforeItemNotAString {
+                                    return Err(IntoPlanItemError::BeforeItemNotAString {
                                         item_span: ispan,
                                     })
                                 }
@@ -125,7 +125,7 @@ impl FromRimu for BlockCallRef {
                         }
                         out
                     }
-                    _ => return Err(IntoBlockCallRefError::BeforeNotAList { span }),
+                    _ => return Err(IntoPlanItemError::BeforeNotAList { span }),
                 }
             }
         };
@@ -142,7 +142,7 @@ impl FromRimu for BlockCallRef {
                             match ival {
                                 Value::String(s) => out.push(Spanned::new(s, ispan)),
                                 _ => {
-                                    return Err(IntoBlockCallRefError::AfterItemNotAString {
+                                    return Err(IntoPlanItemError::AfterItemNotAString {
                                         item_span: ispan,
                                     })
                                 }
@@ -150,12 +150,12 @@ impl FromRimu for BlockCallRef {
                         }
                         out
                     }
-                    _ => return Err(IntoBlockCallRefError::AfterNotAList { span }),
+                    _ => return Err(IntoPlanItemError::AfterNotAList { span }),
                 }
             }
         };
 
-        Ok(BlockCallRef {
+        Ok(PlanItem {
             id,
             module,
             params,
@@ -166,75 +166,73 @@ impl FromRimu for BlockCallRef {
 }
 
 #[derive(Debug, Clone)]
-pub struct BlocksFunction(pub Function);
+pub struct SetupFunction(pub Function);
 
 #[derive(Debug, Clone)]
-pub enum IntoBlocksFunctionError {
+pub enum IntoSetupFunctionError {
     NotAFunction,
 }
 
-impl FromRimu for BlocksFunction {
-    type Error = IntoBlocksFunctionError;
+impl FromRimu for SetupFunction {
+    type Error = IntoSetupFunctionError;
 
     fn from_rimu(value: Value) -> Result<Self, Self::Error> {
         let Value::Function(func) = value else {
-            return Err(IntoBlocksFunctionError::NotAFunction);
+            return Err(IntoSetupFunctionError::NotAFunction);
         };
-        Ok(BlocksFunction(func))
+        Ok(SetupFunction(func))
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct BlockDefinition {
+pub struct Plan {
     pub name: Option<Spanned<Name>>,
     pub version: Option<Spanned<Version>>,
     pub params: Option<Spanned<ParamTypes>>,
-    /// setup: (params, system) => list of BlockCallRef
-    pub setup: Spanned<BlocksFunction>,
+    /// setup: (params, system) => list of PlanItem
+    pub setup: Spanned<SetupFunction>,
 }
 
 #[derive(Debug, Clone)]
-pub enum IntoBlockDefinitionError {
+pub enum IntoPlanError {
     NotAnObject,
     Name(Spanned<IntoNameError>),
     Version(Spanned<IntoVersionError>),
     Params(Spanned<IntoParamTypesError>),
     SetupMissing,
-    SetupNotAFunction(Spanned<IntoBlocksFunctionError>),
+    SetupNotAFunction(Spanned<IntoSetupFunctionError>),
 }
 
-impl FromRimu for BlockDefinition {
-    type Error = IntoBlockDefinitionError;
+impl FromRimu for Plan {
+    type Error = IntoPlanError;
 
     fn from_rimu(value: Value) -> Result<Self, Self::Error> {
         let Value::Object(mut object) = value else {
-            return Err(IntoBlockDefinitionError::NotAnObject);
+            return Err(IntoPlanError::NotAnObject);
         };
 
         let name = object
             .swap_remove("name")
-            .map(|name| Name::from_rimu_spanned(name).map_err(IntoBlockDefinitionError::Name))
+            .map(|name| Name::from_rimu_spanned(name).map_err(IntoPlanError::Name))
             .transpose()?;
 
         let version = object
             .swap_remove("version")
-            .map(|v| Version::from_rimu_spanned(v).map_err(IntoBlockDefinitionError::Version))
+            .map(|v| Version::from_rimu_spanned(v).map_err(IntoPlanError::Version))
             .transpose()?;
 
         let params = object
             .swap_remove("params")
-            .map(|params| {
-                ParamTypes::from_rimu_spanned(params).map_err(IntoBlockDefinitionError::Params)
-            })
+            .map(|params| ParamTypes::from_rimu_spanned(params).map_err(IntoPlanError::Params))
             .transpose()?;
 
         let setup_sp = object
             .swap_remove("setup")
-            .ok_or(IntoBlockDefinitionError::SetupMissing)?;
-        let setup = BlocksFunction::from_rimu_spanned(setup_sp)
-            .map_err(IntoBlockDefinitionError::SetupNotAFunction)?;
+            .ok_or(IntoPlanError::SetupMissing)?;
+        let setup =
+            SetupFunction::from_rimu_spanned(setup_sp).map_err(IntoPlanError::SetupNotAFunction)?;
 
-        Ok(BlockDefinition {
+        Ok(Plan {
             name,
             version,
             params,
@@ -242,5 +240,3 @@ impl FromRimu for BlockDefinition {
         })
     }
 }
-
-pub type SpannedBlockDefinition = Spanned<BlockDefinition>;

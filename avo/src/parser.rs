@@ -1,11 +1,11 @@
-//! Parse Rimu source into a BlockDefinition (spanned).
+//! Parse Rimu source into a Plan (spanned).
 
 use rimu::{SourceId, SourceIdFromPathError, Spanned};
 use std::{cell::RefCell, path::PathBuf, rc::Rc};
 use url::Url;
 
 use crate::{
-    block::{BlockDefinition, IntoBlockDefinitionError, SpannedBlockDefinition},
+    plan::{IntoPlanError, Plan},
     store::StoreItemId,
     FromRimu,
 };
@@ -20,7 +20,7 @@ impl From<BlockId> for StoreItemId {
     fn from(value: BlockId) -> Self {
         match value {
             BlockId::Path(path) => StoreItemId::LocalFile(path),
-            BlockId::Git(url, path) => todo!(),
+            BlockId::Git(_url, _path) => todo!(),
         }
     }
 }
@@ -54,10 +54,10 @@ pub enum ParseError {
     RimuParse(Vec<rimu::ParseError>),
     NoCode,
     Eval(Box<rimu::EvalError>),
-    IntoBlockDefinition(Box<Spanned<IntoBlockDefinitionError>>),
+    IntoPlan(Box<Spanned<IntoPlanError>>),
 }
 
-pub fn parse(code: &str, block_id: BlockId) -> Result<SpannedBlockDefinition, ParseError> {
+pub fn parse(code: &str, block_id: BlockId) -> Result<Spanned<Plan>, ParseError> {
     let source_id = block_id
         .clone()
         .try_into()
@@ -77,6 +77,5 @@ pub fn parse(code: &str, block_id: BlockId) -> Result<SpannedBlockDefinition, Pa
 
     let env = Rc::new(RefCell::new(rimu::Environment::new()));
     let value = rimu::evaluate(&ast, env).map_err(|error| ParseError::Eval(Box::new(error)))?;
-    BlockDefinition::from_rimu_spanned(value)
-        .map_err(|error| ParseError::IntoBlockDefinition(Box::new(error)))
+    Plan::from_rimu_spanned(value).map_err(|error| ParseError::IntoPlan(Box::new(error)))
 }
