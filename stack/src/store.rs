@@ -1,36 +1,39 @@
-use std::{io, path::PathBuf};
+use std::{fmt::Debug, io, path::PathBuf};
 
 use async_trait::async_trait;
 
 #[async_trait]
 pub trait SubStore {
     type ItemId;
-    type Error;
+    type Error: Debug;
 
     fn new(cache_dir: PathBuf) -> Self;
     async fn read(&self, id: &Self::ItemId) -> Result<Vec<u8>, Self::Error>;
 }
 
+#[derive(Debug, Clone)]
 pub struct Store {
     local_file_store: LocalFileStore,
 }
 
+#[derive(Debug, Clone)]
 pub enum StoreItemId {
-    LocalFile(<LocalFileStore as SubStore>::ItemId),
+    LocalFile(PathBuf),
 }
 
+#[derive(Debug)]
 pub enum StoreError {
-    LocalFile(<LocalFileStore as SubStore>::Error),
+    LocalFile(io::Error),
 }
 
 impl Store {
-    fn new(cache_dir: PathBuf) -> Self {
+    pub fn new(cache_dir: PathBuf) -> Self {
         Self {
             local_file_store: LocalFileStore::new(cache_dir.join("files")),
         }
     }
 
-    async fn read(&self, id: &StoreItemId) -> Result<Vec<u8>, StoreError> {
+    pub async fn read(&self, id: &StoreItemId) -> Result<Vec<u8>, StoreError> {
         match id {
             StoreItemId::LocalFile(id) => self
                 .local_file_store

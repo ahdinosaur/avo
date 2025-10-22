@@ -6,6 +6,7 @@ use url::Url;
 
 use crate::{
     block::{BlockDefinition, IntoBlockDefinitionError, SpannedBlockDefinition},
+    store::StoreItemId,
     FromRimu,
 };
 
@@ -13,6 +14,15 @@ use crate::{
 pub enum BlockId {
     Path(PathBuf),
     Git(Url, PathBuf),
+}
+
+impl From<BlockId> for StoreItemId {
+    fn from(value: BlockId) -> Self {
+        match value {
+            BlockId::Path(path) => StoreItemId::LocalFile(path),
+            BlockId::Git(url, path) => todo!(),
+        }
+    }
 }
 
 pub enum SourceIdFromBlockIdError {
