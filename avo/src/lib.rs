@@ -6,7 +6,7 @@ pub mod plan;
 pub mod store;
 pub mod system;
 
-use avo_params::{ParamValidationErrors, ParamValues};
+use avo_params::{ParamTypes, ParamValidationErrors, ParamValues};
 use directories::ProjectDirs;
 use rimu::{call, SerdeValueError, Spanned, Value};
 use rimu_interop::FromRimu;
@@ -18,7 +18,7 @@ use crate::{
         OperationTrait, OperationTree, PackageOperation, PackageParams,
     },
     parser::{parse, ParseError, PlanId},
-    plan::{IntoPlanActionError, Plan, PlanAction},
+    plan::{IntoPlanActionError, Plan, PlanAction, SetupFunction},
     store::{Store, StoreItemId},
 };
 
@@ -32,6 +32,7 @@ pub fn create_store() -> Store {
 #[derive(Debug)]
 pub enum PlanError {
     Parse(ParseError),
+    Validate(ParamValidationErrors),
     Eval(EvalError),
 }
 
@@ -64,7 +65,14 @@ pub async fn plan_recursive(
         .expect("Failed to read from store");
     let code = String::from_utf8(bytes).expect("Failed to convert bytes to string");
     let plan = parse(&code, plan_id).map_err(PlanError::Parse)?;
-    let plan_actions = evaluate(plan, params).map_err(PlanError::Eval)?;
+    let Plan {
+        name: _,
+        version: _,
+        params: param_types,
+        setup,
+    } = plan.into_inner();
+    validate(param_types, &params).map_err(PlanError::Validate)?;
+    let plan_actions = evaluate(setup, params).map_err(PlanError::Eval)?;
     let mut operations = Vec::with_capacity(plan_actions.len());
     for plan_action in plan_actions {
         operations.push(
@@ -148,6 +156,16 @@ async fn plan_item_to_operation(
     }
 }
 
+fn validate(
+    param_types: Option<Spanned<ParamTypes>>,
+    param_values: &Spanned<ParamValues>,
+) -> Result<(), ParamValidationErrors> {
+    if let Some(param_types) = param_types {
+        param_types.into_inner().validate(param_values.inner())?;
+    };
+    Ok(())
+}
+
 #[derive(Debug)]
 pub enum EvalError {
     Call(Box<rimu::EvalError>),
@@ -156,13 +174,12 @@ pub enum EvalError {
 }
 
 fn evaluate(
-    block_definition: Spanned<Plan>,
+    setup: Spanned<SetupFunction>,
     params: Spanned<ParamValues>,
 ) -> Result<Vec<Spanned<PlanAction>>, EvalError> {
-    let (block_definition, _block_definition_span) = block_definition.take();
+    let (setup, setup_span) = setup.take();
     let (params, params_span) = params.take();
     let args = vec![Spanned::new(params.into_rimu(), params_span)];
-    let (setup, setup_span) = block_definition.setup.take();
     let result =
         call(setup_span, setup.0, &args).map_err(|error| EvalError::Call(Box::new(error)))?;
     let (result, _result_span) = result.take();
