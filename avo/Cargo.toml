@@ -10,5 +10,6 @@ async-trait.workspace = true
 directories = "6.0.0"
 indexmap.workspace = true
 rimu.workspace = true
+serde.workspace = true
 tokio.workspace = true
 url.workspace = true

@@ -7,3 +7,4 @@ edition = "2024"
 rimu-interop = { path = "../rimu-interop", version = "0.1" }
 indexmap.workspace = true
 rimu.workspace = true
+serde.workspace = true

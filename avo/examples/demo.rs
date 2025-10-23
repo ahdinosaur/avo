@@ -1,6 +1,8 @@
-use avo::{apply, params::ParamValues, parser::PlanId, plan, FromRimu};
+use avo::{apply, parser::PlanId, plan};
+use avo_params::ParamValues;
 use indexmap::IndexMap;
 use rimu::{SourceId, Span, Spanned, Value};
+use rimu_interop::FromRimu;
 use std::env;
 
 #[tokio::main]

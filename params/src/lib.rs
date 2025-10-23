@@ -1,9 +1,10 @@
 //! Parameter schemas and values.
 
 use indexmap::IndexMap;
-use rimu::{Span, Spanned, Value};
+use rimu::{from_serde_value, SerdeValue, SerdeValueError, Span, Spanned, Value};
 
 use rimu_interop::FromRimu;
+use serde::de::DeserializeOwned;
 
 #[derive(Debug, Clone)]
 pub enum ParamType {
@@ -21,6 +22,10 @@ pub struct ParamField {
 }
 
 impl ParamField {
+    pub const fn new(typ: ParamType, optional: bool) -> Self {
+        Self { typ, optional }
+    }
+
     pub fn typ(&self) -> &ParamType {
         &self.typ
     }
@@ -31,6 +36,12 @@ impl ParamField {
 
 #[derive(Debug, Clone)]
 pub struct ParamTypes(IndexMap<String, Spanned<ParamField>>);
+
+impl ParamTypes {
+    pub const fn new(map: IndexMap<String, Spanned<ParamField>>) -> Self {
+        ParamTypes(map)
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct ParamValues(IndexMap<String, Spanned<Value>>);
@@ -58,6 +69,15 @@ impl ParamValues {
 
     pub fn get(&self, key: &str) -> Option<&Spanned<Value>> {
         self.0.get(key)
+    }
+
+    pub fn into_type<T>(self) -> Result<T, SerdeValueError>
+    where
+        T: DeserializeOwned,
+    {
+        let value = Value::Object(self.0);
+        let serde_value = SerdeValue::from(value);
+        from_serde_value(serde_value)
     }
 }
 

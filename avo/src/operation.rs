@@ -5,12 +5,21 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use async_trait::async_trait;
+use avo_params::{ParamField, ParamType, ParamTypes};
+use indexmap::IndexMap;
+use rimu::{SourceId, Span, Spanned};
+use serde::{de::DeserializeOwned, Deserialize};
 
 /// A single operation type should define:
 /// - what "kind" it is
 /// - how to group many single operations into a grouped operation
 pub trait OperationTrait: Into<Operation> {
     fn kind() -> OperationKind;
+
+    fn param_types() -> ParamTypes;
+
+    type Params: DeserializeOwned;
+    fn new(params: Self::Params) -> Self;
 
     type Group: OperationGroupTrait;
     fn group(ops: impl IntoIterator<Item = Self>) -> Self::Group;
@@ -68,11 +77,6 @@ pub fn group_by_kind(
 pub struct PackageOperation {
     packages: Vec<String>,
 }
-impl PackageOperation {
-    pub fn new(packages: Vec<String>) -> Self {
-        Self { packages }
-    }
-}
 impl From<PackageOperation> for Operation {
     fn from(value: PackageOperation) -> Self {
         Operation::Package(value)
@@ -90,9 +94,51 @@ impl From<PackageOperationGroup> for OperationGroup {
     }
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct PackageParams {
+    package: Option<String>,
+    packages: Vec<String>,
+}
+
 impl OperationTrait for PackageOperation {
     fn kind() -> OperationKind {
         OperationKind::Package
+    }
+
+    fn param_types() -> ParamTypes {
+        ParamTypes::new({
+            let span = Span::new(SourceId::empty(), 0, 0);
+            let mut map = IndexMap::new();
+            map.insert(
+                "package".to_string(),
+                Spanned::new(ParamField::new(ParamType::String, true), span.clone()),
+            );
+            map.insert(
+                "packages".to_string(),
+                Spanned::new(
+                    ParamField::new(
+                        ParamType::List {
+                            item: Box::new(Spanned::new(ParamType::String, span.clone())),
+                        },
+                        true,
+                    ),
+                    span.clone(),
+                ),
+            );
+            map
+        })
+    }
+
+    type Params = PackageParams;
+    fn new(params: Self::Params) -> Self {
+        let Self::Params {
+            package,
+            mut packages,
+        } = params;
+        if let Some(package) = package {
+            packages.insert(0, package);
+        }
+        Self { packages }
     }
 
     type Group = PackageOperationGroup;

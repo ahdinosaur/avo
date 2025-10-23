@@ -8,5 +8,6 @@ members = [
 async-trait = "0.1.89"
 indexmap = "2.12.0"
 rimu = { version = "0.2.0", git = "https://github.com/ahdinosaur/rimu" }
+serde = { version = "1.0.228", features = ["derive"] }
 tokio = { version = "1.48.0", features = ["fs", "macros", "rt-multi-thread"] }
 url = "2.5.7"

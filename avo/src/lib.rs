@@ -6,16 +6,16 @@ pub mod plan;
 pub mod store;
 pub mod system;
 
-use avo_params::ParamValues;
+use avo_params::{ParamValidationErrors, ParamValues};
 use directories::ProjectDirs;
-use rimu::{call, Spanned, Value};
+use rimu::{call, SerdeValueError, Spanned, Value};
 use rimu_interop::FromRimu;
 use std::{panic, path::PathBuf, str::FromStr};
 
 use crate::{
     operation::{
         EpochError, Operation, OperationEpochsGrouped, OperationGroupApplyError, OperationId,
-        OperationTree, PackageOperation,
+        OperationTrait, OperationTree, PackageOperation, PackageParams,
     },
     parser::{parse, ParseError, PlanId},
     plan::{IntoPlanActionError, Plan, PlanAction},
@@ -79,6 +79,8 @@ pub async fn plan_recursive(
 #[derive(Debug)]
 pub enum FromPlanItemToOperationError {
     MissingParam { name: String },
+    ParamValidation(Box<ParamValidationErrors>),
+    SerdeValue(Box<SerdeValueError>),
 }
 
 async fn plan_item_to_operation(
@@ -112,26 +114,14 @@ async fn plan_item_to_operation(
         let (params, _params_span) = params.expect("Failed to get params from PlanAction").take();
         let operation = match core_module_id {
             "pkg" => {
-                let packages = params
-                    .get("packages")
-                    .expect("Failed to get packages from @core/pkg params")
-                    .clone()
-                    .into_inner();
-
-                let Value::List(packages) = packages else {
-                    panic!("Packages is not a list");
-                };
-                let packages = packages
-                    .into_iter()
-                    .map(|package| {
-                        let Value::String(package) = package.into_inner() else {
-                            panic!("Package is not a string");
-                        };
-                        package
-                    })
-                    .collect();
-
-                Operation::Package(PackageOperation::new(packages))
+                let param_types = PackageOperation::param_types();
+                param_types.validate(&params).map_err(|error| {
+                    FromPlanItemToOperationError::ParamValidation(Box::new(error))
+                })?;
+                let package_params: PackageParams = params
+                    .into_type()
+                    .map_err(|error| FromPlanItemToOperationError::SerdeValue(Box::new(error)))?;
+                Operation::Package(PackageOperation::new(package_params))
             }
             _ => {
                 panic!("Unexpected core module");
