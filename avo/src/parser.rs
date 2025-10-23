@@ -1,6 +1,6 @@
 //! Parse Rimu source into a Plan (spanned).
 
-use rimu::{SourceId, SourceIdFromPathError, Spanned};
+use rimu::{SourceId, Spanned};
 use std::{cell::RefCell, path::PathBuf, rc::Rc};
 use url::Url;
 
@@ -25,21 +25,14 @@ impl From<PlanId> for StoreItemId {
     }
 }
 
-#[derive(Debug)]
-pub enum SourceIdFromPlanIdError {
-    Path(SourceIdFromPathError),
-}
-
-impl TryFrom<PlanId> for SourceId {
-    type Error = SourceIdFromPlanIdError;
-
-    fn try_from(value: PlanId) -> Result<Self, Self::Error> {
+impl From<PlanId> for SourceId {
+    fn from(value: PlanId) -> Self {
         match value {
-            PlanId::Path(path) => SourceId::from_path(path).map_err(SourceIdFromPlanIdError::Path),
+            PlanId::Path(path) => SourceId::from(path.to_string_lossy().to_string()),
             PlanId::Git(mut url, path) => {
                 url.query_pairs_mut()
                     .append_pair("path", &path.to_string_lossy());
-                Ok(SourceId::Url(url))
+                SourceId::from(url.to_string())
             }
         }
     }
@@ -47,10 +40,6 @@ impl TryFrom<PlanId> for SourceId {
 
 #[derive(Debug)]
 pub enum ParseError {
-    IncorrectPlanId {
-        block_id: PlanId,
-        error: Box<SourceIdFromPlanIdError>,
-    },
     RimuParse(Vec<rimu::ParseError>),
     NoCode,
     Eval(Box<rimu::EvalError>),
@@ -58,13 +47,7 @@ pub enum ParseError {
 }
 
 pub fn parse(code: &str, block_id: PlanId) -> Result<Spanned<Plan>, ParseError> {
-    let source_id = block_id
-        .clone()
-        .try_into()
-        .map_err(|error| ParseError::IncorrectPlanId {
-            block_id,
-            error: Box::new(error),
-        })?;
+    let source_id = block_id.into();
 
     let (ast, errors) = rimu::parse(code, source_id);
     if !errors.is_empty() {
