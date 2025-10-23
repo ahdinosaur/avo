@@ -22,8 +22,11 @@ pub struct ParamField {
 }
 
 impl ParamField {
-    pub const fn new(typ: ParamType, optional: bool) -> Self {
-        Self { typ, optional }
+    pub const fn new(typ: ParamType) -> Self {
+        Self {
+            typ,
+            optional: false,
+        }
     }
 
     pub fn typ(&self) -> &ParamType {
@@ -35,12 +38,11 @@ impl ParamField {
 }
 
 #[derive(Debug, Clone)]
-pub struct ParamTypes(IndexMap<String, Spanned<ParamField>>);
-
-impl ParamTypes {
-    pub const fn new(map: IndexMap<String, Spanned<ParamField>>) -> Self {
-        ParamTypes(map)
-    }
+pub enum ParamTypes {
+    // A single object structure: keys -> fields
+    Struct(IndexMap<String, Spanned<ParamField>>),
+    // A union of possible object structures.
+    Union(Vec<IndexMap<String, Spanned<ParamField>>>),
 }
 
 #[derive(Debug, Clone)]
@@ -175,8 +177,17 @@ impl FromRimu for ParamField {
 
 #[derive(Debug, Clone)]
 pub enum IntoParamTypesError {
-    NotAnObject,
-    Entry {
+    NotAnObjectOrList,
+    StructEntry {
+        key: String,
+        error: Box<Spanned<IntoParamFieldError>>,
+    },
+    UnionItemNotAnObject {
+        index: usize,
+        span: Span,
+    },
+    UnionItemEntry {
+        index: usize,
         key: String,
         error: Box<Spanned<IntoParamFieldError>>,
     },
@@ -185,27 +196,64 @@ pub enum IntoParamTypesError {
 impl FromRimu for ParamTypes {
     type Error = IntoParamTypesError;
 
+    // In Rimu:
+    // - An object defines a Struct (map of fields).
+    // - A list defines a Union; each list item is an object defining one case.
     fn from_rimu(value: Value) -> Result<Self, Self::Error> {
-        let Value::Object(map) = value else {
-            return Err(IntoParamTypesError::NotAnObject);
-        };
+        match value {
+            Value::Object(map) => {
+                let mut out: IndexMap<String, Spanned<ParamField>> =
+                    IndexMap::with_capacity(map.len());
 
-        let mut out: IndexMap<String, Spanned<ParamField>> = IndexMap::with_capacity(map.len());
-
-        for (key, value) in map {
-            let field = match ParamField::from_rimu_spanned(value) {
-                Ok(field) => field,
-                Err(error) => {
-                    return Err(IntoParamTypesError::Entry {
-                        key: key.clone(),
-                        error: Box::new(error),
-                    })
+                for (key, value) in map {
+                    let field = match ParamField::from_rimu_spanned(value) {
+                        Ok(field) => field,
+                        Err(error) => {
+                            return Err(IntoParamTypesError::StructEntry {
+                                key: key.clone(),
+                                error: Box::new(error),
+                            })
+                        }
+                    };
+                    out.insert(key, field);
                 }
-            };
-            out.insert(key, field);
-        }
 
-        Ok(ParamTypes(out))
+                Ok(ParamTypes::Struct(out))
+            }
+            Value::List(items) => {
+                let mut cases: Vec<IndexMap<String, Spanned<ParamField>>> =
+                    Vec::with_capacity(items.len());
+
+                for (index, spanned_item) in items.into_iter().enumerate() {
+                    let (inner, span) = spanned_item.clone().take();
+                    let Value::Object(case_map) = inner else {
+                        return Err(IntoParamTypesError::UnionItemNotAnObject { index, span });
+                    };
+
+                    let mut case_out: IndexMap<String, Spanned<ParamField>> =
+                        IndexMap::with_capacity(case_map.len());
+
+                    for (key, value) in case_map {
+                        let field = match ParamField::from_rimu_spanned(value) {
+                            Ok(field) => field,
+                            Err(error) => {
+                                return Err(IntoParamTypesError::UnionItemEntry {
+                                    index,
+                                    key: key.clone(),
+                                    error: Box::new(error),
+                                })
+                            }
+                        };
+                        case_out.insert(key, field);
+                    }
+
+                    cases.push(case_out);
+                }
+
+                Ok(ParamTypes::Union(cases))
+            }
+            _ => Err(IntoParamTypesError::NotAnObjectOrList),
+        }
     }
 }
 
@@ -238,6 +286,10 @@ pub enum ParamValidationError {
     InvalidParam {
         key: String,
         error: Box<ValidateValueError>,
+    },
+    // For union ParamTypes, no case validated successfully.
+    UnionNoMatch {
+        case_errors: Vec<ParamValidationErrors>,
     },
 }
 
@@ -318,50 +370,85 @@ pub fn validate(
     }
 }
 
+fn validate_struct(
+    fields: &IndexMap<String, Spanned<ParamField>>,
+    values: &ParamValues,
+) -> Result<(), ParamValidationErrors> {
+    let mut errors: Vec<ParamValidationError> = Vec::new();
+
+    // Requiredness and per-field validation.
+    for (key, spanned_field) in fields.iter() {
+        let (field, field_span) = spanned_field.clone().take();
+        let spanned_type = Spanned::new(field.typ().clone(), field_span);
+
+        match values.0.get(key) {
+            Some(spanned_value) => {
+                if let Err(error) = validate(&spanned_type, spanned_value) {
+                    errors.push(ParamValidationError::InvalidParam {
+                        key: key.clone(),
+                        error: Box::new(error),
+                    });
+                }
+            }
+            None => {
+                if !field.optional {
+                    errors.push(ParamValidationError::MissingParam {
+                        key: key.clone(),
+                        expected_type: Box::new(spanned_type),
+                    });
+                }
+            }
+        }
+    }
+
+    // Unknown keys.
+    for (key, spanned_value) in values.0.iter() {
+        if !fields.contains_key(key) {
+            errors.push(ParamValidationError::UnknownParam {
+                key: key.clone(),
+                value: Box::new(spanned_value.clone()),
+            });
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(ParamValidationErrors { errors })
+    }
+}
+
 impl ParamTypes {
+    // For Struct: validate all fields.
+    // For Union: succeed if any one case validates; otherwise return all case errors.
     pub fn validate(&self, values: &ParamValues) -> Result<(), ParamValidationErrors> {
-        let mut errors: Vec<ParamValidationError> = Vec::new();
+        match self {
+            ParamTypes::Struct(map) => validate_struct(map, values),
+            ParamTypes::Union(cases) => {
+                if cases.is_empty() {
+                    return Err(ParamValidationErrors {
+                        errors: vec![ParamValidationError::UnionNoMatch {
+                            case_errors: vec![],
+                        }],
+                    });
+                }
 
-        // Requiredness and per-field validation.
-        for (key, spanned_field) in self.0.iter() {
-            let (field, field_span) = spanned_field.clone().take();
+                let mut all_case_errors: Vec<ParamValidationErrors> =
+                    Vec::with_capacity(cases.len());
 
-            let spanned_type = Spanned::new(field.typ().clone(), field_span);
-
-            match values.0.get(key) {
-                Some(spanned_value) => {
-                    if let Err(error) = validate(&spanned_type, spanned_value) {
-                        errors.push(ParamValidationError::InvalidParam {
-                            key: key.clone(),
-                            error: Box::new(error),
-                        });
+                for case in cases {
+                    match validate_struct(case, values) {
+                        Ok(()) => return Ok(()),
+                        Err(errs) => all_case_errors.push(errs),
                     }
                 }
-                None => {
-                    if !field.optional {
-                        errors.push(ParamValidationError::MissingParam {
-                            key: key.clone(),
-                            expected_type: Box::new(spanned_type),
-                        });
-                    }
-                }
-            }
-        }
 
-        // Unknown keys.
-        for (key, spanned_value) in values.0.iter() {
-            if !self.0.contains_key(key) {
-                errors.push(ParamValidationError::UnknownParam {
-                    key: key.clone(),
-                    value: Box::new(spanned_value.clone()),
-                });
+                Err(ParamValidationErrors {
+                    errors: vec![ParamValidationError::UnionNoMatch {
+                        case_errors: all_case_errors,
+                    }],
+                })
             }
-        }
-
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(ParamValidationErrors { errors })
         }
     }
 }

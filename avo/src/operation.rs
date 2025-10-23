@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use async_trait::async_trait;
 use avo_params::{ParamField, ParamType, ParamTypes};
-use indexmap::IndexMap;
+use indexmap::indexmap;
 use rimu::{SourceId, Span, Spanned};
 use serde::{de::DeserializeOwned, Deserialize};
 
@@ -95,9 +95,10 @@ impl From<PackageOperationGroup> for OperationGroup {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct PackageParams {
-    package: Option<String>,
-    packages: Vec<String>,
+#[serde(untagged)]
+pub enum PackageParams {
+    Package { package: String },
+    Packages { packages: Vec<String> },
 }
 
 impl OperationTrait for PackageOperation {
@@ -106,39 +107,34 @@ impl OperationTrait for PackageOperation {
     }
 
     fn param_types() -> ParamTypes {
-        ParamTypes::new({
-            let span = Span::new(SourceId::empty(), 0, 0);
-            let mut map = IndexMap::new();
-            map.insert(
-                "package".to_string(),
-                Spanned::new(ParamField::new(ParamType::String, true), span.clone()),
-            );
-            map.insert(
-                "packages".to_string(),
-                Spanned::new(
-                    ParamField::new(
-                        ParamType::List {
-                            item: Box::new(Spanned::new(ParamType::String, span.clone())),
-                        },
-                        true,
+        let span = Span::new(SourceId::empty(), 0, 0);
+        ParamTypes::Union(vec![
+            indexmap! {
+                "package".to_string() =>
+                    Spanned::new(ParamField::new(ParamType::String), span.clone())
+            },
+            indexmap! {
+                "packages".to_string() =>
+                    Spanned::new(
+                        ParamField::new(
+                            ParamType::List {
+                                item: Box::new(Spanned::new(ParamType::String, span.clone())),
+                            },
+                        ),
+                        span.clone(),
                     ),
-                    span.clone(),
-                ),
-            );
-            map
-        })
+            },
+        ])
     }
 
     type Params = PackageParams;
     fn new(params: Self::Params) -> Self {
-        let Self::Params {
-            package,
-            mut packages,
-        } = params;
-        if let Some(package) = package {
-            packages.insert(0, package);
+        match params {
+            PackageParams::Package { package } => Self {
+                packages: vec![package],
+            },
+            PackageParams::Packages { packages } => Self { packages },
         }
-        Self { packages }
     }
 
     type Group = PackageOperationGroup;
