@@ -6,7 +6,7 @@ pub mod plan;
 pub mod store;
 pub mod system;
 
-use avo_params::{ParamTypes, ParamValidationErrors, ParamValues};
+use avo_params::{validate, ParamValidationErrors, ParamValues};
 use directories::ProjectDirs;
 use rimu::{call, SerdeValueError, Spanned, Value};
 use rimu_interop::FromRimu;
@@ -55,7 +55,7 @@ pub async fn plan(
 
 pub async fn plan_recursive(
     plan_id: PlanId,
-    params: Spanned<ParamValues>,
+    param_values: Spanned<ParamValues>,
     store: &mut Store,
 ) -> Result<Vec<OperationTree>, PlanError> {
     let store_item_id: StoreItemId = plan_id.clone().into();
@@ -71,8 +71,8 @@ pub async fn plan_recursive(
         params: param_types,
         setup,
     } = plan.into_inner();
-    validate(param_types, &params).map_err(PlanError::Validate)?;
-    let plan_actions = evaluate(setup, params).map_err(PlanError::Eval)?;
+    validate(&param_types, &param_values).map_err(PlanError::Validate)?;
+    let plan_actions = evaluate(setup, param_values).map_err(PlanError::Eval)?;
     let mut operations = Vec::with_capacity(plan_actions.len());
     for plan_action in plan_actions {
         operations.push(
@@ -100,12 +100,14 @@ async fn plan_item_to_operation(
     let PlanAction {
         id,
         ref module,
-        params,
+        params: param_values,
         before,
         after,
     } = plan_action;
 
     let id = id.map(|id| OperationId::new(id.into_inner()));
+
+    let param_values = param_values.expect("Failed to get params from PlanAction");
 
     let before = before
         .into_iter()
@@ -119,14 +121,14 @@ async fn plan_item_to_operation(
         .collect();
 
     if let Some(core_module_id) = PlanAction::is_core_module(module) {
-        let (params, _params_span) = params.expect("Failed to get params from PlanAction").take();
         let operation = match core_module_id {
             "pkg" => {
                 let param_types = PackageOperation::param_types();
-                param_types.validate(&params).map_err(|error| {
+                validate(&param_types, &param_values).map_err(|error| {
                     FromPlanItemToOperationError::ParamValidation(Box::new(error))
                 })?;
-                let package_params: PackageParams = params
+                let package_params: PackageParams = param_values
+                    .into_inner()
                     .into_type()
                     .map_err(|error| FromPlanItemToOperationError::SerdeValue(Box::new(error)))?;
                 Operation::Package(PackageOperation::new(package_params))
@@ -142,11 +144,11 @@ async fn plan_item_to_operation(
             after,
         })
     } else {
-        let params = params.expect("Failed to get params from PlanAction");
-        let module = plan_action.module.into_inner();
-        let path = PathBuf::from_str(&module).expect("Failed to convert module to path");
+        let path = PathBuf::from_str(module.inner()).expect("Failed to convert module to path");
         let plan_id = PlanId::Path(path);
-        let children = plan_recursive(plan_id, params, store).await.expect("TODO");
+        let children = plan_recursive(plan_id, param_values, store)
+            .await
+            .expect("TODO");
         Ok(OperationTree::Branch {
             id,
             children,
@@ -154,16 +156,6 @@ async fn plan_item_to_operation(
             after,
         })
     }
-}
-
-fn validate(
-    param_types: Option<Spanned<ParamTypes>>,
-    param_values: &Spanned<ParamValues>,
-) -> Result<(), ParamValidationErrors> {
-    if let Some(param_types) = param_types {
-        param_types.into_inner().validate(param_values.inner())?;
-    };
-    Ok(())
 }
 
 #[derive(Debug)]

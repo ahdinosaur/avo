@@ -16,7 +16,7 @@ use serde::{de::DeserializeOwned, Deserialize};
 pub trait OperationTrait: Into<Operation> {
     fn kind() -> OperationKind;
 
-    fn param_types() -> ParamTypes;
+    fn param_types() -> Option<Spanned<ParamTypes>>;
 
     type Params: DeserializeOwned;
     fn new(params: Self::Params) -> Self;
@@ -106,25 +106,28 @@ impl OperationTrait for PackageOperation {
         OperationKind::Package
     }
 
-    fn param_types() -> ParamTypes {
+    fn param_types() -> Option<Spanned<ParamTypes>> {
         let span = Span::new(SourceId::empty(), 0, 0);
-        ParamTypes::Union(vec![
-            indexmap! {
-                "package".to_string() =>
-                    Spanned::new(ParamField::new(ParamType::String), span.clone())
-            },
-            indexmap! {
-                "packages".to_string() =>
-                    Spanned::new(
-                        ParamField::new(
-                            ParamType::List {
-                                item: Box::new(Spanned::new(ParamType::String, span.clone())),
-                            },
+        Some(Spanned::new(
+            ParamTypes::Union(vec![
+                indexmap! {
+                    "package".to_string() =>
+                        Spanned::new(ParamField::new(ParamType::String), span.clone())
+                },
+                indexmap! {
+                    "packages".to_string() =>
+                        Spanned::new(
+                            ParamField::new(
+                                ParamType::List {
+                                    item: Box::new(Spanned::new(ParamType::String, span.clone())),
+                                },
+                            ),
+                            span.clone(),
                         ),
-                        span.clone(),
-                    ),
-            },
-        ])
+                },
+            ]),
+            span,
+        ))
     }
 
     type Params = PackageParams;

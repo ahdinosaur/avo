@@ -311,7 +311,7 @@ fn mismatch(typ: &Spanned<ParamType>, value: &Spanned<Value>) -> ValidateValueEr
     }
 }
 
-pub fn validate(
+fn validate_type(
     param_type: &Spanned<ParamType>,
     value: &Spanned<Value>,
 ) -> Result<(), ValidateValueError> {
@@ -340,7 +340,7 @@ pub fn validate(
             };
 
             for (index, item_value) in items.iter().enumerate() {
-                if let Err(error) = validate(item, item_value) {
+                if let Err(error) = validate_type(item, item_value) {
                     return Err(ValidateValueError::ListItem {
                         index,
                         error: Box::new(error),
@@ -357,7 +357,7 @@ pub fn validate(
             };
 
             for (key, entry_value) in map.iter() {
-                if let Err(error) = validate(value_type, entry_value) {
+                if let Err(error) = validate_type(value_type, entry_value) {
                     return Err(ValidateValueError::ObjectEntry {
                         key: key.clone(),
                         error: Box::new(error),
@@ -383,7 +383,7 @@ fn validate_struct(
 
         match values.0.get(key) {
             Some(spanned_value) => {
-                if let Err(error) = validate(&spanned_type, spanned_value) {
+                if let Err(error) = validate_type(&spanned_type, spanned_value) {
                     errors.push(ParamValidationError::InvalidParam {
                         key: key.clone(),
                         error: Box::new(error),
@@ -418,37 +418,42 @@ fn validate_struct(
     }
 }
 
-impl ParamTypes {
-    // For Struct: validate all fields.
-    // For Union: succeed if any one case validates; otherwise return all case errors.
-    pub fn validate(&self, values: &ParamValues) -> Result<(), ParamValidationErrors> {
-        match self {
-            ParamTypes::Struct(map) => validate_struct(map, values),
-            ParamTypes::Union(cases) => {
-                if cases.is_empty() {
-                    return Err(ParamValidationErrors {
-                        errors: vec![ParamValidationError::UnionNoMatch {
-                            case_errors: vec![],
-                        }],
-                    });
-                }
-
-                let mut all_case_errors: Vec<ParamValidationErrors> =
-                    Vec::with_capacity(cases.len());
-
-                for case in cases {
-                    match validate_struct(case, values) {
-                        Ok(()) => return Ok(()),
-                        Err(errs) => all_case_errors.push(errs),
-                    }
-                }
-
-                Err(ParamValidationErrors {
+// For Struct: validate all fields.
+// For Union: succeed if any one case validates; otherwise return all case errors.
+pub fn validate(
+    param_types: &Option<Spanned<ParamTypes>>,
+    param_values: &Spanned<ParamValues>,
+) -> Result<(), ParamValidationErrors> {
+    let Some(param_types) = param_types else {
+        return Ok(());
+    };
+    let param_types = param_types.inner();
+    let param_values = param_values.inner();
+    match param_types {
+        ParamTypes::Struct(map) => validate_struct(map, param_values),
+        ParamTypes::Union(cases) => {
+            if cases.is_empty() {
+                return Err(ParamValidationErrors {
                     errors: vec![ParamValidationError::UnionNoMatch {
-                        case_errors: all_case_errors,
+                        case_errors: vec![],
                     }],
-                })
+                });
             }
+
+            let mut all_case_errors: Vec<ParamValidationErrors> = Vec::with_capacity(cases.len());
+
+            for case in cases {
+                match validate_struct(case, param_values) {
+                    Ok(()) => return Ok(()),
+                    Err(errs) => all_case_errors.push(errs),
+                }
+            }
+
+            Err(ParamValidationErrors {
+                errors: vec![ParamValidationError::UnionNoMatch {
+                    case_errors: all_case_errors,
+                }],
+            })
         }
     }
 }
