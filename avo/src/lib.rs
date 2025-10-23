@@ -1,25 +1,22 @@
 #![allow(dead_code)]
 
 pub mod operation;
-pub mod params;
 pub mod parser;
 pub mod plan;
-mod rimu_interop;
 pub mod store;
 pub mod system;
 
-use std::{panic, path::PathBuf, str::FromStr};
-
+use avo_params::ParamValues;
 use directories::ProjectDirs;
 use rimu::{call, Spanned, Value};
-pub use rimu_interop::FromRimu;
+use rimu_interop::FromRimu;
+use std::{panic, path::PathBuf, str::FromStr};
 
 use crate::{
     operation::{
         EpochError, Operation, OperationEpochsGrouped, OperationGroupApplyError, OperationId,
         OperationTree, PackageOperation,
     },
-    params::ParamValues,
     parser::{parse, ParseError, PlanId},
     plan::{IntoPlanActionError, Plan, PlanAction},
     store::{Store, StoreItemId},

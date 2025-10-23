@@ -69,11 +69,22 @@ name = "avo"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "avo-params",
  "directories",
  "indexmap",
  "rimu",
+ "rimu-interop",
  "tokio",
  "url",
+]
+
+[[package]]
+name = "avo-params"
+version = "0.1.0"
+dependencies = [
+ "indexmap",
+ "rimu",
+ "rimu-interop",
 ]
 
 [[package]]
@@ -651,6 +662,13 @@ dependencies = [
  "rust_decimal",
  "rust_decimal_macros",
  "thiserror",
+]
+
+[[package]]
+name = "rimu-interop"
+version = "0.1.0"
+dependencies = [
+ "rimu",
 ]
 
 [[package]]

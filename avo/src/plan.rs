@@ -1,9 +1,6 @@
+use avo_params::{IntoParamTypesError, IntoParamValuesError, ParamTypes, ParamValues};
 use rimu::{Function, Span, Spanned, Value};
-
-use crate::{
-    params::{IntoParamTypesError, IntoParamValuesError, ParamTypes, ParamValues},
-    FromRimu,
-};
+use rimu_interop::FromRimu;
 
 #[derive(Debug, Clone)]
 pub struct Name(pub String);

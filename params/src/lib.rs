@@ -2,8 +2,7 @@
 
 use indexmap::IndexMap;
 use rimu::{Span, Spanned, Value};
-
-use crate::FromRimu;
+use rimu_interop::FromRimu;
 
 #[derive(Debug, Clone)]
 pub enum ParamType {
