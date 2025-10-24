@@ -709,6 +709,7 @@ name = "rimu-interop"
 version = "0.1.0"
 dependencies = [
  "rimu",
+ "serde",
 ]
 
 [[package]]

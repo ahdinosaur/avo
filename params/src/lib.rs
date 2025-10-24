@@ -1,10 +1,10 @@
 //! Parameter schemas and values.
 
 use indexmap::IndexMap;
-use rimu::{from_serde_value, SerdeValue, SerdeValueError, Span, Spanned, Value};
+use rimu::{from_serde_value, SerdeValue, SerdeValueError, SourceId, Span, Spanned, Value};
 
-use rimu_interop::FromRimu;
-use serde::de::DeserializeOwned;
+use rimu_interop::{to_rimu, FromRimu, ToRimuError};
+use serde::{de::DeserializeOwned, Serialize};
 
 #[derive(Debug, Clone)]
 pub enum ParamType {
@@ -49,16 +49,36 @@ pub enum ParamTypes {
 pub struct ParamValues(IndexMap<String, Spanned<Value>>);
 
 #[derive(Debug, Clone)]
-pub enum IntoParamValuesError {
+pub enum ParamValuesFromTypeError {
+    ToRimu(ToRimuError),
+    FromRimu(ParamValuesFromRimuError),
+}
+
+impl ParamValues {
+    pub fn from_type<T>(
+        value: T,
+        source_id: SourceId,
+    ) -> Result<Spanned<Self>, ParamValuesFromTypeError>
+    where
+        T: Serialize,
+    {
+        let rimu_value = to_rimu(value, source_id).map_err(ParamValuesFromTypeError::ToRimu)?;
+        ParamValues::from_rimu_spanned(rimu_value)
+            .map_err(|error| ParamValuesFromTypeError::FromRimu(error.into_inner()))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ParamValuesFromRimuError {
     NotAnObject,
 }
 
 impl FromRimu for ParamValues {
-    type Error = IntoParamValuesError;
+    type Error = ParamValuesFromRimuError;
 
     fn from_rimu(value: Value) -> Result<Self, Self::Error> {
         let Value::Object(object) = value else {
-            return Err(IntoParamValuesError::NotAnObject);
+            return Err(ParamValuesFromRimuError::NotAnObject);
         };
         Ok(ParamValues(object))
     }
@@ -84,32 +104,32 @@ impl ParamValues {
 }
 
 #[derive(Debug, Clone)]
-pub enum IntoParamTypeError {
+pub enum ParamTypeFromRimuError {
     NotAnObject,
     HasNoType,
     TypeNotAString { span: Span },
     UnknownType(String),
     ListMissingItem,
-    ListItem(Box<Spanned<IntoParamTypeError>>),
+    ListItem(Box<Spanned<ParamTypeFromRimuError>>),
     ObjectMissingValue,
-    ObjectValue(Box<Spanned<IntoParamTypeError>>),
+    ObjectValue(Box<Spanned<ParamTypeFromRimuError>>),
 }
 
 impl FromRimu for ParamType {
-    type Error = IntoParamTypeError;
+    type Error = ParamTypeFromRimuError;
 
     fn from_rimu(value: Value) -> Result<Self, Self::Error> {
         let Value::Object(mut object) = value else {
-            return Err(IntoParamTypeError::NotAnObject);
+            return Err(ParamTypeFromRimuError::NotAnObject);
         };
 
         let Some(typ) = object.get("type") else {
-            return Err(IntoParamTypeError::HasNoType);
+            return Err(ParamTypeFromRimuError::HasNoType);
         };
         let (typ, typ_span) = typ.clone().take();
 
         let Value::String(typ) = typ else {
-            return Err(IntoParamTypeError::TypeNotAString { span: typ_span });
+            return Err(ParamTypeFromRimuError::TypeNotAString { span: typ_span });
         };
 
         match typ.as_str() {
@@ -119,9 +139,9 @@ impl FromRimu for ParamType {
             "list" => {
                 let item = object
                     .swap_remove("item")
-                    .ok_or(IntoParamTypeError::ListMissingItem)?;
+                    .ok_or(ParamTypeFromRimuError::ListMissingItem)?;
                 let item = ParamType::from_rimu_spanned(item)
-                    .map_err(|error| IntoParamTypeError::ListItem(Box::new(error)))?;
+                    .map_err(|error| ParamTypeFromRimuError::ListItem(Box::new(error)))?;
                 Ok(ParamType::List {
                     item: Box::new(item),
                 })
@@ -129,31 +149,31 @@ impl FromRimu for ParamType {
             "object" => {
                 let value = object
                     .swap_remove("value")
-                    .ok_or(IntoParamTypeError::ObjectMissingValue)?;
+                    .ok_or(ParamTypeFromRimuError::ObjectMissingValue)?;
                 let value = ParamType::from_rimu_spanned(value)
-                    .map_err(|error| IntoParamTypeError::ObjectValue(Box::new(error)))?;
+                    .map_err(|error| ParamTypeFromRimuError::ObjectValue(Box::new(error)))?;
                 Ok(ParamType::Object {
                     value: Box::new(value),
                 })
             }
-            other => Err(IntoParamTypeError::UnknownType(other.to_string())),
+            other => Err(ParamTypeFromRimuError::UnknownType(other.to_string())),
         }
     }
 }
 
 #[derive(Debug, Clone)]
-pub enum IntoParamFieldError {
+pub enum ParamFieldFromRimuError {
     NotAnObject,
     OptionalNotABoolean { span: Span },
-    FieldType(IntoParamTypeError),
+    FieldType(ParamTypeFromRimuError),
 }
 
 impl FromRimu for ParamField {
-    type Error = IntoParamFieldError;
+    type Error = ParamFieldFromRimuError;
 
     fn from_rimu(value: Value) -> Result<Self, Self::Error> {
         let Value::Object(mut object) = value else {
-            return Err(IntoParamFieldError::NotAnObject);
+            return Err(ParamFieldFromRimuError::NotAnObject);
         };
 
         // Optional defaults to false (required by default).
@@ -161,26 +181,26 @@ impl FromRimu for ParamField {
             let (inner, span) = optional_value.take();
             match inner {
                 Value::Boolean(b) => b,
-                _ => return Err(IntoParamFieldError::OptionalNotABoolean { span }),
+                _ => return Err(ParamFieldFromRimuError::OptionalNotABoolean { span }),
             }
         } else {
             false
         };
 
         // Parse the underlying type (ignore unknown keys).
-        let typ =
-            ParamType::from_rimu(Value::Object(object)).map_err(IntoParamFieldError::FieldType)?;
+        let typ = ParamType::from_rimu(Value::Object(object))
+            .map_err(ParamFieldFromRimuError::FieldType)?;
 
         Ok(ParamField { typ, optional })
     }
 }
 
 #[derive(Debug, Clone)]
-pub enum IntoParamTypesError {
+pub enum ParamTypesFromRimuError {
     NotAnObjectOrList,
     StructEntry {
         key: String,
-        error: Box<Spanned<IntoParamFieldError>>,
+        error: Box<Spanned<ParamFieldFromRimuError>>,
     },
     UnionItemNotAnObject {
         index: usize,
@@ -189,12 +209,12 @@ pub enum IntoParamTypesError {
     UnionItemEntry {
         index: usize,
         key: String,
-        error: Box<Spanned<IntoParamFieldError>>,
+        error: Box<Spanned<ParamFieldFromRimuError>>,
     },
 }
 
 impl FromRimu for ParamTypes {
-    type Error = IntoParamTypesError;
+    type Error = ParamTypesFromRimuError;
 
     // In Rimu:
     // - An object defines a Struct (map of fields).
@@ -209,7 +229,7 @@ impl FromRimu for ParamTypes {
                     let field = match ParamField::from_rimu_spanned(value) {
                         Ok(field) => field,
                         Err(error) => {
-                            return Err(IntoParamTypesError::StructEntry {
+                            return Err(ParamTypesFromRimuError::StructEntry {
                                 key: key.clone(),
                                 error: Box::new(error),
                             })
@@ -227,7 +247,7 @@ impl FromRimu for ParamTypes {
                 for (index, spanned_item) in items.into_iter().enumerate() {
                     let (inner, span) = spanned_item.clone().take();
                     let Value::Object(case_map) = inner else {
-                        return Err(IntoParamTypesError::UnionItemNotAnObject { index, span });
+                        return Err(ParamTypesFromRimuError::UnionItemNotAnObject { index, span });
                     };
 
                     let mut case_out: IndexMap<String, Spanned<ParamField>> =
@@ -237,7 +257,7 @@ impl FromRimu for ParamTypes {
                         let field = match ParamField::from_rimu_spanned(value) {
                             Ok(field) => field,
                             Err(error) => {
-                                return Err(IntoParamTypesError::UnionItemEntry {
+                                return Err(ParamTypesFromRimuError::UnionItemEntry {
                                     index,
                                     key: key.clone(),
                                     error: Box::new(error),
@@ -252,7 +272,7 @@ impl FromRimu for ParamTypes {
 
                 Ok(ParamTypes::Union(cases))
             }
-            _ => Err(IntoParamTypesError::NotAnObjectOrList),
+            _ => Err(ParamTypesFromRimuError::NotAnObjectOrList),
         }
     }
 }

@@ -4,10 +4,14 @@ use avo::{
     plan::{plan, PlanId},
 };
 use avo_params::ParamValues;
-use indexmap::indexmap;
-use rimu::{SourceId, Span, Spanned, Value};
-use rimu_interop::FromRimu;
+use rimu::SourceId;
+use serde::Serialize;
 use std::env;
+
+#[derive(Serialize)]
+struct ExampleParams {
+    pub whatever: bool,
+}
 
 #[tokio::main]
 async fn main() {
@@ -16,14 +20,8 @@ async fn main() {
     let path = env::current_dir().expect("Failed to get env::current_dir()");
     let plan_id = PlanId::Path(path.join("examples/demo.avo"));
 
-    let value_span = Span::new(SourceId::empty(), 0, 0);
-    let params = ParamValues::from_rimu_spanned(Spanned::new(
-        Value::Object(indexmap! {
-            "whatever".into() => Spanned::new(Value::Boolean(true), value_span.clone()),
-        }),
-        value_span,
-    ))
-    .expect("Failed to create params");
+    let params = ParamValues::from_type(ExampleParams { whatever: true }, SourceId::empty())
+        .expect("Failed to create params");
 
     let operation = plan(plan_id, params, &mut store)
         .await

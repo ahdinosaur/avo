@@ -1,4 +1,4 @@
-use avo_params::{IntoParamTypesError, IntoParamValuesError, ParamTypes, ParamValues};
+use avo_params::{ParamTypes, ParamTypesFromRimuError, ParamValues, ParamValuesFromRimuError};
 use rimu::{Function, Span, Spanned, Value};
 use rimu_interop::FromRimu;
 
@@ -64,7 +64,7 @@ pub enum IntoPlanActionError {
     ModuleMissing,
     ModuleNotAString { span: Span },
     IdNotAString { span: Span },
-    Params(Spanned<IntoParamValuesError>),
+    Params(Spanned<ParamValuesFromRimuError>),
     BeforeNotAList { span: Span },
     BeforeItemNotAString { item_span: Span },
     AfterNotAList { span: Span },
@@ -201,7 +201,7 @@ pub enum IntoPlanError {
     NotAnObject,
     Name(Spanned<IntoNameError>),
     Version(Spanned<IntoVersionError>),
-    Params(Spanned<IntoParamTypesError>),
+    Params(Spanned<ParamTypesFromRimuError>),
     SetupMissing,
     SetupNotAFunction(Spanned<IntoSetupFunctionError>),
 }
