@@ -1,10 +1,11 @@
 //! Parameter schemas and values.
 
+use displaydoc::Display;
 use indexmap::IndexMap;
-use rimu::{from_serde_value, SerdeValue, SerdeValueError, SourceId, Span, Spanned, Value};
-
-use rimu_interop::{to_rimu, FromRimu, ToRimuError};
-use serde::{de::DeserializeOwned, Serialize};
+use rimu::{SerdeValue, SerdeValueError, SourceId, Span, Spanned, Value, from_serde_value};
+use rimu_interop::{FromRimu, ToRimuError, to_rimu};
+use serde::{Serialize, de::DeserializeOwned};
+use thiserror::Error;
 
 #[derive(Debug, Clone)]
 pub enum ParamType {
@@ -32,6 +33,7 @@ impl ParamField {
     pub fn typ(&self) -> &ParamType {
         &self.typ
     }
+
     pub fn optional(&self) -> &bool {
         &self.optional
     }
@@ -48,10 +50,12 @@ pub enum ParamTypes {
 #[derive(Debug, Clone)]
 pub struct ParamValues(IndexMap<String, Spanned<Value>>);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error, Display)]
 pub enum ParamValuesFromTypeError {
-    ToRimu(ToRimuError),
-    FromRimu(ParamValuesFromRimuError),
+    /// Failed to convert serializable value to Rimu
+    ToRimu(#[source] ToRimuError),
+    /// Failed to convert Rimu value into parameter values
+    FromRimu(#[source] ParamValuesFromRimuError),
 }
 
 impl ParamValues {
@@ -68,8 +72,9 @@ impl ParamValues {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error, Display)]
 pub enum ParamValuesFromRimuError {
+    /// Expected an object mapping parameter names to values
     NotAnObject,
 }
 
@@ -103,15 +108,23 @@ impl ParamValues {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error, Display)]
 pub enum ParamTypeFromRimuError {
+    /// Expected an object for parameter type
     NotAnObject,
+    /// Missing property: "type"
     HasNoType,
+    /// The "type" property must be a string
     TypeNotAString { span: Span },
+    /// Unknown parameter type: {0}
     UnknownType(String),
+    /// List type is missing required "item" property
     ListMissingItem,
+    /// Invalid "item" type in list: {0:?}
     ListItem(Box<Spanned<ParamTypeFromRimuError>>),
+    /// Object type is missing required "value" property
     ObjectMissingValue,
+    /// Invalid "value" type in object: {0:?}
     ObjectValue(Box<Spanned<ParamTypeFromRimuError>>),
 }
 
@@ -126,8 +139,8 @@ impl FromRimu for ParamType {
         let Some(typ) = object.get("type") else {
             return Err(ParamTypeFromRimuError::HasNoType);
         };
-        let (typ, typ_span) = typ.clone().take();
 
+        let (typ, typ_span) = typ.clone().take();
         let Value::String(typ) = typ else {
             return Err(ParamTypeFromRimuError::TypeNotAString { span: typ_span });
         };
@@ -161,11 +174,14 @@ impl FromRimu for ParamType {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error, Display)]
 pub enum ParamFieldFromRimuError {
+    /// Expected an object for parameter field
     NotAnObject,
+    /// The "optional" property must be a boolean
     OptionalNotABoolean { span: Span },
-    FieldType(ParamTypeFromRimuError),
+    /// Invalid field type: {0:?}
+    FieldType(#[source] ParamTypeFromRimuError),
 }
 
 impl FromRimu for ParamField {
@@ -176,36 +192,36 @@ impl FromRimu for ParamField {
             return Err(ParamFieldFromRimuError::NotAnObject);
         };
 
-        // Optional defaults to false (required by default).
         let optional = if let Some(optional_value) = object.swap_remove("optional") {
             let (inner, span) = optional_value.take();
             match inner {
                 Value::Boolean(b) => b,
-                _ => return Err(ParamFieldFromRimuError::OptionalNotABoolean { span }),
+                _ => {
+                    return Err(ParamFieldFromRimuError::OptionalNotABoolean { span });
+                }
             }
         } else {
             false
         };
 
-        // Parse the underlying type (ignore unknown keys).
         let typ = ParamType::from_rimu(Value::Object(object))
             .map_err(ParamFieldFromRimuError::FieldType)?;
-
         Ok(ParamField { typ, optional })
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error, Display)]
 pub enum ParamTypesFromRimuError {
+    /// Expected an object (struct) or a list (union) for parameter types
     NotAnObjectOrList,
+    /// Invalid struct entry for key "{key}": {error:?}
     StructEntry {
         key: String,
         error: Box<Spanned<ParamFieldFromRimuError>>,
     },
-    UnionItemNotAnObject {
-        index: usize,
-        span: Span,
-    },
+    /// Union item at index {index} is not an object
+    UnionItemNotAnObject { index: usize, span: Span },
+    /// Invalid union item entry for key "{key}" at index {index}: {error:?}
     UnionItemEntry {
         index: usize,
         key: String,
@@ -277,43 +293,50 @@ impl FromRimu for ParamTypes {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error, Display)]
 pub enum ValidateValueError {
+    /// Value does not match expected type
     TypeMismatch {
         expected_type: Box<Spanned<ParamType>>,
         got_value: Box<Spanned<Value>>,
     },
+    /// Invalid list item at index {index}: {error:?}
     ListItem {
         index: usize,
         error: Box<ValidateValueError>,
     },
+    /// Invalid object entry for key "{key}": {error:?}
     ObjectEntry {
         key: String,
         error: Box<ValidateValueError>,
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error, Display)]
 pub enum ParamValidationError {
+    /// Missing required parameter "{key}"
     MissingParam {
         key: String,
         expected_type: Box<Spanned<ParamType>>,
     },
+    /// Unknown parameter "{key}"
     UnknownParam {
         key: String,
         value: Box<Spanned<Value>>,
     },
+    /// Invalid parameter "{key}": {error:?}
     InvalidParam {
         key: String,
         error: Box<ValidateValueError>,
     },
-    // For union ParamTypes, no case validated successfully.
+    /// Parameter union did not match any case
     UnionNoMatch {
         case_errors: Vec<ParamValidationErrors>,
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error, Display)]
+#[displaydoc("Parameter validation failed")]
 pub struct ParamValidationErrors {
     pub errors: Vec<ParamValidationError>,
 }

@@ -1,29 +1,34 @@
 //! Parse Rimu source into a Plan (spanned).
 
-use rimu::Spanned;
 use std::{cell::RefCell, rc::Rc};
 
+use displaydoc::Display;
+use rimu::Spanned;
+use thiserror::Error;
+
 use crate::{
-    plan::{IntoPlanError, Plan},
     FromRimu, PlanId,
+    plan::{IntoPlanError, Plan},
 };
 
-#[derive(Debug)]
+#[derive(Debug, Error, Display)]
 pub enum ParseError {
+    /// Rimu parse failed
     RimuParse(Vec<rimu::ParseError>),
+    /// No code found in source
     NoCode,
+    /// Evaluating Rimu AST failed
     Eval(Box<rimu::EvalError>),
+    /// Failed to convert Rimu value into Plan
     IntoPlan(Box<Spanned<IntoPlanError>>),
 }
 
 pub fn parse(code: &str, block_id: PlanId) -> Result<Spanned<Plan>, ParseError> {
     let source_id = block_id.into();
-
     let (ast, errors) = rimu::parse(code, source_id);
     if !errors.is_empty() {
         return Err(ParseError::RimuParse(errors));
     }
-
     let Some(ast) = ast else {
         return Err(ParseError::NoCode);
     };

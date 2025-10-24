@@ -1,6 +1,7 @@
-use std::{fmt::Debug, io, path::PathBuf};
-
 use async_trait::async_trait;
+use displaydoc::Display;
+use std::{fmt::Debug, io, path::PathBuf};
+use thiserror::Error;
 
 #[async_trait]
 pub trait SubStore {
@@ -8,6 +9,7 @@ pub trait SubStore {
     type Error: Debug;
 
     fn new(cache_dir: PathBuf) -> Self;
+
     async fn read(&mut self, id: &Self::ItemId) -> Result<Vec<u8>, Self::Error>;
 }
 
@@ -21,9 +23,10 @@ pub enum StoreItemId {
     LocalFile(PathBuf),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error, Display)]
 pub enum StoreError {
-    LocalFile(io::Error),
+    /// Local file store failed
+    LocalFile(#[from] io::Error),
 }
 
 impl Store {
@@ -39,7 +42,7 @@ impl Store {
                 .local_file_store
                 .read(id)
                 .await
-                .map_err(StoreError::LocalFile),
+                .map_err(StoreError::from),
         }
     }
 }

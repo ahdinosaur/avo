@@ -1,12 +1,17 @@
+#![allow(dead_code)]
+
 use avo_params::{ParamTypes, ParamTypesFromRimuError, ParamValues, ParamValuesFromRimuError};
+use displaydoc::Display;
 use rimu::{Function, Span, Spanned, Value};
 use rimu_interop::FromRimu;
+use thiserror::Error;
 
 #[derive(Debug, Clone)]
 pub struct Name(pub String);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error, Display)]
 pub enum IntoNameError {
+    /// Expected a string for plan name
     NotAString,
 }
 
@@ -24,8 +29,9 @@ impl FromRimu for Name {
 #[derive(Debug, Clone)]
 pub struct Version(pub String);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error, Display)]
 pub enum IntoVersionError {
+    /// Expected a string for plan version
     NotAString,
 }
 
@@ -58,16 +64,25 @@ impl PlanAction {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error, Display)]
 pub enum IntoPlanActionError {
+    /// Expected an object for plan action
     NotAnObject,
+    /// Missing property: "module"
     ModuleMissing,
+    /// Property "module" must be a string
     ModuleNotAString { span: Span },
+    /// Property "id" must be a string
     IdNotAString { span: Span },
+    /// Failed to convert "params" into ParamValues: {0:?}
     Params(Spanned<ParamValuesFromRimuError>),
+    /// Property "before" must be a list
     BeforeNotAList { span: Span },
+    /// "before" list item must be a string
     BeforeItemNotAString { item_span: Span },
+    /// Property "after" must be a list
     AfterNotAList { span: Span },
+    /// "after" list item must be a string
     AfterItemNotAString { item_span: Span },
 }
 
@@ -122,7 +137,7 @@ impl FromRimu for PlanAction {
                                 _ => {
                                     return Err(IntoPlanActionError::BeforeItemNotAString {
                                         item_span: ispan,
-                                    })
+                                    });
                                 }
                             }
                         }
@@ -147,7 +162,7 @@ impl FromRimu for PlanAction {
                                 _ => {
                                     return Err(IntoPlanActionError::AfterItemNotAString {
                                         item_span: ispan,
-                                    })
+                                    });
                                 }
                             }
                         }
@@ -171,8 +186,9 @@ impl FromRimu for PlanAction {
 #[derive(Debug, Clone)]
 pub struct SetupFunction(pub Function);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error, Display)]
 pub enum IntoSetupFunctionError {
+    /// Expected a function for "setup"
     NotAFunction,
 }
 
@@ -196,13 +212,19 @@ pub struct Plan {
     pub setup: Spanned<SetupFunction>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error, Display)]
 pub enum IntoPlanError {
+    /// Expected an object for plan
     NotAnObject,
+    /// Invalid plan name: {0:?}
     Name(Spanned<IntoNameError>),
+    /// Invalid plan version: {0:?}
     Version(Spanned<IntoVersionError>),
+    /// Invalid plan params: {0:?}
     Params(Spanned<ParamTypesFromRimuError>),
+    /// Missing property: "setup"
     SetupMissing,
+    /// "setup" is not a function: {0:?}
     SetupNotAFunction(Spanned<IntoSetupFunctionError>),
 }
 

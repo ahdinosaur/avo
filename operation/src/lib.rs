@@ -2,30 +2,31 @@
 //! - Then section operations into temporal epochs
 //! - Then group operations of same kind and epoch into single operation.
 
-use std::collections::{HashMap, HashSet, VecDeque};
-
 use async_trait::async_trait;
 use avo_params::{ParamField, ParamType, ParamTypes};
+use displaydoc::Display;
 use indexmap::indexmap;
 use rimu::{SourceId, Span, Spanned};
-use serde::{de::DeserializeOwned, Deserialize};
+use serde::{Deserialize, de::DeserializeOwned};
+use std::collections::{HashMap, HashSet, VecDeque};
+use thiserror::Error;
 
-#[derive(Debug)]
+#[derive(Debug, Error, Display)]
 pub enum ApplyError {
-    Epoch(EpochError),
-    OperationGroupApply(OperationGroupApplyError),
+    /// Failed to compute epochs
+    Epoch(#[from] EpochError),
+    /// Failed to apply grouped operations
+    OperationGroupApply(#[from] OperationGroupApplyError),
 }
 
+/// Apply a fully planned operation tree.
 pub async fn apply(operation: OperationTree) -> Result<OperationEpochsGrouped, ApplyError> {
     println!("Apply ---");
-    let epochs = operation.into_epochs().map_err(ApplyError::Epoch)?;
+    let epochs = operation.into_epochs()?;
     println!("Epochs: {:?}", epochs);
     let epochs_grouped = epochs.group();
     println!("Epoch grouped: {:?}", epochs_grouped);
-    epochs_grouped
-        .apply_all()
-        .await
-        .map_err(ApplyError::OperationGroupApply)?;
+    epochs_grouped.apply_all().await?;
     Ok(epochs_grouped)
 }
 
@@ -130,19 +131,15 @@ impl OperationTrait for PackageOperation {
         Some(Spanned::new(
             ParamTypes::Union(vec![
                 indexmap! {
-                    "package".to_string() =>
-                        Spanned::new(ParamField::new(ParamType::String), span.clone())
+                    "package".to_string() => Spanned::new(ParamField::new(ParamType::String), span.clone())
                 },
                 indexmap! {
-                    "packages".to_string() =>
-                        Spanned::new(
-                            ParamField::new(
-                                ParamType::List {
-                                    item: Box::new(Spanned::new(ParamType::String, span.clone())),
-                                },
-                            ),
-                            span.clone(),
-                        ),
+                    "packages".to_string() => Spanned::new(
+                        ParamField::new(ParamType::List {
+                            item: Box::new(Spanned::new(ParamType::String, span.clone())),
+                        }),
+                        span.clone(),
+                    )
                 },
             ]),
             span,
@@ -184,8 +181,9 @@ impl OperationGroupTrait for PackageOperationGroup {
 }
 
 /// Unified error for applying grouped operations.
-#[derive(Debug)]
+#[derive(Debug, Error, Display)]
 pub enum OperationGroupApplyError {
+    /// Package group apply failed
     Package(<PackageOperationGroup as OperationGroupTrait>::Error),
 }
 
@@ -230,11 +228,15 @@ pub enum OperationTree {
 }
 
 /// Errors computing epochs (e.g., dependency issues).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error, Display)]
 pub enum EpochError {
+    /// Duplicate id: {0}
     DuplicateId(String),
+    /// Unknown id referenced in 'before': {0}
     UnknownBeforeRef(String),
+    /// Unknown id referenced in 'after': {0}
     UnknownAfterRef(String),
+    /// Cycle detected in dependency graph (remaining nodes: {remaining})
     CycleDetected { remaining: usize },
 }
 
@@ -457,7 +459,7 @@ impl OperationTree {
 }
 
 impl OperationEpoch {
-    /// Step 4 (per-epoch): group operations by kind and reduce to grouped ops.
+    /// Group operations by kind within an epoch.
     pub fn group(self) -> OperationEpochGrouped {
         let grouped = group_by_kind(self.operations);
         OperationEpochGrouped {
@@ -467,7 +469,7 @@ impl OperationEpoch {
 }
 
 impl OperationEpocs {
-    /// Step 4 (all epochs): group by kind within each epoch.
+    /// Group operations by kind across all epochs.
     pub fn group(self) -> OperationEpochsGrouped {
         let grouped_epochs = self
             .0

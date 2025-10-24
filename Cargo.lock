@@ -88,19 +88,23 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "avo-params",
+ "displaydoc",
  "indexmap",
  "rimu",
  "serde",
+ "thiserror",
 ]
 
 [[package]]
 name = "avo-params"
 version = "0.1.0"
 dependencies = [
+ "displaydoc",
  "indexmap",
  "rimu",
  "rimu-interop",
  "serde",
+ "thiserror",
 ]
 
 [[package]]
@@ -110,8 +114,10 @@ dependencies = [
  "avo-operation",
  "avo-params",
  "avo-store",
+ "displaydoc",
  "rimu",
  "rimu-interop",
+ "thiserror",
  "url",
 ]
 
@@ -120,6 +126,8 @@ name = "avo-store"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "displaydoc",
+ "thiserror",
  "tokio",
 ]
 
@@ -708,8 +716,10 @@ dependencies = [
 name = "rimu-interop"
 version = "0.1.0"
 dependencies = [
+ "displaydoc",
  "rimu",
  "serde",
+ "thiserror",
 ]
 
 [[package]]

@@ -1,6 +1,6 @@
-use std::path::PathBuf;
 use avo_store::StoreItemId;
 use rimu::SourceId;
+use std::path::PathBuf;
 use url::Url;
 
 #[derive(Debug, Clone)]

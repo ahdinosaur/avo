@@ -1,7 +1,7 @@
 use avo::{
     create_store,
     operation::apply,
-    plan::{plan, PlanId},
+    plan::{PlanId, plan},
 };
 use avo_params::ParamValues;
 use rimu::SourceId;

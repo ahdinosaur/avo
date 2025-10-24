@@ -4,5 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+displaydoc.workspace = true
 rimu.workspace = true
 serde.workspace = true
+thiserror.workspace = true

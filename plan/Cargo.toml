@@ -7,6 +7,8 @@ edition = "2024"
 avo-params = { path = "../params", version = "0.1" }
 avo-operation = { path = "../operation", version = "0.1" }
 avo-store = { path = "../store", version = "0.1" }
+displaydoc.workspace = true
 rimu.workspace = true
 rimu-interop = { path = "../rimu-interop", version = "0.1" }
+thiserror.workspace = true
 url.workspace = true
