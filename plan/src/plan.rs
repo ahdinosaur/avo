@@ -96,8 +96,8 @@ impl FromRimu for PlanAction {
 
         let module = match object.swap_remove("module") {
             Some(sp) => {
-                let (val, span) = sp.clone().take();
-                match val {
+                let (value, span) = sp.clone().take();
+                match value {
                     Value::String(s) => Spanned::new(s, span),
                     _ => {
                         return Err(IntoPlanActionError::ModuleNotAString { span });
@@ -110,8 +110,8 @@ impl FromRimu for PlanAction {
         let id = object
             .swap_remove("id")
             .map(|sp| {
-                let (val, span) = sp.clone().take();
-                match val {
+                let (value, span) = sp.clone().take();
+                match value {
                     Value::String(s) => Ok(Spanned::new(s, span)),
                     _ => Err(IntoPlanActionError::IdNotAString { span }),
                 }
@@ -125,18 +125,18 @@ impl FromRimu for PlanAction {
 
         let before = match object.swap_remove("before") {
             None => Vec::new(),
-            Some(sp) => {
-                let (val, span) = sp.clone().take();
-                match val {
+            Some(value) => {
+                let (value, span) = value.clone().take();
+                match value {
                     Value::List(items) => {
                         let mut out = Vec::with_capacity(items.len());
                         for item in items {
-                            let (ival, ispan) = item.clone().take();
-                            match ival {
-                                Value::String(s) => out.push(Spanned::new(s, ispan)),
+                            let (item_value, item_span) = item.clone().take();
+                            match item_value {
+                                Value::String(s) => out.push(Spanned::new(s, item_span)),
                                 _ => {
                                     return Err(IntoPlanActionError::BeforeItemNotAString {
-                                        item_span: ispan,
+                                        item_span,
                                     });
                                 }
                             }
@@ -150,18 +150,18 @@ impl FromRimu for PlanAction {
 
         let after = match object.swap_remove("after") {
             None => Vec::new(),
-            Some(sp) => {
-                let (val, span) = sp.clone().take();
-                match val {
+            Some(value) => {
+                let (value, span) = value.clone().take();
+                match value {
                     Value::List(items) => {
                         let mut out = Vec::with_capacity(items.len());
                         for item in items {
-                            let (ival, ispan) = item.clone().take();
-                            match ival {
-                                Value::String(s) => out.push(Spanned::new(s, ispan)),
+                            let (item_value, item_span) = item.clone().take();
+                            match item_value {
+                                Value::String(s) => out.push(Spanned::new(s, item_span)),
                                 _ => {
                                     return Err(IntoPlanActionError::AfterItemNotAString {
-                                        item_span: ispan,
+                                        item_span,
                                     });
                                 }
                             }

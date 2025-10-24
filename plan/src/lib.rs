@@ -82,7 +82,7 @@ async fn plan_recursive(
 
     let code = String::from_utf8(bytes)?;
 
-    let plan = parse(&code, plan_id)?;
+    let plan = parse(&code, &plan_id)?;
     let Plan {
         name: _,
         version: _,
@@ -95,7 +95,7 @@ async fn plan_recursive(
 
     let mut operations = Vec::with_capacity(plan_actions.len());
     for plan_action in plan_actions {
-        let op_tree = Box::pin(plan_item_to_operation(plan_action, store)).await?;
+        let op_tree = Box::pin(plan_item_to_operation(plan_action, &plan_id, store)).await?;
         operations.push(op_tree);
     }
 
@@ -118,6 +118,7 @@ pub enum FromPlanItemToOperationError {
 
 async fn plan_item_to_operation(
     plan_action: Spanned<PlanAction>,
+    current_plan_id: &PlanId,
     store: &mut Store,
 ) -> Result<OperationTree, FromPlanItemToOperationError> {
     let (plan_action, _plan_action_span) = plan_action.take();
@@ -169,7 +170,7 @@ async fn plan_item_to_operation(
         })
     } else {
         let path = PathBuf::from(module.inner());
-        let plan_id = PlanId::Path(path);
+        let plan_id = current_plan_id.join(path);
         let children = plan_recursive(plan_id, param_values.as_ref(), store)
             .await
             .map_err(Box::new)?;

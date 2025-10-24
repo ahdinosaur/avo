@@ -7,8 +7,8 @@ use rimu::Spanned;
 use thiserror::Error;
 
 use crate::{
-    FromRimu, PlanId,
     plan::{IntoPlanError, Plan},
+    FromRimu, PlanId,
 };
 
 #[derive(Debug, Error, Display)]
@@ -23,8 +23,8 @@ pub enum ParseError {
     IntoPlan(Box<Spanned<IntoPlanError>>),
 }
 
-pub fn parse(code: &str, block_id: PlanId) -> Result<Spanned<Plan>, ParseError> {
-    let source_id = block_id.into();
+pub fn parse(code: &str, plan_id: &PlanId) -> Result<Spanned<Plan>, ParseError> {
+    let source_id = plan_id.clone().into();
     let (ast, errors) = rimu::parse(code, source_id);
     if !errors.is_empty() {
         return Err(ParseError::RimuParse(errors));
