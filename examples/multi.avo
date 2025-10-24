@@ -1,0 +1,10 @@
+name: "multi"
+version: "0.1.0"
+
+setup: () =>
+  - module: "@core/pkg"
+    params:
+      packages: ["less"]
+  - module: "./simple.avo"
+    params:
+      whatever: true

@@ -1,0 +1,18 @@
+name: "simple"
+version: "0.1.0"
+
+params:
+  whatever:
+    type: "boolean"
+
+setup: (params) =>
+  - module: "@core/pkg"
+    id: "install-nvim"
+    params:
+      packages: ["nvim"]
+  - module: "@core/pkg"
+    id: "install-curl"
+    before:
+      - "install-nvim"
+    params:
+      package: "curl"

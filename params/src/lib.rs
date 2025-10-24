@@ -473,14 +473,22 @@ pub fn validate(
     param_types: Option<&Spanned<ParamTypes>>,
     param_values: Option<&Spanned<ParamValues>>,
 ) -> Result<(), ParamsValidationError> {
-    let Some(param_types) = param_types else {
-        return Err(ParamsValidationError::TypesWithoutValues);
+    let (param_types, param_values) = match (param_types, param_values) {
+        (Some(param_types), Some(param_values)) => (param_types, param_values),
+        (Some(_), None) => {
+            return Err(ParamsValidationError::TypesWithoutValues);
+        }
+        (None, Some(_)) => {
+            return Err(ParamsValidationError::ValuesWithoutTypes);
+        }
+        (None, None) => {
+            return Ok(());
+        }
     };
-    let Some(param_values) = param_values else {
-        return Err(ParamsValidationError::ValuesWithoutTypes);
-    };
+
     let param_types = param_types.inner();
     let param_values = param_values.inner();
+
     match param_types {
         ParamTypes::Struct(map) => {
             validate_struct(map, param_values).map_err(Box::new)?;
