@@ -69,14 +69,28 @@ name = "avo"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "avo-operation",
  "avo-params",
+ "avo-plan",
+ "avo-store",
+ "avo-system",
  "directories",
  "indexmap",
  "rimu",
  "rimu-interop",
  "serde",
  "tokio",
- "url",
+]
+
+[[package]]
+name = "avo-operation"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "avo-params",
+ "indexmap",
+ "rimu",
+ "serde",
 ]
 
 [[package]]
@@ -88,6 +102,30 @@ dependencies = [
  "rimu-interop",
  "serde",
 ]
+
+[[package]]
+name = "avo-plan"
+version = "0.1.0"
+dependencies = [
+ "avo-operation",
+ "avo-params",
+ "avo-store",
+ "rimu",
+ "rimu-interop",
+ "url",
+]
+
+[[package]]
+name = "avo-store"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "tokio",
+]
+
+[[package]]
+name = "avo-system"
+version = "0.1.0"
 
 [[package]]
 name = "bitflags"

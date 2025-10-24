@@ -1,0 +1,11 @@
+[package]
+name = "avo-operation"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+avo-params = { path = "../params", version = "0.1" }
+async-trait.workspace = true
+indexmap.workspace = true
+rimu.workspace = true
+serde.workspace = true

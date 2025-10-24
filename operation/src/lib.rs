@@ -10,6 +10,25 @@ use indexmap::indexmap;
 use rimu::{SourceId, Span, Spanned};
 use serde::{de::DeserializeOwned, Deserialize};
 
+#[derive(Debug)]
+pub enum ApplyError {
+    Epoch(EpochError),
+    OperationGroupApply(OperationGroupApplyError),
+}
+
+pub async fn apply(operation: OperationTree) -> Result<OperationEpochsGrouped, ApplyError> {
+    println!("Apply ---");
+    let epochs = operation.into_epochs().map_err(ApplyError::Epoch)?;
+    println!("Epochs: {:?}", epochs);
+    let epochs_grouped = epochs.group();
+    println!("Epoch grouped: {:?}", epochs_grouped);
+    epochs_grouped
+        .apply_all()
+        .await
+        .map_err(ApplyError::OperationGroupApply)?;
+    Ok(epochs_grouped)
+}
+
 /// A single operation type should define:
 /// - what "kind" it is
 /// - how to group many single operations into a grouped operation
