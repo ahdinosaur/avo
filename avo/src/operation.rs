@@ -5,12 +5,21 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use async_trait::async_trait;
+use avo_params::{ParamField, ParamType, ParamTypes};
+use indexmap::indexmap;
+use rimu::{SourceId, Span, Spanned};
+use serde::{de::DeserializeOwned, Deserialize};
 
 /// A single operation type should define:
 /// - what "kind" it is
 /// - how to group many single operations into a grouped operation
 pub trait OperationTrait: Into<Operation> {
     fn kind() -> OperationKind;
+
+    fn param_types() -> Option<Spanned<ParamTypes>>;
+
+    type Params: DeserializeOwned;
+    fn new(params: Self::Params) -> Self;
 
     type Group: OperationGroupTrait;
     fn group(ops: impl IntoIterator<Item = Self>) -> Self::Group;
@@ -68,11 +77,6 @@ pub fn group_by_kind(
 pub struct PackageOperation {
     packages: Vec<String>,
 }
-impl PackageOperation {
-    pub fn new(packages: Vec<String>) -> Self {
-        Self { packages }
-    }
-}
 impl From<PackageOperation> for Operation {
     fn from(value: PackageOperation) -> Self {
         Operation::Package(value)
@@ -90,9 +94,50 @@ impl From<PackageOperationGroup> for OperationGroup {
     }
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum PackageParams {
+    Package { package: String },
+    Packages { packages: Vec<String> },
+}
+
 impl OperationTrait for PackageOperation {
     fn kind() -> OperationKind {
         OperationKind::Package
+    }
+
+    fn param_types() -> Option<Spanned<ParamTypes>> {
+        let span = Span::new(SourceId::empty(), 0, 0);
+        Some(Spanned::new(
+            ParamTypes::Union(vec![
+                indexmap! {
+                    "package".to_string() =>
+                        Spanned::new(ParamField::new(ParamType::String), span.clone())
+                },
+                indexmap! {
+                    "packages".to_string() =>
+                        Spanned::new(
+                            ParamField::new(
+                                ParamType::List {
+                                    item: Box::new(Spanned::new(ParamType::String, span.clone())),
+                                },
+                            ),
+                            span.clone(),
+                        ),
+                },
+            ]),
+            span,
+        ))
+    }
+
+    type Params = PackageParams;
+    fn new(params: Self::Params) -> Self {
+        match params {
+            PackageParams::Package { package } => Self {
+                packages: vec![package],
+            },
+            PackageParams::Packages { packages } => Self { packages },
+        }
     }
 
     type Group = PackageOperationGroup;

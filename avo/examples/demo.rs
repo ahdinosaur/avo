@@ -1,15 +1,20 @@
-use avo::{apply, params::ParamValues, parser::PlanId, plan, FromRimu};
-use indexmap::IndexMap;
+use avo::{apply, parser::PlanId, plan};
+use avo_params::ParamValues;
+use indexmap::indexmap;
 use rimu::{SourceId, Span, Spanned, Value};
+use rimu_interop::FromRimu;
 use std::env;
 
 #[tokio::main]
 async fn main() {
     let path = env::current_dir().expect("Failed to get env::current_dir()");
     let plan_id = PlanId::Path(path.join("examples/demo.avo"));
+    let value_span = Span::new(SourceId::empty(), 0, 0);
     let params = ParamValues::from_rimu_spanned(Spanned::new(
-        Value::Object(IndexMap::new()),
-        Span::new(SourceId::empty(), 0, 0),
+        Value::Object(indexmap! {
+            "whatever".into() => Spanned::new(Value::Boolean(true), value_span.clone()),
+        }),
+        value_span,
     ))
     .expect("Failed to create params");
 

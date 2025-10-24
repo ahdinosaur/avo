@@ -1,15 +1,10 @@
 [package]
-name = "avo"
+name = "avo-params"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-avo-params = { path = "../params", version = "0.1" }
 rimu-interop = { path = "../rimu-interop", version = "0.1" }
-async-trait.workspace = true
-directories = "6.0.0"
 indexmap.workspace = true
 rimu.workspace = true
 serde.workspace = true
-tokio.workspace = true
-url.workspace = true
