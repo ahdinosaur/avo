@@ -1,6 +1,6 @@
 use avo_params::ParamValues;
 use displaydoc::Display;
-use rimu::{Spanned, Value, call};
+use rimu::{call, Spanned, Value};
 use rimu_interop::FromRimu;
 use thiserror::Error;
 
@@ -18,12 +18,18 @@ pub enum EvalError {
 
 pub(crate) fn evaluate(
     setup: Spanned<SetupFunction>,
-    params: Spanned<ParamValues>,
+    params: Option<Spanned<ParamValues>>,
 ) -> Result<Vec<Spanned<PlanAction>>, EvalError> {
     let (setup, setup_span) = setup.take();
-    let (params, params_span) = params.take();
 
-    let args = vec![Spanned::new(params.into_rimu(), params_span)];
+    let args = match params {
+        None => vec![],
+        Some(params) => {
+            let (params, params_span) = params.take();
+            vec![Spanned::new(params.into_rimu(), params_span)]
+        }
+    };
+
     let result =
         call(setup_span, setup.0, &args).map_err(|error| EvalError::Call(Box::new(error)))?;
     let (result, _result_span) = result.take();

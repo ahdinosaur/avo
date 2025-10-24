@@ -2,9 +2,9 @@
 
 use displaydoc::Display;
 use indexmap::IndexMap;
-use rimu::{SerdeValue, SerdeValueError, SourceId, Span, Spanned, Value, from_serde_value};
-use rimu_interop::{FromRimu, ToRimuError, to_rimu};
-use serde::{Serialize, de::DeserializeOwned};
+use rimu::{from_serde_value, SerdeValue, SerdeValueError, SourceId, Span, Spanned, Value};
+use rimu_interop::{to_rimu, FromRimu, ToRimuError};
+use serde::{de::DeserializeOwned, Serialize};
 use thiserror::Error;
 
 #[derive(Debug, Clone)]
@@ -47,7 +47,7 @@ pub enum ParamTypes {
     Union(Vec<IndexMap<String, Spanned<ParamField>>>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ParamValues(IndexMap<String, Spanned<Value>>);
 
 #[derive(Debug, Clone, Error, Display)]
@@ -329,22 +329,28 @@ pub enum ParamValidationError {
         key: String,
         error: Box<ValidateValueError>,
     },
-    /// Parameter union did not match any case
-    UnionNoMatch {
-        case_errors: Vec<ParamValidationErrors>,
-    },
 }
 
 #[derive(Debug, Clone, Error, Display)]
-#[displaydoc("Parameter validation failed")]
-pub struct ParamValidationErrors {
-    pub errors: Vec<ParamValidationError>,
+#[displaydoc("Parameters struct did not match all fields")]
+pub struct ParamsStructValidationError {
+    errors: Vec<ParamValidationError>,
 }
 
-impl ParamValidationErrors {
-    pub fn is_empty(&self) -> bool {
-        self.errors.is_empty()
-    }
+#[derive(Debug, Clone, Error, Display)]
+pub enum ParamsValidationError {
+    /// Parameter values without parameter types
+    ValuesWithoutTypes,
+    /// Parameter types without parameter values
+    TypesWithoutValues,
+    /// Parameter struct did not match all fields
+    Struct(#[from] Box<ParamsStructValidationError>),
+    /// Parameter union did not match any case
+    Union {
+        case_errors: Vec<ParamsStructValidationError>,
+    },
+    /// Parameter union type is empty
+    EmptyUnion,
 }
 
 fn mismatch(typ: &Spanned<ParamType>, value: &Spanned<Value>) -> ValidateValueError {
@@ -416,7 +422,7 @@ fn validate_type(
 fn validate_struct(
     fields: &IndexMap<String, Spanned<ParamField>>,
     values: &ParamValues,
-) -> Result<(), ParamValidationErrors> {
+) -> Result<(), ParamsStructValidationError> {
     let mut errors: Vec<ParamValidationError> = Vec::new();
 
     // Requiredness and per-field validation.
@@ -457,46 +463,45 @@ fn validate_struct(
     if errors.is_empty() {
         Ok(())
     } else {
-        Err(ParamValidationErrors { errors })
+        Err(ParamsStructValidationError { errors })
     }
 }
 
 // For Struct: validate all fields.
 // For Union: succeed if any one case validates; otherwise return all case errors.
 pub fn validate(
-    param_types: &Option<Spanned<ParamTypes>>,
-    param_values: &Spanned<ParamValues>,
-) -> Result<(), ParamValidationErrors> {
+    param_types: Option<&Spanned<ParamTypes>>,
+    param_values: Option<&Spanned<ParamValues>>,
+) -> Result<(), ParamsValidationError> {
     let Some(param_types) = param_types else {
-        return Ok(());
+        return Err(ParamsValidationError::TypesWithoutValues);
+    };
+    let Some(param_values) = param_values else {
+        return Err(ParamsValidationError::ValuesWithoutTypes);
     };
     let param_types = param_types.inner();
     let param_values = param_values.inner();
     match param_types {
-        ParamTypes::Struct(map) => validate_struct(map, param_values),
+        ParamTypes::Struct(map) => {
+            validate_struct(map, param_values).map_err(Box::new)?;
+
+            Ok(())
+        }
         ParamTypes::Union(cases) => {
             if cases.is_empty() {
-                return Err(ParamValidationErrors {
-                    errors: vec![ParamValidationError::UnionNoMatch {
-                        case_errors: vec![],
-                    }],
-                });
+                return Err(ParamsValidationError::EmptyUnion);
             }
 
-            let mut all_case_errors: Vec<ParamValidationErrors> = Vec::with_capacity(cases.len());
+            let mut case_errors: Vec<ParamsStructValidationError> = Vec::with_capacity(cases.len());
 
             for case in cases {
                 match validate_struct(case, param_values) {
                     Ok(()) => return Ok(()),
-                    Err(errs) => all_case_errors.push(errs),
+                    Err(error) => case_errors.push(error),
                 }
             }
 
-            Err(ParamValidationErrors {
-                errors: vec![ParamValidationError::UnionNoMatch {
-                    case_errors: all_case_errors,
-                }],
-            })
+            Err(ParamsValidationError::Union { case_errors })
         }
     }
 }
