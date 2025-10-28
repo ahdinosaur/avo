@@ -7,7 +7,7 @@ use rimu::Spanned;
 use thiserror::Error;
 
 use crate::{
-    plan::{IntoPlanError, Plan},
+    plan::{Plan, PlanFromRimuError},
     FromRimu, PlanId,
 };
 
@@ -18,9 +18,9 @@ pub enum ParseError {
     /// No code found in source
     NoCode,
     /// Evaluating Rimu AST failed
-    Eval(Box<rimu::EvalError>),
+    Eval(#[from] Box<rimu::EvalError>),
     /// Failed to convert Rimu value into Plan
-    IntoPlan(Box<Spanned<IntoPlanError>>),
+    PlanFromRimu(Box<Spanned<PlanFromRimuError>>),
 }
 
 pub fn parse(code: &str, plan_id: &PlanId) -> Result<Spanned<Plan>, ParseError> {
@@ -34,6 +34,8 @@ pub fn parse(code: &str, plan_id: &PlanId) -> Result<Spanned<Plan>, ParseError> 
     };
 
     let env = Rc::new(RefCell::new(rimu::Environment::new()));
-    let value = rimu::evaluate(&ast, env).map_err(|error| ParseError::Eval(Box::new(error)))?;
-    Plan::from_rimu_spanned(value).map_err(|error| ParseError::IntoPlan(Box::new(error)))
+    let value = rimu::evaluate(&ast, env).map_err(Box::new)?;
+    let plan = Plan::from_rimu_spanned(value)
+        .map_err(|error| ParseError::PlanFromRimu(Box::new(error)))?;
+    Ok(plan)
 }

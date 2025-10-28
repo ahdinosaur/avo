@@ -53,9 +53,9 @@ pub struct ParamValues(IndexMap<String, Spanned<Value>>);
 #[derive(Debug, Clone, Error, Display)]
 pub enum ParamValuesFromTypeError {
     /// Failed to convert serializable value to Rimu
-    ToRimu(#[source] ToRimuError),
+    ToRimu(#[from] ToRimuError),
     /// Failed to convert Rimu value into parameter values
-    FromRimu(#[source] ParamValuesFromRimuError),
+    FromRimu(#[from] ParamValuesFromRimuError),
 }
 
 impl ParamValues {
@@ -66,9 +66,10 @@ impl ParamValues {
     where
         T: Serialize,
     {
-        let rimu_value = to_rimu(value, source_id).map_err(ParamValuesFromTypeError::ToRimu)?;
-        ParamValues::from_rimu_spanned(rimu_value)
-            .map_err(|error| ParamValuesFromTypeError::FromRimu(error.into_inner()))
+        let rimu_value = to_rimu(value, source_id)?;
+        let param_values =
+            ParamValues::from_rimu_spanned(rimu_value).map_err(Spanned::into_inner)?;
+        Ok(param_values)
     }
 }
 
@@ -181,7 +182,7 @@ pub enum ParamFieldFromRimuError {
     /// The "optional" property must be a boolean
     OptionalNotABoolean { span: Span },
     /// Invalid field type: {0:?}
-    FieldType(#[source] ParamTypeFromRimuError),
+    FieldType(#[from] ParamTypeFromRimuError),
 }
 
 impl FromRimu for ParamField {
@@ -204,8 +205,7 @@ impl FromRimu for ParamField {
             false
         };
 
-        let typ = ParamType::from_rimu(Value::Object(object))
-            .map_err(ParamFieldFromRimuError::FieldType)?;
+        let typ = ParamType::from_rimu(Value::Object(object))?;
         Ok(ParamField { typ, optional })
     }
 }
