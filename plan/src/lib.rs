@@ -12,7 +12,7 @@ mod core;
 mod eval;
 mod id;
 mod load;
-mod plan;
+mod model;
 
 use crate::core::{core_module, is_core_module};
 pub use crate::id::PlanId;
@@ -20,7 +20,7 @@ pub use crate::id::PlanId;
 use crate::{
     eval::{evaluate, EvalError},
     load::{load, LoadError},
-    plan::{Plan, PlanAction},
+    model::{Plan, PlanAction},
 };
 
 #[derive(Debug, Error, Display)]

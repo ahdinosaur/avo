@@ -8,7 +8,7 @@ use rimu_interop::FromRimu;
 use thiserror::Error;
 
 use crate::{
-    plan::{Plan, PlanFromRimuError},
+    model::{Plan, PlanFromRimuError},
     PlanId,
 };
 

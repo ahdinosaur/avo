@@ -4,7 +4,7 @@ use rimu::{call, Spanned, Value};
 use rimu_interop::FromRimu;
 use thiserror::Error;
 
-use crate::plan::{IntoPlanActionError, PlanAction, SetupFunction};
+use crate::model::{IntoPlanActionError, PlanAction, SetupFunction};
 
 #[derive(Debug, Error, Display)]
 pub enum EvalError {
