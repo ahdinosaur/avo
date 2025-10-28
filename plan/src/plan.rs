@@ -58,12 +58,6 @@ pub struct PlanAction {
     pub after: Vec<Spanned<String>>,
 }
 
-impl PlanAction {
-    pub fn is_core_module(module: &Spanned<String>) -> Option<&str> {
-        module.inner().strip_prefix("@core/")
-    }
-}
-
 #[derive(Debug, Clone, Error, Display)]
 pub enum IntoPlanActionError {
     /// Expected an object for plan action
