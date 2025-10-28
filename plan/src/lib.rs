@@ -8,19 +8,18 @@ use avo_store::{Store, StoreError, StoreItemId};
 use displaydoc::Display;
 use rimu::SerdeValueError;
 use rimu::Spanned;
-use rimu_interop::FromRimu;
 use thiserror::Error;
 
 mod eval;
 mod id;
-mod parse;
+mod load;
 mod plan;
 
 pub use crate::id::PlanId;
 
 use crate::{
     eval::{evaluate, EvalError},
-    parse::{parse, ParseError},
+    load::{load, LoadError},
     plan::{Plan, PlanAction},
 };
 
@@ -34,8 +33,8 @@ pub enum PlanError {
     },
     /// Failed to decode plan source as UTF-8
     InvalidUtf8(#[from] FromUtf8Error),
-    /// Failed to parse plan source
-    Parse(#[from] ParseError),
+    /// Failed to load plan source
+    Load(#[from] LoadError),
     /// Parameter validation failed
     Validate(#[from] ParamsValidationError),
     /// Failed to evaluate plan setup
@@ -44,8 +43,7 @@ pub enum PlanError {
     PlanItemToOperation(#[from] FromPlanItemToOperationError),
 }
 
-/// Top-level planning routine: read & parse a plan, validate parameters and
-/// assemble `OperationTree`.
+/// Top-level planning routine: load a plan, validate parameters, and evaluate to `OperationTree`.
 pub async fn plan(
     plan_id: PlanId,
     param_values: Option<Spanned<ParamValues>>,
@@ -82,7 +80,7 @@ async fn plan_recursive(
 
     let code = String::from_utf8(bytes)?;
 
-    let plan = parse(&code, &plan_id)?;
+    let plan = load(&code, &plan_id)?;
     let Plan {
         name: _,
         version: _,

@@ -9,7 +9,7 @@ use crate::plan::{IntoPlanActionError, PlanAction, SetupFunction};
 #[derive(Debug, Error, Display)]
 pub enum EvalError {
     /// Calling setup function failed
-    Call(Box<rimu::EvalError>),
+    RimuCall(#[from] Box<rimu::EvalError>),
     /// Setup returned a non-list value
     ReturnedNotList,
     /// Invalid PlanAction value
@@ -30,8 +30,7 @@ pub(crate) fn evaluate(
         }
     };
 
-    let result =
-        call(setup_span, setup.0, &args).map_err(|error| EvalError::Call(Box::new(error)))?;
+    let result = call(setup_span, setup.0, &args).map_err(Box::new)?;
     let (result, _result_span) = result.take();
 
     let Value::List(items) = result else {
