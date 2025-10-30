@@ -1,15 +1,15 @@
 use avo_params::ParamValues;
 use displaydoc::Display;
-use rimu::{Spanned, Value, call};
+use rimu::{call, Spanned, Value};
 use rimu_interop::FromRimu;
 use thiserror::Error;
 
-use crate::plan::{IntoPlanActionError, PlanAction, SetupFunction};
+use crate::model::{IntoPlanActionError, PlanAction, SetupFunction};
 
 #[derive(Debug, Error, Display)]
 pub enum EvalError {
     /// Calling setup function failed
-    Call(Box<rimu::EvalError>),
+    RimuCall(#[from] Box<rimu::EvalError>),
     /// Setup returned a non-list value
     ReturnedNotList,
     /// Invalid PlanAction value
@@ -18,14 +18,19 @@ pub enum EvalError {
 
 pub(crate) fn evaluate(
     setup: Spanned<SetupFunction>,
-    params: Spanned<ParamValues>,
+    params: Option<Spanned<ParamValues>>,
 ) -> Result<Vec<Spanned<PlanAction>>, EvalError> {
     let (setup, setup_span) = setup.take();
-    let (params, params_span) = params.take();
 
-    let args = vec![Spanned::new(params.into_rimu(), params_span)];
-    let result =
-        call(setup_span, setup.0, &args).map_err(|error| EvalError::Call(Box::new(error)))?;
+    let args = match params {
+        None => vec![],
+        Some(params) => {
+            let (params, params_span) = params.take();
+            vec![Spanned::new(params.into_rimu(), params_span)]
+        }
+    };
+
+    let result = call(setup_span, setup.0, &args).map_err(Box::new)?;
     let (result, _result_span) = result.take();
 
     let Value::List(items) = result else {

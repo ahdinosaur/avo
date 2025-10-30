@@ -1,27 +1,26 @@
 use std::{path::PathBuf, string::FromUtf8Error};
 
-use avo_operation::{
-    Operation, OperationId, OperationTrait, OperationTree, PackageOperation, PackageParams,
-};
-use avo_params::{ParamValidationErrors, ParamValues, validate};
+use avo_operation::{OperationId, OperationTree};
+use avo_params::{validate, ParamValues, ParamsValidationError};
 use avo_store::{Store, StoreError, StoreItemId};
 use displaydoc::Display;
 use rimu::SerdeValueError;
 use rimu::Spanned;
-use rimu_interop::FromRimu;
 use thiserror::Error;
 
+mod core;
 mod eval;
 mod id;
-mod parse;
-mod plan;
+mod load;
+mod model;
 
+use crate::core::{core_module, is_core_module};
 pub use crate::id::PlanId;
 
 use crate::{
-    eval::{EvalError, evaluate},
-    parse::{ParseError, parse},
-    plan::{Plan, PlanAction},
+    eval::{evaluate, EvalError},
+    load::{load, LoadError},
+    model::{Plan, PlanAction},
 };
 
 #[derive(Debug, Error, Display)]
@@ -34,26 +33,25 @@ pub enum PlanError {
     },
     /// Failed to decode plan source as UTF-8
     InvalidUtf8(#[from] FromUtf8Error),
-    /// Failed to parse plan source
-    Parse(#[from] ParseError),
+    /// Failed to load plan source
+    Load(#[from] LoadError),
     /// Parameter validation failed
-    Validate(#[from] ParamValidationErrors),
+    Validate(#[from] ParamsValidationError),
     /// Failed to evaluate plan setup
     Eval(#[from] EvalError),
     /// Failed to convert plan item to operation
-    PlanItemToOperation(#[from] FromPlanItemToOperationError),
+    PlanActionToOperation(#[from] PlanActionToOperationError),
 }
 
-/// Top-level planning routine: read & parse a plan, validate parameters and
-/// assemble `OperationTree`.
+/// Top-level planning routine: load a plan, validate parameters, and evaluate to `OperationTree`.
 pub async fn plan(
     plan_id: PlanId,
-    params: Spanned<ParamValues>,
+    param_values: Option<Spanned<ParamValues>>,
     store: &mut Store,
 ) -> Result<OperationTree, PlanError> {
     println!("Plan ---");
 
-    let operations = plan_recursive(plan_id, params, store).await?;
+    let operations = plan_recursive(plan_id, param_values.as_ref(), store).await?;
     let operation = OperationTree::Branch {
         id: None,
         before: vec![],
@@ -67,7 +65,7 @@ pub async fn plan(
 
 async fn plan_recursive(
     plan_id: PlanId,
-    param_values: Spanned<ParamValues>,
+    param_values: Option<&Spanned<ParamValues>>,
     store: &mut Store,
 ) -> Result<Vec<OperationTree>, PlanError> {
     let store_item_id: StoreItemId = plan_id.clone().into();
@@ -82,7 +80,7 @@ async fn plan_recursive(
 
     let code = String::from_utf8(bytes)?;
 
-    let plan = parse(&code, plan_id)?;
+    let plan = load(&code, &plan_id)?;
     let Plan {
         name: _,
         version: _,
@@ -90,12 +88,12 @@ async fn plan_recursive(
         setup,
     } = plan.into_inner();
 
-    validate(&param_types, &param_values)?;
-    let plan_actions = evaluate(setup, param_values)?;
+    validate(param_types.as_ref(), param_values)?;
+    let plan_actions = evaluate(setup, param_values.cloned())?;
 
     let mut operations = Vec::with_capacity(plan_actions.len());
     for plan_action in plan_actions {
-        let op_tree = Box::pin(plan_item_to_operation(plan_action, store)).await?;
+        let op_tree = Box::pin(plan_action_to_operation(plan_action, &plan_id, store)).await?;
         operations.push(op_tree);
     }
 
@@ -103,11 +101,11 @@ async fn plan_recursive(
 }
 
 #[derive(Debug, Error, Display)]
-pub enum FromPlanItemToOperationError {
+pub enum PlanActionToOperationError {
     /// Missing required parameters in plan action
     MissingParams,
-    /// Parameter validation for operation failed
-    ParamValidation(#[from] ParamValidationErrors),
+    /// Parameters validation for operation failed
+    ParamsValidation(#[from] ParamsValidationError),
     /// Failed to convert parameter values to operation params
     SerdeValue(#[from] SerdeValueError),
     /// Unsupported core module id "{id}"
@@ -116,10 +114,11 @@ pub enum FromPlanItemToOperationError {
     PlanSubtree(#[from] Box<PlanError>),
 }
 
-async fn plan_item_to_operation(
+async fn plan_action_to_operation(
     plan_action: Spanned<PlanAction>,
+    current_plan_id: &PlanId,
     store: &mut Store,
-) -> Result<OperationTree, FromPlanItemToOperationError> {
+) -> Result<OperationTree, PlanActionToOperationError> {
     let (plan_action, _plan_action_span) = plan_action.take();
     let PlanAction {
         id,
@@ -130,7 +129,6 @@ async fn plan_item_to_operation(
     } = plan_action;
 
     let id = id.map(|id| OperationId::new(id.into_inner()));
-    let param_values = param_values.ok_or(FromPlanItemToOperationError::MissingParams)?;
     let before = before
         .into_iter()
         .map(|v| v.into_inner())
@@ -142,25 +140,8 @@ async fn plan_item_to_operation(
         .map(OperationId::new)
         .collect();
 
-    if let Some(core_module_id) = PlanAction::is_core_module(module) {
-        let operation = match core_module_id {
-            "pkg" => {
-                let param_types = PackageOperation::param_types();
-                validate(&param_types, &param_values)
-                    .map_err(FromPlanItemToOperationError::from)?;
-                let package_params: PackageParams = param_values
-                    .into_inner()
-                    .into_type()
-                    .map_err(FromPlanItemToOperationError::from)?;
-                Operation::Package(PackageOperation::new(package_params))
-            }
-            other => {
-                return Err(FromPlanItemToOperationError::UnsupportedCoreModuleId {
-                    id: other.to_string(),
-                });
-            }
-        };
-
+    if let Some(core_module_id) = is_core_module(module) {
+        let operation = core_module(core_module_id, param_values)?;
         Ok(OperationTree::Leaf {
             id,
             operation,
@@ -169,10 +150,10 @@ async fn plan_item_to_operation(
         })
     } else {
         let path = PathBuf::from(module.inner());
-        let plan_id = PlanId::Path(path);
-        let children = plan_recursive(plan_id, param_values, store)
+        let plan_id = current_plan_id.join(path);
+        let children = plan_recursive(plan_id, param_values.as_ref(), store)
             .await
-            .map_err(|e| FromPlanItemToOperationError::PlanSubtree(Box::new(e)))?;
+            .map_err(Box::new)?;
         Ok(OperationTree::Branch {
             id,
             children,

@@ -10,17 +10,17 @@ use thiserror::Error;
 pub struct Name(pub String);
 
 #[derive(Debug, Clone, Error, Display)]
-pub enum IntoNameError {
+pub enum NameFromRimuError {
     /// Expected a string for plan name
     NotAString,
 }
 
 impl FromRimu for Name {
-    type Error = IntoNameError;
+    type Error = NameFromRimuError;
 
     fn from_rimu(value: Value) -> Result<Self, Self::Error> {
         let Value::String(string) = value else {
-            return Err(IntoNameError::NotAString);
+            return Err(NameFromRimuError::NotAString);
         };
         Ok(Name(string))
     }
@@ -30,17 +30,17 @@ impl FromRimu for Name {
 pub struct Version(pub String);
 
 #[derive(Debug, Clone, Error, Display)]
-pub enum IntoVersionError {
+pub enum VersionFromRimuError {
     /// Expected a string for plan version
     NotAString,
 }
 
 impl FromRimu for Version {
-    type Error = IntoVersionError;
+    type Error = VersionFromRimuError;
 
     fn from_rimu(value: Value) -> Result<Self, Self::Error> {
         let Value::String(string) = value else {
-            return Err(IntoVersionError::NotAString);
+            return Err(VersionFromRimuError::NotAString);
         };
         Ok(Version(string))
     }
@@ -56,12 +56,6 @@ pub struct PlanAction {
     pub params: Option<Spanned<ParamValues>>,
     pub before: Vec<Spanned<String>>,
     pub after: Vec<Spanned<String>>,
-}
-
-impl PlanAction {
-    pub fn is_core_module(module: &Spanned<String>) -> Option<&str> {
-        module.inner().strip_prefix("@core/")
-    }
 }
 
 #[derive(Debug, Clone, Error, Display)]
@@ -96,8 +90,8 @@ impl FromRimu for PlanAction {
 
         let module = match object.swap_remove("module") {
             Some(sp) => {
-                let (val, span) = sp.clone().take();
-                match val {
+                let (value, span) = sp.clone().take();
+                match value {
                     Value::String(s) => Spanned::new(s, span),
                     _ => {
                         return Err(IntoPlanActionError::ModuleNotAString { span });
@@ -110,8 +104,8 @@ impl FromRimu for PlanAction {
         let id = object
             .swap_remove("id")
             .map(|sp| {
-                let (val, span) = sp.clone().take();
-                match val {
+                let (value, span) = sp.clone().take();
+                match value {
                     Value::String(s) => Ok(Spanned::new(s, span)),
                     _ => Err(IntoPlanActionError::IdNotAString { span }),
                 }
@@ -125,18 +119,18 @@ impl FromRimu for PlanAction {
 
         let before = match object.swap_remove("before") {
             None => Vec::new(),
-            Some(sp) => {
-                let (val, span) = sp.clone().take();
-                match val {
+            Some(value) => {
+                let (value, span) = value.clone().take();
+                match value {
                     Value::List(items) => {
                         let mut out = Vec::with_capacity(items.len());
                         for item in items {
-                            let (ival, ispan) = item.clone().take();
-                            match ival {
-                                Value::String(s) => out.push(Spanned::new(s, ispan)),
+                            let (item_value, item_span) = item.clone().take();
+                            match item_value {
+                                Value::String(s) => out.push(Spanned::new(s, item_span)),
                                 _ => {
                                     return Err(IntoPlanActionError::BeforeItemNotAString {
-                                        item_span: ispan,
+                                        item_span,
                                     });
                                 }
                             }
@@ -150,18 +144,18 @@ impl FromRimu for PlanAction {
 
         let after = match object.swap_remove("after") {
             None => Vec::new(),
-            Some(sp) => {
-                let (val, span) = sp.clone().take();
-                match val {
+            Some(value) => {
+                let (value, span) = value.clone().take();
+                match value {
                     Value::List(items) => {
                         let mut out = Vec::with_capacity(items.len());
                         for item in items {
-                            let (ival, ispan) = item.clone().take();
-                            match ival {
-                                Value::String(s) => out.push(Spanned::new(s, ispan)),
+                            let (item_value, item_span) = item.clone().take();
+                            match item_value {
+                                Value::String(s) => out.push(Spanned::new(s, item_span)),
                                 _ => {
                                     return Err(IntoPlanActionError::AfterItemNotAString {
-                                        item_span: ispan,
+                                        item_span,
                                     });
                                 }
                             }
@@ -187,17 +181,17 @@ impl FromRimu for PlanAction {
 pub struct SetupFunction(pub Function);
 
 #[derive(Debug, Clone, Error, Display)]
-pub enum IntoSetupFunctionError {
+pub enum SetupFunctionFromRimuError {
     /// Expected a function for "setup"
     NotAFunction,
 }
 
 impl FromRimu for SetupFunction {
-    type Error = IntoSetupFunctionError;
+    type Error = SetupFunctionFromRimuError;
 
     fn from_rimu(value: Value) -> Result<Self, Self::Error> {
         let Value::Function(func) = value else {
-            return Err(IntoSetupFunctionError::NotAFunction);
+            return Err(SetupFunctionFromRimuError::NotAFunction);
         };
         Ok(SetupFunction(func))
     }
@@ -213,49 +207,49 @@ pub struct Plan {
 }
 
 #[derive(Debug, Clone, Error, Display)]
-pub enum IntoPlanError {
+pub enum PlanFromRimuError {
     /// Expected an object for plan
     NotAnObject,
     /// Invalid plan name: {0:?}
-    Name(Spanned<IntoNameError>),
+    Name(Spanned<NameFromRimuError>),
     /// Invalid plan version: {0:?}
-    Version(Spanned<IntoVersionError>),
+    Version(Spanned<VersionFromRimuError>),
     /// Invalid plan params: {0:?}
     Params(Spanned<ParamTypesFromRimuError>),
     /// Missing property: "setup"
     SetupMissing,
     /// "setup" is not a function: {0:?}
-    SetupNotAFunction(Spanned<IntoSetupFunctionError>),
+    SetupNotAFunction(Spanned<SetupFunctionFromRimuError>),
 }
 
 impl FromRimu for Plan {
-    type Error = IntoPlanError;
+    type Error = PlanFromRimuError;
 
     fn from_rimu(value: Value) -> Result<Self, Self::Error> {
         let Value::Object(mut object) = value else {
-            return Err(IntoPlanError::NotAnObject);
+            return Err(PlanFromRimuError::NotAnObject);
         };
 
         let name = object
             .swap_remove("name")
-            .map(|name| Name::from_rimu_spanned(name).map_err(IntoPlanError::Name))
+            .map(|name| Name::from_rimu_spanned(name).map_err(PlanFromRimuError::Name))
             .transpose()?;
 
         let version = object
             .swap_remove("version")
-            .map(|v| Version::from_rimu_spanned(v).map_err(IntoPlanError::Version))
+            .map(|v| Version::from_rimu_spanned(v).map_err(PlanFromRimuError::Version))
             .transpose()?;
 
         let params = object
             .swap_remove("params")
-            .map(|params| ParamTypes::from_rimu_spanned(params).map_err(IntoPlanError::Params))
+            .map(|params| ParamTypes::from_rimu_spanned(params).map_err(PlanFromRimuError::Params))
             .transpose()?;
 
         let setup_sp = object
             .swap_remove("setup")
-            .ok_or(IntoPlanError::SetupMissing)?;
-        let setup =
-            SetupFunction::from_rimu_spanned(setup_sp).map_err(IntoPlanError::SetupNotAFunction)?;
+            .ok_or(PlanFromRimuError::SetupMissing)?;
+        let setup = SetupFunction::from_rimu_spanned(setup_sp)
+            .map_err(PlanFromRimuError::SetupNotAFunction)?;
 
         Ok(Plan {
             name,

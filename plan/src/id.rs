@@ -1,12 +1,30 @@
 use avo_store::StoreItemId;
 use rimu::SourceId;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use url::Url;
 
 #[derive(Debug, Clone)]
 pub enum PlanId {
     Path(PathBuf),
     Git(Url, PathBuf),
+}
+
+impl PlanId {
+    pub fn join<P: AsRef<Path>>(&self, path: P) -> PlanId {
+        match self {
+            PlanId::Path(current_path) => PlanId::Path(relative(current_path, path)),
+            PlanId::Git(url, current_path) => {
+                PlanId::Git(url.clone(), relative(current_path, path))
+            }
+        }
+    }
+}
+
+fn relative<P: AsRef<Path>>(current_path: &Path, next_path: P) -> PathBuf {
+    current_path
+        .parent()
+        .unwrap_or(&PathBuf::default())
+        .join(next_path)
 }
 
 impl From<PlanId> for StoreItemId {
