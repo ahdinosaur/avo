@@ -5,7 +5,6 @@ Develop your avo config on a virtual machine, before deploying to a physical mac
 - Create new machine with id
 - List machines by id
 - Start cached machine from id
--
 
 Machine configuration:
 
