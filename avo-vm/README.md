@@ -14,7 +14,6 @@ Machine configuration:
 
 Stack:
 
-- libvirt
+- qemu
 - virtiofsd
-- libvirt-gpu
-- mkisofs
+- virtio-gpu
