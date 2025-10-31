@@ -5,17 +5,17 @@ use std::process::Command;
 
 use bytesize::ByteSize;
 use clap::crate_name;
+use color_eyre::eyre::{bail, eyre, Context, OptionExt};
 use color_eyre::Result;
-use color_eyre::eyre::{Context, OptionExt, bail, eyre};
 use dir_lock::DirLock;
 use directories::ProjectDirs;
 use sysinfo::{ProcessRefreshKind, ProcessesToUpdate};
 use termion::{color, style};
 use tokio::task;
-use tracing::{Level, debug, info, instrument, trace, warn};
+use tracing::{debug, info, instrument, trace, warn, Level};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::prelude::*;
-use tracing_subscriber::{EnvFilter, fmt};
+use tracing_subscriber::{fmt, EnvFilter};
 use walkdir::WalkDir;
 
 pub static HEX_ALPHABET: [char; 16] = [
@@ -168,8 +168,8 @@ pub fn find_required_tools() -> Result<ExecutablePaths> {
         .wrap_err("Couldn't find qemu-system-x86_64 in PATH")?;
 
     // Find virtiofsd
-    let virtiofsd_path = which::which_in("virtiofsd", Some("/usr/lib:/usr/libexec"), "/")
-        .wrap_err("Couldn't find virtiofsd in /usr/lib or /usr/libexec")?;
+    let virtiofsd_path =
+        which::which_global("virtiofsd").wrap_err("Couldn't find virtiofsd in PATH")?;
 
     // Find virt-copy-out
     let virt_copy_out_path = which::which_global("virt-copy-out")
