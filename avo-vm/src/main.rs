@@ -4,7 +4,7 @@ use std::time::Duration;
 use std::{fs, process};
 
 use clap::{CommandFactory, Parser};
-use color_eyre::eyre::{Context, Result, bail};
+use color_eyre::eyre::{bail, Context, Result};
 use comfy_table::Table;
 use daemonize_me::Daemon;
 use dir_lock::DirLock;
@@ -24,12 +24,12 @@ use crate::cli::{
     CleanCommand, Command, ExecCommand, KsmCommand, OsTypeOrImagePath, PsCommand, RunCommand,
     StopCommand,
 };
-use crate::qemu::{QemuLaunchOpts, convert_ovmf_uefi_variables};
-use crate::ssh::{SshLaunchOpts, connect_ssh_for_command, ensure_ssh_key};
+use crate::qemu::{convert_ovmf_uefi_variables, QemuLaunchOpts};
+use crate::ssh::{connect_ssh_for_command, ensure_ssh_key, SshLaunchOpts};
 use crate::utils::get_live_cid_and_pids_for_vmid;
 use crate::utils::{
-    HEX_ALPHABET, VmexecDirs, check_ksm_active, create_free_cid, find_required_tools,
-    install_tracing, print_ksm_stats, reap_dead_run_dirs,
+    check_ksm_active, create_free_cid, find_required_tools, install_tracing, print_ksm_stats,
+    reap_dead_run_dirs, VmexecDirs, HEX_ALPHABET,
 };
 use crate::vm_images::VmImage;
 
@@ -289,7 +289,8 @@ fn run_command(run_args: RunCommand) -> Result<Option<u32>> {
     // We need a free CID for host-guest communication via vsock.
     let cid = create_free_cid(&dirs.runs_dir, &run_dir)?;
 
-    let ovmf_vars_system_path = Path::new("/usr/share/edk2/x64/OVMF_VARS.4m.fd");
+    // let ovmf_vars_system_path = Path::new("/usr/share/edk2/x64/OVMF_VARS.4m.fd");
+    let ovmf_vars_system_path = Path::new("/usr/share/OVMF/OVMF_VARS_4M.fd");
     let ovmf_vars =
         rt.block_on(async { convert_ovmf_uefi_variables(&run_dir, ovmf_vars_system_path).await })?;
 

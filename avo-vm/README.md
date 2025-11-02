@@ -14,8 +14,16 @@ Machine configuration:
   - Debian
   - Arch Linux
 
-Stack:
+## Dependencies
 
 - qemu
 - virtiofsd
-- virtio-gpu
+- virt-copy-out (in libguestfs)
+
+### Debian
+
+```
+sudo apt install qemu-system virtiofsd ovmf libguestfs-tools
+```
+
+If on Debian Bookworm, install `virtiofsd` with `cargo install`.
