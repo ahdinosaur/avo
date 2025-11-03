@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{env::Environment, http::HttpError, system::Arch};
+use crate::{context::Context, env::Environment, http::HttpError, system::Arch};
 
 #[derive(Error, Debug)]
 pub enum ImageError {
@@ -63,32 +63,18 @@ pub struct ImageListContent {
     images: ImageList,
 }
 
-#[derive(Debug)]
-pub struct ImageService {
-    env: Environment,
+pub async fn load_list() -> Result<ImageList, ImageError> {
+    let images_str = include_str!("../images.toml");
+    let images_cache: ImageListContent = toml::from_str(images_str)?;
+    Ok(images_cache.images)
 }
 
-impl ImageService {
-    pub fn new(env: Environment) -> Self {
-        Self { env }
-    }
+pub async fn fetch_image(mut ctx: Context, image_index: ImageIndex) -> Result<(), ImageError> {
+    let image_path = ctx.paths().images_dir().join(image_index.to_file_name());
 
-    pub async fn load_list() -> Result<ImageList, ImageError> {
-        let images_str = include_str!("../images.toml");
-        let images_cache: ImageListContent = toml::from_str(images_str)?;
-        Ok(images_cache.images)
-    }
+    ctx.http_client()
+        .download_file(image_index.image.to_url(), image_path)
+        .await?;
 
-    pub async fn fetch_image(
-        mut env: Environment,
-        image_index: ImageIndex,
-    ) -> Result<(), ImageError> {
-        let image_path = env.images_dir().join(image_index.to_file_name());
-
-        env.http_client()
-            .download_file(image_index.image.to_url(), image_path)
-            .await?;
-
-        Ok(())
-    }
+    Ok(())
 }

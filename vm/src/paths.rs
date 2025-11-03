@@ -1,32 +1,23 @@
 use std::path::{Path, PathBuf};
 
-use crate::http::HttpClient;
-
-#[derive(Debug, Clone, Clone)]
-pub struct Environment {
-    http_client: HttpClient,
+#[derive(Debug, Clone)]
+pub struct Paths {
     data_dir: PathBuf,
     cache_dir: PathBuf,
     runtime_dir: PathBuf,
 }
 
-impl Environment {
+impl Paths {
     pub fn new(
-        http_client: HttpClient,
         data_dir: impl Into<PathBuf>,
         cache_dir: impl Into<PathBuf>,
         runtime_dir: impl Into<PathBuf>,
     ) -> Self {
         Self {
-            http_client,
             data_dir: data_dir.into(),
             cache_dir: cache_dir.into(),
             runtime_dir: runtime_dir.into(),
         }
-    }
-
-    pub fn http_client(&mut self) -> &mut HttpClient {
-        &mut self.http_client
     }
 
     pub fn data_dir(&self) -> &Path {

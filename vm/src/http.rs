@@ -29,7 +29,7 @@ pub enum HttpError {
     Fs(#[from] FsError),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HttpClient {
     client: Client,
 }
