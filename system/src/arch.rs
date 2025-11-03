@@ -1,0 +1,41 @@
+use std::fmt::Display;
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum Arch {
+    X86_64,
+    Aarch64,
+}
+
+impl Display for Arch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Arch::X86_64 => write!(f, "x86-64"),
+            Arch::Aarch64 => write!(f, "aarch64"),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum Bitness {
+    X64,
+}
+
+impl Display for Bitness {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Bitness::X64 => write!(f, "64-bit"),
+        }
+    }
+}
+
+impl From<Arch> for Bitness {
+    fn from(value: Arch) -> Self {
+        use Bitness::*;
+        match value {
+            Arch::X86_64 => X64,
+            Arch::Aarch64 => X64,
+        }
+    }
+}

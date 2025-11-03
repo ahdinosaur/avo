@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use avo_machine::{Arch, Os};
+use avo_system::{Arch, Os};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -36,7 +36,6 @@ impl ImageIndex {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
 pub enum ImageRef {
     Qcow2 { url: String },
 }
