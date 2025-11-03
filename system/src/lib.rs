@@ -1,15 +1,5 @@
 #![allow(dead_code)]
 
-pub enum Os {
-    Linux(Linux),
-}
-
-pub enum Linux {
-    Ubuntu,
-    Debian,
-    Arch,
-}
-
 pub struct OsVersion(String);
 
 pub enum Bitness {

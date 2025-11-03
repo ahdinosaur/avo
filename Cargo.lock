@@ -123,6 +123,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "avo-machine"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "avo-operation"
 version = "0.1.0"
 dependencies = [
