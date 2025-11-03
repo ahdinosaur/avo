@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 use crate::fs::{self as fs, FsError};
 use reqwest::Client;
 use thiserror::Error;
@@ -6,6 +8,28 @@ use tokio_stream::StreamExt;
 
 const REQUEST_TIMEOUT_SEC: u64 = 10;
 
+#[derive(Error, Debug)]
+pub enum HttpError {
+    #[error("Failed to build HTTP client: {0}")]
+    BuildClient(#[source] reqwest::Error),
+
+    #[error("HTTP request error: {0}")]
+    Request(#[source] reqwest::Error),
+
+    #[error("HTTP stream error: {0}")]
+    Stream(#[source] reqwest::Error),
+
+    #[error("File write error for '{path}': {source}")]
+    Write {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+
+    #[error(transparent)]
+    Fs(#[from] FsError),
+}
+
+#[derive(Debug)]
 pub struct HttpClient {
     client: Client,
 }
@@ -36,8 +60,14 @@ impl HttpClient {
         Ok(size)
     }
 
-    pub async fn download_file(&self, url: &str, file_path: &str) -> Result<(), HttpError> {
-        let temp_file = format!("{file_path}.tmp");
+    pub async fn download_file<P: AsRef<Path>>(
+        &self,
+        url: &str,
+        file_path: P,
+    ) -> Result<(), HttpError> {
+        let file_path = file_path.as_ref();
+        let temp_file = file_path.join(".tmp");
+
         if fs::path_exists(&temp_file).await? {
             fs::remove_file(&temp_file).await?;
         }
@@ -88,25 +118,4 @@ impl HttpClient {
             .await
             .map_err(HttpError::Request)
     }
-}
-
-#[derive(Error, Debug)]
-pub enum HttpError {
-    #[error("Failed to build HTTP client: {0}")]
-    BuildClient(#[source] reqwest::Error),
-
-    #[error("HTTP request error: {0}")]
-    Request(#[source] reqwest::Error),
-
-    #[error("HTTP stream error: {0}")]
-    Stream(#[source] reqwest::Error),
-
-    #[error("File write error for '{path}': {source}")]
-    Write {
-        path: String,
-        source: std::io::Error,
-    },
-
-    #[error(transparent)]
-    Fs(#[from] FsError),
 }
