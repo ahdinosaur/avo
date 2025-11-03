@@ -127,6 +127,7 @@ name = "avo-machine"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -186,6 +187,7 @@ version = "0.1.0"
 name = "avo-vm"
 version = "0.1.0"
 dependencies = [
+ "avo-machine",
  "reqwest",
  "serde",
  "thiserror",

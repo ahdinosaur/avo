@@ -2,10 +2,11 @@
 
 use std::collections::HashMap;
 
+use avo_machine::{Arch, Os};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{context::Context, env::Environment, http::HttpError, system::Arch};
+use crate::{context::Context, http::HttpError};
 
 #[derive(Error, Debug)]
 pub enum ImageError {
@@ -18,9 +19,7 @@ pub enum ImageError {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImageIndex {
-    pub vendor: String,
-    pub codename: String,
-    pub version: String,
+    pub os: Os,
     pub arch: Arch,
     pub image: ImageRef,
     pub hash: HashRef,
@@ -28,11 +27,11 @@ pub struct ImageIndex {
 
 impl ImageIndex {
     pub fn to_name(&self) -> String {
-        format!("{}:{}:{}", self.vendor, self.version, self.arch)
+        format!("{}:{}", self.os, self.arch)
     }
 
     pub fn to_file_name(&self) -> String {
-        format!("{}_{}_{}", self.vendor, self.codename, self.arch)
+        format!("{}_{}", self.os, self.arch)
     }
 }
 
