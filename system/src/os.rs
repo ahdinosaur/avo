@@ -4,12 +4,14 @@ use serde::{de, Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(tag = "type")]
+#[non_exhaustive]
 pub enum Os {
     Linux(Linux),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(tag = "linux")]
+#[non_exhaustive]
 pub enum Linux {
     Ubuntu {
         #[serde(deserialize_with = "validate_ubuntu_version")]

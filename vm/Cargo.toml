@@ -14,3 +14,4 @@ tokio.workspace = true
 tokio-stream = "0.1.17"
 toml = "0.9.8"
 sha2 = "0.10.9"
+cuid2 = "0.1.4"

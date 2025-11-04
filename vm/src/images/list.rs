@@ -3,14 +3,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ImageIndex {
+pub struct VmImageIndex {
     pub arch: Arch,
     pub os: Os,
-    pub image: ImageRef,
-    pub hash: ImageHashRef,
+    pub image: VmImageRef,
+    pub hash: VmImageHashRef,
 }
 
-impl ImageIndex {
+impl VmImageIndex {
     pub fn to_image_file_name(&self) -> String {
         let arch = &self.arch;
         let os = &self.os;
@@ -27,49 +27,49 @@ impl ImageIndex {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
-pub enum ImageRef {
+pub enum VmImageRef {
     #[serde(rename = "qcow2")]
     Qcow2 { url: String },
 }
 
-impl ImageRef {
+impl VmImageRef {
     pub fn to_url(&self) -> &str {
         match self {
-            ImageRef::Qcow2 { url } => url,
+            VmImageRef::Qcow2 { url } => url,
         }
     }
     fn to_extension(&self) -> &str {
         match self {
-            ImageRef::Qcow2 { url: _ } => "qcow2",
+            VmImageRef::Qcow2 { url: _ } => "qcow2",
         }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
-pub enum ImageHashRef {
+pub enum VmImageHashRef {
     #[serde(rename = "sha512sums")]
     Sha512Sums { url: String },
 }
 
-impl ImageHashRef {
+impl VmImageHashRef {
     pub fn to_url(&self) -> &str {
         match self {
-            ImageHashRef::Sha512Sums { url } => url,
+            VmImageHashRef::Sha512Sums { url } => url,
         }
     }
     fn to_extension(&self) -> &str {
         match self {
-            ImageHashRef::Sha512Sums { url: _ } => "sha512sums",
+            VmImageHashRef::Sha512Sums { url: _ } => "sha512sums",
         }
     }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ImagesList(HashMap<String, ImageIndex>);
+pub struct VmImagesList(HashMap<String, VmImageIndex>);
 
-impl ImagesList {
-    pub fn into_values(self) -> impl Iterator<Item = ImageIndex> {
+impl VmImagesList {
+    pub fn into_values(self) -> impl Iterator<Item = VmImageIndex> {
         self.0.into_values()
     }
 }

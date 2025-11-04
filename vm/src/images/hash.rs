@@ -4,11 +4,11 @@ use tokio::io::AsyncReadExt;
 
 use crate::{
     fs::{self, FsError},
-    images::list::{ImageHashRef, ImageIndex},
+    images::list::{VmImageHashRef, VmImageIndex},
 };
 
 #[derive(Error, Debug)]
-pub enum ImageHashError {
+pub enum VmImageHashError {
     #[error(transparent)]
     Fs(#[from] FsError),
 
@@ -30,22 +30,22 @@ pub enum ImageHashError {
 }
 
 #[derive(Debug, Clone)]
-pub enum ImageHash<'a> {
+pub enum VmImageHash<'a> {
     Sha512Sums { path: &'a Path },
 }
 
-impl<'a> ImageHash<'a> {
-    pub fn new(hash_ref: &ImageHashRef, path: &'a Path) -> Self {
+impl<'a> VmImageHash<'a> {
+    pub fn new(hash_ref: &VmImageHashRef, path: &'a Path) -> Self {
         match hash_ref {
-            ImageHashRef::Sha512Sums { url: _ } => ImageHash::Sha512Sums { path },
+            VmImageHashRef::Sha512Sums { url: _ } => VmImageHash::Sha512Sums { path },
         }
     }
 
     pub async fn validate(
         &self,
-        image_index: &ImageIndex,
+        image_index: &VmImageIndex,
         image_path: &Path,
-    ) -> Result<(), ImageHashError> {
+    ) -> Result<(), VmImageHashError> {
         async fn sha512_file_hex<P: AsRef<Path>>(path: P) -> Result<String, FsError> {
             use sha2::{Digest, Sha512};
 
@@ -82,7 +82,7 @@ impl<'a> ImageHash<'a> {
         /// Accepts lines like:
         /// <128-hex> [space][space or more][optional '*']<filename>
         /// Ignores empty lines and lines starting with '#'.
-        fn lookup_sha512_for(sums: &str, image_name: &str) -> Result<String, ImageHashError> {
+        fn lookup_sha512_for(sums: &str, image_name: &str) -> Result<String, VmImageHashError> {
             for (idx, raw_line) in sums.lines().enumerate() {
                 let line = raw_line.trim_end_matches('\r').trim();
                 if line.is_empty() || line.starts_with('#') {
@@ -94,7 +94,7 @@ impl<'a> ImageHash<'a> {
                 let (hash, name_part) = if let Some((h, rest)) = split_once_whitespace(line) {
                     (h, rest)
                 } else {
-                    return Err(ImageHashError::MalformedLine {
+                    return Err(VmImageHashError::MalformedLine {
                         line_index: idx + 1,
                         line: raw_line.to_string(),
                     });
@@ -111,7 +111,7 @@ impl<'a> ImageHash<'a> {
 
                 // Validate hash shape: 128 hex chars
                 if hash.len() != 128 || !hash.chars().all(|c| c.is_ascii_hexdigit()) {
-                    return Err(ImageHashError::MalformedLine {
+                    return Err(VmImageHashError::MalformedLine {
                         line_index: idx + 1,
                         line: raw_line.to_string(),
                     });
@@ -122,7 +122,7 @@ impl<'a> ImageHash<'a> {
                 }
             }
 
-            Err(ImageHashError::HashNotFound {
+            Err(VmImageHashError::HashNotFound {
                 name: image_name.to_string(),
             })
         }
@@ -146,13 +146,13 @@ impl<'a> ImageHash<'a> {
         }
 
         match self {
-            ImageHash::Sha512Sums { path } => {
+            VmImageHash::Sha512Sums { path } => {
                 let sums = fs::read_file_to_string(path).await?;
 
                 // Resolve the target name we need to look up in sums
                 let image_url = image_index.image.to_url();
                 let image_name = image_url.split('/').next_back().ok_or_else(|| {
-                    ImageHashError::MalformedFileName {
+                    VmImageHashError::MalformedFileName {
                         url: image_url.to_string(),
                     }
                 })?;
@@ -167,7 +167,7 @@ impl<'a> ImageHash<'a> {
                 if expected.eq_ignore_ascii_case(&actual) {
                     Ok(())
                 } else {
-                    Err(ImageHashError::HashMismatch {
+                    Err(VmImageHashError::HashMismatch {
                         name: image_name.to_string(),
                         expected,
                         actual,
