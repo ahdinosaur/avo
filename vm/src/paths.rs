@@ -58,4 +58,8 @@ impl Paths {
     pub fn run_dir(&self, run_id: &str) -> PathBuf {
         self.runs_dir().join(run_id)
     }
+
+    pub fn ovmf_vars_file(&self, run_id: &str) -> PathBuf {
+        self.run_dir(run_id).join("OVMF_VARS.4m.fd.qcow2")
+    }
 }

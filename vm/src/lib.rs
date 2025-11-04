@@ -13,6 +13,7 @@ mod fs;
 mod http;
 mod images;
 mod paths;
+mod qemu;
 
 #[derive(Error, Debug)]
 pub enum VmError {
