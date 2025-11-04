@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use directories::ProjectDirs;
+use thiserror::Error;
+use which::which_global;
 
 #[derive(Debug, Clone)]
 pub struct Paths {
@@ -47,8 +49,12 @@ impl Paths {
         self.runtime_dir().join("vm/machines")
     }
 
-    pub fn machine_dir(&self, machine_file_name: &str) -> PathBuf {
-        self.machines_dir().join(machine_file_name)
+    pub fn machine_dir(&self, machine_id: &str) -> PathBuf {
+        self.machines_dir().join(machine_id)
+    }
+
+    pub fn ovmf_vars_file(&self, machine_id: &str) -> PathBuf {
+        self.machine_dir(machine_id).join("OVMF_VARS.4m.fd.qcow2")
     }
 
     pub fn runs_dir(&self) -> PathBuf {
@@ -58,8 +64,55 @@ impl Paths {
     pub fn run_dir(&self, run_id: &str) -> PathBuf {
         self.runs_dir().join(run_id)
     }
+}
 
-    pub fn ovmf_vars_file(&self, run_id: &str) -> PathBuf {
-        self.run_dir(run_id).join("OVMF_VARS.4m.fd.qcow2")
+#[derive(Error, Debug)]
+#[error(transparent)]
+pub struct ExecutablePathsError(#[from] which::Error);
+
+#[derive(Debug, Clone)]
+pub struct ExecutablePaths {
+    virt_copy_out: PathBuf,
+    virtiofsd: PathBuf,
+    qemu_x86_64: PathBuf,
+    qemu_aarch64: PathBuf,
+    unshare: PathBuf,
+}
+
+impl ExecutablePaths {
+    pub fn new() -> Result<ExecutablePaths, ExecutablePathsError> {
+        let virt_copy_out = which_global("virt-copy-out")?;
+        let virtiofsd = which_global("virtiofsd")?;
+        let qemu_x86_64 = which_global("qemu-system-x86_64")?;
+        let qemu_aarch64 = which_global("qemu-system-aarch64")?;
+        let unshare = which_global("unshare")?;
+
+        Ok(ExecutablePaths {
+            virt_copy_out,
+            virtiofsd,
+            qemu_x86_64,
+            qemu_aarch64,
+            unshare,
+        })
+    }
+
+    pub fn virt_copy_out(&self) -> &Path {
+        &self.virt_copy_out
+    }
+
+    pub fn virtiofsd(&self) -> &Path {
+        &self.virtiofsd
+    }
+
+    pub fn qemu_x86_64(&self) -> &Path {
+        &self.qemu_x86_64
+    }
+
+    pub fn qemu_aarch64(&self) -> &Path {
+        &self.qemu_aarch64
+    }
+
+    pub fn unshare(&self) -> &Path {
+        &self.unshare
     }
 }

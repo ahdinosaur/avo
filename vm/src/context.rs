@@ -1,14 +1,36 @@
-use crate::{http::HttpClient, paths::Paths};
+use thiserror::Error;
+
+use crate::{
+    http::{HttpClient, HttpError},
+    paths::{ExecutablePaths, ExecutablePathsError, Paths},
+};
+
+#[derive(Error, Debug)]
+pub enum ContextError {
+    #[error(transparent)]
+    Http(#[from] HttpError),
+
+    #[error(transparent)]
+    ExecutablePaths(#[from] ExecutablePathsError),
+}
 
 #[derive(Debug, Clone)]
 pub struct Context {
     http_client: HttpClient,
     paths: Paths,
+    executables: ExecutablePaths,
 }
 
 impl Context {
-    pub fn new(http_client: HttpClient, paths: Paths) -> Self {
-        Self { http_client, paths }
+    pub fn new() -> Result<Self, ContextError> {
+        let http_client = HttpClient::new()?;
+        let paths = Paths::new();
+        let executables = ExecutablePaths::new()?;
+        Ok(Self {
+            http_client,
+            paths,
+            executables,
+        })
     }
 
     pub fn http_client(&mut self) -> &mut HttpClient {
@@ -17,5 +39,9 @@ impl Context {
 
     pub fn paths(&self) -> &Paths {
         &self.paths
+    }
+
+    pub fn executables(&self) -> &ExecutablePaths {
+        &self.executables
     }
 }

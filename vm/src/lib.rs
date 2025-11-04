@@ -1,9 +1,8 @@
-use avo_machine::Machine;
+use thiserror::Error;
 
 use crate::{
-    context::Context,
-    http::{HttpClient, HttpError},
-    paths::Paths,
+    context::{Context, ContextError},
+    machines::VmMachine,
     runs::VmRunError,
 };
 
@@ -16,12 +15,17 @@ mod paths;
 mod qemu;
 mod runs;
 
-fn ctx() -> Result<Context, HttpError> {
-    let http_client = HttpClient::new()?;
-    let paths = Paths::new();
-    Ok(Context::new(http_client, paths))
+#[derive(Error, Debug)]
+pub enum VmError {
+    #[error(transparent)]
+    Context(#[from] ContextError),
+
+    #[error(transparent)]
+    Run(#[from] VmRunError),
 }
 
-pub async fn run(machine: Machine) -> Result<(), VmRunError> {
-    runs::run(ctx(), machine).await
+pub async fn run(machine: VmMachine) -> Result<(), VmError> {
+    let ctx = Context::new()?;
+    runs::run(&mut ctx, machine).await?;
+    Ok(())
 }

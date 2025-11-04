@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 use tokio::process::Command;
 
-use crate::context::Context;
+use crate::paths::Paths;
 
 #[derive(Debug, Error)]
 pub enum ConvertOvmfVarsError {
@@ -21,19 +21,19 @@ pub enum ConvertOvmfVarsError {
 /// Also, if we don't provide a read-write OVMF_VARS file on boot, we'll get an `NvVars` file in
 /// our writeable mounts which is what QEMU uses to emulate writeable UEFI vars.
 ///
-/// Source: https://gitlab.archlinux.org/archlinux/vmexec/-/blob/03b649bdbcdc64d30b2943f61b51165f390b920d/src/qemu.rs#L93-124
+/// Original source: https://gitlab.archlinux.org/archlinux/vmexec/-/blob/03b649bdbcdc64d30b2943f61b51165f390b920d/src/qemu.rs#L93-124
 pub async fn convert_ovmf_uefi_variables(
-    ctx: &Context,
-    run_id: &str,
-    source_image: &Path,
+    paths: &Paths,
+    machine_id: &str,
+    source_image_path: &Path,
 ) -> Result<PathBuf, ConvertOvmfVarsError> {
-    let output_file = ctx.paths().ovmf_vars_file(run_id);
+    let output_file = paths.ovmf_vars_file(machine_id);
 
     let mut qemu_img_cmd = Command::new("qemu-img");
     qemu_img_cmd
         .arg("convert")
         .args(["-O", "qcow2"])
-        .arg(source_image)
+        .arg(source_image_path)
         .arg(&output_file);
 
     let qemu_img_output = qemu_img_cmd.output().await?;
