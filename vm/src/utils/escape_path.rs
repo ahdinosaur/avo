@@ -2,7 +2,7 @@
 ///
 /// From https://github.com/lucab/libsystemd-rs/blob/b43fa5e3b5eca3e6aa16a6c2fad87220dc0ad7a0/src/unit.rs
 ///
-/// Source: https://gitlab.archlinux.org/archlinux/vmexec/-/blob/main/src/utils.rs#L76-L98
+/// Source: https://gitlab.archlinux.org/archlinux/vmexec/-/blob/7ac73d73cf3eb994795a06e02050e6b6d9e236e5/src/utils.rs#L76-L98
 pub fn escape_path(path: &str) -> String {
     let trimmed = path.trim_matches('/');
     if trimmed.is_empty() {

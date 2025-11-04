@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 
-use avo_machine::Machine;
 use avo_system::{Arch, Linux, Os};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -16,6 +15,7 @@ use crate::{
         hash::{VmImageHash, VmImageHashError},
         list::{VmImageIndex, VmImagesList},
     },
+    machines::VmMachine,
     paths::Paths,
 };
 
@@ -40,8 +40,57 @@ pub async fn get_images_list() -> Result<VmImagesList, VmImageError> {
     Ok(images_list)
 }
 
-pub async fn find_image_index_for_machine(
-    machine: Machine,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum VmSourceImage {
+    Linux {
+        arch: Arch,
+        linux: Linux,
+        image_path: PathBuf,
+    },
+}
+
+impl VmSourceImage {
+    pub fn new(paths: &Paths, image_index: &VmImageIndex) -> Self {
+        let image_path = paths.image_file(&image_index.to_image_file_name());
+        let arch = image_index.arch;
+        match &image_index.os {
+            Os::Linux(linux) => VmSourceImage::Linux {
+                arch,
+                linux: linux.clone(),
+                image_path,
+            },
+            _ => {
+                unimplemented!()
+            }
+        }
+    }
+}
+
+pub async fn get_image(
+    ctx: &mut Context,
+    machine: VmMachine,
+) -> Result<VmSourceImage, VmImageError> {
+    let image_index = find_image_index_for_machine(machine).await?;
+
+    let Some(image_index) = image_index else {
+        panic!("Unable to find matching image for machine");
+    };
+
+    println!("image: {:?}", image_index);
+
+    println!("fetching...");
+
+    fetch_image(ctx, &image_index).await?;
+
+    println!("fetched.");
+
+    let image = get_image_from_index(ctx, &image_index);
+
+    Ok(image)
+}
+
+async fn find_image_index_for_machine(
+    machine: VmMachine,
 ) -> Result<Option<VmImageIndex>, VmImageError> {
     let images_list = get_images_list().await?;
     let image_index = images_list
@@ -50,10 +99,7 @@ pub async fn find_image_index_for_machine(
     Ok(image_index)
 }
 
-pub async fn fetch_image(
-    ctx: &mut Context,
-    image_index: &VmImageIndex,
-) -> Result<(), VmImageError> {
+async fn fetch_image(ctx: &mut Context, image_index: &VmImageIndex) -> Result<(), VmImageError> {
     let image_path = ctx.paths().image_file(&image_index.to_image_file_name());
 
     fs::setup_directory_access(ctx.paths().images_dir()).await?;
@@ -74,54 +120,6 @@ pub async fn fetch_image(
     Ok(())
 }
 
-pub fn get_image(ctx: &mut Context, image_index: &VmImageIndex) -> VmImage {
-    VmImage::new(ctx.paths(), image_index)
-}
-
-// An VM image and auxiliary files
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum VmImage {
-    Linux {
-        arch: Arch,
-        linux: Linux,
-        image_path: PathBuf,
-        kernel_path: PathBuf,
-        // `initrd` is optional since some distributions (such as Arch Linux) bake all required modules
-        // directly into the kernel. This shaves a few hundred milliseconds off the boot so we won't use an
-        // initrd if we can avoid it.
-        initrd_path: Option<PathBuf>,
-    },
-}
-
-impl VmImage {
-    pub fn new(paths: &Paths, image_index: &VmImageIndex) -> Self {
-        let image_path = paths.image_file(&image_index.to_image_file_name());
-        let arch = image_index.arch;
-        match &image_index.os {
-            Os::Linux(linux) => {
-                let kernel_path = image_path.join("vmlinuz-linux");
-                let initrd_path = if matches!(linux, Linux::Arch) {
-                    None
-                } else {
-                    Some(image_path.join("initramfs-linux,img"))
-                };
-                VmImage::Linux {
-                    arch,
-                    linux: linux.clone(),
-                    image_path,
-                    kernel_path,
-                    initrd_path,
-                }
-            }
-            _ => {
-                unimplemented!()
-            }
-        }
-    }
-
-    pub fn overlay_image(&self) -> PathBuf {
-        match self {
-            VmImage::Linux { image_path, .. } => image_path.with_extension("overlay.qcow2"),
-        }
-    }
+fn get_image_from_index(ctx: &mut Context, image_index: &VmImageIndex) -> VmSourceImage {
+    VmSourceImage::new(ctx.paths(), image_index)
 }

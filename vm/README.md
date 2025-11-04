@@ -41,4 +41,8 @@ If on Debian Bookworm, install `virtiofsd` with `cargo install`.
 Steps to run a command in QEMU :
 
 1. Download the base image
-2.
+2. Prep image
+    1. Convert OVMF UEFI variables
+    2. Extract kernel from image
+3. Warmup run with base image, save snapshot as overlay
+4. Normal run with overlay image
