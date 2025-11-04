@@ -4,7 +4,9 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Arch {
+    #[serde(rename = "x86-64")]
     X86_64,
+    #[serde(rename = "aarch64")]
     Aarch64,
 }
 
@@ -19,6 +21,7 @@ impl Display for Arch {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Bitness {
+    #[serde(rename = "64-bit")]
     X64,
 }
 

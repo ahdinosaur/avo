@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use directories::ProjectDirs;
+
 #[derive(Debug, Clone)]
 pub struct Paths {
     data_dir: PathBuf,
@@ -8,11 +10,12 @@ pub struct Paths {
 }
 
 impl Paths {
-    pub fn new(
-        data_dir: impl Into<PathBuf>,
-        cache_dir: impl Into<PathBuf>,
-        runtime_dir: impl Into<PathBuf>,
-    ) -> Self {
+    pub fn new() -> Self {
+        let dirs =
+            ProjectDirs::from("dev", "Avo Org", "Avo").expect("Failed to get project directory");
+        let data_dir = dirs.data_dir();
+        let cache_dir = dirs.cache_dir();
+        let runtime_dir = dirs.runtime_dir().unwrap_or(cache_dir);
         Self {
             data_dir: data_dir.into(),
             cache_dir: cache_dir.into(),
@@ -33,42 +36,26 @@ impl Paths {
     }
 
     pub fn images_dir(&self) -> PathBuf {
-        self.cache_dir.join("images")
+        self.cache_dir().join("vm/images")
     }
 
-    pub fn image_file(&self, image: &str) -> PathBuf {
-        self.images_dir().join(image)
+    pub fn image_file(&self, image_file_name: &str) -> PathBuf {
+        self.images_dir().join(image_file_name)
     }
 
-    pub fn image_cache_file(&self) -> PathBuf {
-        self.cache_dir.join("images.cache")
+    pub fn machines_dir(&self) -> PathBuf {
+        self.runtime_dir().join("vm/machines")
     }
 
-    pub fn instances_dir(&self) -> PathBuf {
-        self.data_dir.join("instance")
+    pub fn machine_dir(&self, machine_file_name: &str) -> PathBuf {
+        self.machines_dir().join(machine_file_name)
     }
 
-    pub fn instance_dir(&self, instance: &str) -> PathBuf {
-        self.instances_dir().join(instance)
+    pub fn runs_dir(&self) -> PathBuf {
+        self.runtime_dir().join("vm/runs")
     }
 
-    pub fn instance_config_file(&self, instance: &str) -> PathBuf {
-        self.instance_dir(instance).join("machine.yaml")
-    }
-
-    pub fn instance_image_file(&self, instance: &str) -> PathBuf {
-        self.instance_dir(instance).join("machine.img")
-    }
-
-    pub fn instance_cache_dir(&self, instance: &str) -> PathBuf {
-        self.cache_dir.join("instances").join(instance)
-    }
-
-    pub fn instance_runtime_dir(&self, instance: &str) -> PathBuf {
-        self.runtime_dir.join("instances").join(instance)
-    }
-
-    pub fn qemu_pid_file(&self, instance: &str) -> PathBuf {
-        self.instance_runtime_dir(instance).join("qemu.pid")
+    pub fn run_dir(&self, run_id: &str) -> PathBuf {
+        self.runs_dir().join(run_id)
     }
 }

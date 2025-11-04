@@ -10,7 +10,7 @@ avo-operation = { path = "../operation", version = "0.1" }
 avo-store = { path = "../store", version = "0.1" }
 avo-system = { path = "../system", version = "0.1" }
 async-trait.workspace = true
-directories = "6.0.0"
+directories.workspace = true
 indexmap.workspace = true
 rimu.workspace = true
 rimu-interop = { path = "../rimu-interop", version = "0.1" }

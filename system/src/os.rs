@@ -23,13 +23,12 @@ pub enum Linux {
     Arch, // no version
 }
 
-// Display impls
 impl Display for Linux {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Linux::Ubuntu { version } => write!(f, "Ubuntu {}", version),
-            Linux::Debian { version } => write!(f, "Debian {}", version),
-            Linux::Arch => write!(f, "Arch"),
+            Linux::Ubuntu { version } => write!(f, "ubuntu-{}", version),
+            Linux::Debian { version } => write!(f, "debian-{}", version),
+            Linux::Arch => write!(f, "arch"),
         }
     }
 }
@@ -37,7 +36,7 @@ impl Display for Linux {
 impl Display for Os {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Os::Linux(l) => write!(f, "Linux: {}", l),
+            Os::Linux(l) => write!(f, "linux-{}", l),
         }
     }
 }
@@ -82,7 +81,7 @@ mod tests {
             "ubuntu": "22.04"
         }"#;
         let os: Os = from_str(j).unwrap();
-        assert_eq!(os.to_string(), "Linux: Ubuntu 22.04");
+        assert_eq!(os.to_string(), "linux-ubuntu-22.04");
     }
 
     #[test]
@@ -104,7 +103,7 @@ mod tests {
             "debian": 12
         }"#;
         let os: Os = from_str(j).unwrap();
-        assert_eq!(os.to_string(), "Linux: Debian 12");
+        assert_eq!(os.to_string(), "linux-debian-12");
     }
 
     #[test]
@@ -114,6 +113,6 @@ mod tests {
             "linux": "Arch"
         }"#;
         let os: Os = from_str(j).unwrap();
-        assert_eq!(os.to_string(), "Linux: Arch");
+        assert_eq!(os.to_string(), "linux-arch");
     }
 }

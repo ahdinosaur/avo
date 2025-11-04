@@ -37,7 +37,7 @@ pub struct HttpClient {
 impl HttpClient {
     pub fn new() -> Result<Self, HttpError> {
         let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SEC))
+            .read_timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SEC))
             .gzip(true)
             .brotli(true)
             .build()
@@ -66,14 +66,16 @@ impl HttpClient {
         file_path: P,
     ) -> Result<(), HttpError> {
         let file_path = file_path.as_ref();
-        let temp_file = file_path.join(".tmp");
-
-        if fs::path_exists(&temp_file).await? {
-            fs::remove_file(&temp_file).await?;
-        }
 
         if fs::path_exists(file_path).await? {
             return Ok(());
+        }
+
+        let mut temp_file = PathBuf::from(file_path);
+        temp_file.add_extension("tmp");
+
+        if fs::path_exists(&temp_file).await? {
+            fs::remove_file(&temp_file).await?;
         }
 
         let resp = self

@@ -3,9 +3,14 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Machine {
-    hostname: Hostname,
-    os: Os,
-    arch: Arch,
-    memory_size: MemorySize,
-    cpu_count: CpuCount,
+    pub hostname: Hostname,
+    pub arch: Arch,
+    pub os: Os,
+    pub vm: Option<MachineVmOptions>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct MachineVmOptions {
+    pub memory_size: Option<MemorySize>,
+    pub cpu_count: Option<CpuCount>,
 }

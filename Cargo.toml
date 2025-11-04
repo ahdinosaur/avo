@@ -6,6 +6,7 @@ members = [
 
 [workspace.dependencies]
 async-trait = "0.1.89"
+directories = "6.0.0"
 displaydoc = "0.2.5"
 indexmap = "2.12.0"
 rimu = { version = "0.2.0", git = "https://github.com/ahdinosaur/rimu" }
