@@ -14,6 +14,7 @@ mod machines;
 mod paths;
 mod qemu;
 mod run;
+mod ssh;
 mod utils;
 
 #[derive(Error, Debug)]
