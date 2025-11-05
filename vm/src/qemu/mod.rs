@@ -3,7 +3,10 @@ use std::{
     net::Ipv4Addr,
     path::{Path, PathBuf},
     process::Stdio,
-    sync::{atomic::AtomicBool, Arc},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
 
 use avo_machine::MachineVmOptions;
@@ -12,11 +15,14 @@ use base64ct::{Base64, Encoding};
 use dir_lock::DirLock;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tokio::process::Command;
+use tokio::{fs, process::Command};
 
 use crate::{
-    context::Context, machines::VmMachineImage, run::CancellationTokens, utils::escape_path,
+    context::Context, machines::VmMachineImage, qemu::virtiofsd::launch_virtiofsd,
+    run::CancellationTokens, utils::escape_path,
 };
+
+mod virtiofsd;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PublishPort {
@@ -82,10 +88,9 @@ impl Display for BindMount {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QemuLaunchOpts {
-    pub id: String,
-    pub cid: u32,
     pub vm: MachineVmOptions,
     pub vm_image: VmMachineImage,
+    pub cid: u32,
     pub volumes: Vec<BindMount>,
     pub published_ports: Vec<PublishPort>,
     pub show_vm_window: bool,
@@ -94,10 +99,26 @@ pub struct QemuLaunchOpts {
 }
 
 #[derive(Error, Debug)]
-pub enum QemuLaunchError {}
+pub enum QemuLaunchError {
+    #[error("failed to launch virtiofsd for volume {volume}: {error}")]
+    VirtiofsdLaunch { volume: BindMount, error: String },
+
+    #[error("QEMU has no pid, maybe it exited early?")]
+    QemuPidUnavailable,
+
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+
+    #[error(transparent)]
+    Utf8(#[from] std::string::FromUtf8Error),
+
+    #[error("QEMU failed: {stderr}")]
+    QemuError { stderr: String },
+}
 
 pub async fn launch_qemu(
     ctx: &mut Context,
+    machine_id: &str,
     qemu_launch_opts: QemuLaunchOpts,
     cancellation_tokens: CancellationTokens,
     qemu_should_exit: Arc<AtomicBool>,
@@ -156,28 +177,29 @@ pub async fn launch_qemu(
     qemu_cmd
         // Decrease idle CPU usage
         .args(["-machine", "hpet=off"])
-
         .args(["-smp", &cpu_count.to_string()])
-
         // We extracted the kernel and initrd from this image earlier in order to boot it more
         // quickly.
         .args(["-kernel", &kernel_path_str])
         .args(["-append", "rw root=/dev/vda3"])
-
         // SSH port forwarding
-        .args(["-device", &format!("vhost-vsock-pci,id=vhost-vsock-pci0,guest-cid={cid}")])
-
+        .args([
+            "-device",
+            &format!("vhost-vsock-pci,id=vhost-vsock-pci0,guest-cid={cid}"),
+        ])
         // Network controller
         .args(["-nic", &format!("user,model=virtio{hostfwd}")])
-
         // Free Page Reporting allows the guest to signal to the host that memory can be reclaimed.
         .args(["-device", "virtio-balloon,free-page-reporting=on"])
-
         // Memory configuration
         .args(["-m", &format!("{memory_size}")])
-        .args(["-object", &format!("memory-backend-memfd,id=mem0,merge=on,share=on,size={memory_size}")])
+        .args([
+            "-object",
+            &format!(
+                "memory-backend-memfd,id=mem0,merge=on,share=on,size={memory_size}"
+            ),
+        ])
         .args(["-numa", "node,memdev=mem0"])
-
         // UEFI
         .args([
             "-drive",
@@ -187,13 +209,13 @@ pub async fn launch_qemu(
             "-drive",
             &format!("if=pflash,format=qcow2,unit=1,file={ovmf_vars_path_str}"),
         ])
-
         // Overlay image
-        .args(["-drive", &format!("if=virtio,node-name=overlay-disk,file={overlay_image_path_str}")])
-
+        .args([
+            "-drive",
+            &format!("if=virtio,node-name=overlay-disk,file={overlay_image_path_str}"),
+        ])
         // QMP API to expose QEMU command API
         .args(["-qmp", &format!("unix:{qmp_socket_path_str}")])
-
         // Here we inject the SSH using systemd.system-credentials, see:
         // https://www.freedesktop.org/software/systemd/man/latest/systemd.system-credentials.html
         .args([
@@ -220,9 +242,12 @@ pub async fn launch_qemu(
 
     // Add virtiofsd-based directory shares
     for (i, vol) in qemu_launch_opts.volumes.iter().enumerate() {
-        let virtiofsd_child = launch_virtiofsd(&tool_paths.virtiofsd_path, run_dir, vol)
-            .await
-            .wrap_err(format!("Failed to launch virtiofsd for {vol}"))?;
+        let virtiofsd_child = launch_virtiofsd(ctx, machine_id, vol).await.map_err(|e| {
+            QemuLaunchError::VirtiofsdLaunch {
+                volume: vol.clone(),
+                error: e.to_string(),
+            }
+        })?;
         virtiofsd_handles.push(virtiofsd_child);
 
         let socket_path = run_dir.join(vol.socket_name());
@@ -245,25 +270,6 @@ pub async fn launch_qemu(
                 "-device",
                 &format!("vhost-user-fs-pci,chardev=char{i},tag={tag}"),
             ]);
-    }
-
-    // Add virtio-pmem devices
-    for (i, pmem) in qemu_launch_opts.pmems.iter().enumerate() {
-        // Systemd will conveniently auto-format the device on mount, neat!
-        let fstab_entry = format!(
-            "/dev/pmem{i} {} ext4 rw,relatime,dax=always,x-systemd.makefs 0 0",
-            pmem.dest.to_string_lossy()
-        );
-        fstab_entries.push(fstab_entry);
-
-        let pmem_file = run_dir.join(format!("pmem{i}.pmem"));
-        qemu_cmd.args([
-            "-object",
-            &format!("memory-backend-file,id=pmem{i},share=on,merge=on,discard-data=on,mem-path={},size={}G", pmem_file.to_string_lossy(), pmem.size)]);
-        qemu_cmd.args([
-            "-device",
-            &format!("virtio-pmem-pci,memdev=pmem{i},id=nv{i}"),
-        ]);
     }
 
     if !fstab_entries.is_empty() {
@@ -292,37 +298,40 @@ pub async fn launch_qemu(
     let qemu_pid_path = run_dir.join("qemu.pid");
     let qemu_pid = qemu_child
         .id()
-        .ok_or_eyre("QEMU has no pid, maybe it exited early?")?
+        .ok_or(QemuLaunchError::QemuPidUnavailable)?
         .to_string();
     fs::write(&qemu_pid_path, &qemu_pid).await?;
-    trace!("Writing QEMU pid {qemu_pid} to {qemu_pid_path:?}");
+    // trace!("Writing QEMU pid {qemu_pid} to {qemu_pid_path:?}");
 
     // We drop the lock at this point because now we have a live qemu.pid that'll make sure that
     // this run dir won't be reaped.
     // `lock` is `None` in case this is a warmup run.
     if let Some(lock) = lock {
-        trace!("Unlocking {:?}", lock.path());
+        // trace!("Unlocking {:?}", lock.path());
         lock.drop_async().await.expect("Couldn't drop lock");
     }
 
     let qemu_output = tokio::select! {
         _ = cancellation_tokens.qemu.cancelled() => {
-            debug!("QEMU task was cancelled");
+            // debug!("QEMU task was cancelled");
             return Ok(());
         }
         val = qemu_child.wait_with_output() => {
             if qemu_should_exit.load(Ordering::SeqCst) {
-                info!("QEMU has finished running");
+                // info!("QEMU has finished running");
                 return Ok(());
             }
-            error!("QEMU process exited early, that's usually a bad sign");
+            eprintln!("QEMU process exited early, that's usually a bad sign");
             val?
         }
     };
 
     if !qemu_output.status.success() {
-        error!("QEMU failed: {}", String::from_utf8(qemu_output.stderr)?);
         cancellation_tokens.ssh.cancel();
+
+        return Err(QemuLaunchError::QemuError {
+            stderr: String::from_utf8_lossy(qemu_output.stderr).to_string(),
+        });
     }
 
     Ok(())
