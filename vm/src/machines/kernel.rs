@@ -5,9 +5,9 @@ use tokio::process::Command;
 use crate::context::Context;
 use std::path::{Path, PathBuf};
 
-pub struct VmImageKernel {
-    kernel_path: PathBuf,
-    initrd_path: Option<PathBuf>,
+pub struct VmImageKernelDetails {
+    pub kernel_path: PathBuf,
+    pub initrd_path: Option<PathBuf>,
 }
 
 #[derive(Error, Debug)]
@@ -28,7 +28,7 @@ pub async fn extract_kernel(
     machine_id: &str,
     linux: Linux,
     source_image_path: &Path,
-) -> Result<VmImageKernel, ExtractKernelError> {
+) -> Result<VmImageKernelDetails, ExtractKernelError> {
     let kernel = "vmlinuz-linux";
     let initrd = if matches!(linux, Linux::Arch) {
         None
@@ -57,7 +57,7 @@ pub async fn extract_kernel(
         });
     }
 
-    Ok(VmImageKernel {
+    Ok(VmImageKernelDetails {
         kernel_path: dest_dir.join(kernel),
         initrd_path: initrd.map(|initrd| dest_dir.join(initrd)),
     })

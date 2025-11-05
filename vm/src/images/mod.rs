@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use avo_machine::Machine;
 use avo_system::{Arch, Linux, Os};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -15,7 +16,6 @@ use crate::{
         hash::{VmImageHash, VmImageHashError},
         list::{VmImageIndex, VmImagesList},
     },
-    machines::VmMachine,
     paths::Paths,
 };
 
@@ -66,10 +66,7 @@ impl VmSourceImage {
     }
 }
 
-pub async fn get_image(
-    ctx: &mut Context,
-    machine: VmMachine,
-) -> Result<VmSourceImage, VmImageError> {
+pub async fn get_image(ctx: &mut Context, machine: Machine) -> Result<VmSourceImage, VmImageError> {
     let image_index = find_image_index_for_machine(machine).await?;
 
     let Some(image_index) = image_index else {
@@ -90,7 +87,7 @@ pub async fn get_image(
 }
 
 async fn find_image_index_for_machine(
-    machine: VmMachine,
+    machine: Machine,
 ) -> Result<Option<VmImageIndex>, VmImageError> {
     let images_list = get_images_list().await?;
     let image_index = images_list

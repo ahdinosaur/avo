@@ -25,6 +25,10 @@ impl Paths {
         }
     }
 
+    pub fn ovmf_vars_system_file(&self) -> &Path {
+        &PathBuf::from("/usr/share/OVMF/OVMF_VARS_4M.fd")
+    }
+
     pub fn data_dir(&self) -> &Path {
         &self.data_dir
     }
@@ -57,12 +61,8 @@ impl Paths {
         self.machine_dir(machine_id).join("OVMF_VARS.4m.fd.qcow2")
     }
 
-    pub fn runs_dir(&self) -> PathBuf {
-        self.runtime_dir().join("vm/runs")
-    }
-
-    pub fn run_dir(&self, run_id: &str) -> PathBuf {
-        self.runs_dir().join(run_id)
+    pub fn overlay_image_file(&self, machine_id: &str) -> PathBuf {
+        self.machine_dir(machine_id).join("overlay.qcow2")
     }
 }
 

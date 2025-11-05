@@ -1,83 +1,52 @@
-use std::{fmt::Display, net::Ipv4Addr, path::PathBuf, str::FromStr};
+use std::{
+    fmt::{Display, Write},
+    net::Ipv4Addr,
+    path::{Path, PathBuf},
+    process::Stdio,
+    sync::{atomic::AtomicBool, Arc},
+};
 
+use avo_machine::MachineVmOptions;
+use avo_system::{CpuCount, MemorySize};
+use base64ct::{Base64, Encoding};
+use dir_lock::DirLock;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
+use tokio::process::Command;
 
-use crate::machines::VmMachineImage;
+use crate::{
+    context::Context, machines::VmMachineImage, run::CancellationTokens, utils::escape_path,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PublishPort {
-    pub host_ip: Ipv4Addr,
-    pub host_port: u32,
+    pub host_ip: Option<Ipv4Addr>,
+    pub host_port: Option<u32>,
     pub vm_port: u32,
 }
 
-impl Display for PublishPort {
+impl std::fmt::Display for PublishPort {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}:{}->{}/tcp",
-            self.host_ip, self.host_port, self.vm_port
-        )
-    }
-}
+        let mut wrote_left = false;
 
-impl FromStr for PublishPort {
-    type Err = String;
-
-    fn from_str(src: &str) -> Result<Self, Self::Err> {
-        let parts: Vec<&str> = src.split(':').collect();
-
-        if parts[0].is_empty() {
-            return Err("Expected format: [[hostip:][hostport]:]vmport".to_string());
+        if let Some(ip) = self.host_ip {
+            write!(f, "{}", ip)?;
+            wrote_left = true;
         }
 
-        let (host_ip, host_port, vm_port) = match parts.len() {
-            // If there's only a single part, it has to be the `vm_port`.
-            1 => {
-                let host_ip = Ipv4Addr::UNSPECIFIED;
-                let host_port = parts[0]
-                    .parse()
-                    .map_err(|_| format!("'{}' is not a valid port", parts[0]))?;
-                let vm_port = parts[0]
-                    .parse()
-                    .map_err(|_| format!("'{}' is not a valid port", parts[0]))?;
+        if let Some(port) = self.host_port {
+            if wrote_left {
+                write!(f, ":")?;
+            }
+            write!(f, "{}", port)?;
+            wrote_left = true;
+        }
 
-                (host_ip, host_port, vm_port)
-            }
-            2 => {
-                let host_ip = Ipv4Addr::UNSPECIFIED;
-                let host_port = parts[0]
-                    .parse()
-                    .map_err(|_| format!("'{}' is not a valid port", parts[0]))?;
-                let vm_port = parts[1]
-                    .parse()
-                    .map_err(|_| format!("'{}' is not a valid port", parts[1]))?;
-                (host_ip, host_port, vm_port)
-            }
-            3 => {
-                let host_ip = parts[0]
-                    .parse()
-                    .map_err(|_| format!("'{}' is not a valid IPv4", parts[0]))?;
-                let vm_port = parts[2]
-                    .parse()
-                    .map_err(|_| format!("'{}' is not a valid port", parts[2]))?;
-                let host_port = if !parts[1].is_empty() {
-                    parts[1]
-                        .parse()
-                        .map_err(|_| format!("'{}' is not a valid port", parts[1]))?
-                } else {
-                    vm_port
-                };
-                (host_ip, host_port, vm_port)
-            }
-            _ => return Err("Expected format: [[hostip:][hostport]:]vmport".to_string()),
-        };
+        if wrote_left {
+            write!(f, "->")?;
+        }
 
-        Ok(Self {
-            host_ip,
-            host_port,
-            vm_port,
-        })
+        write!(f, "{}/tcp", self.vm_port)
     }
 }
 
@@ -111,92 +80,250 @@ impl Display for BindMount {
     }
 }
 
-/// Parse a string the format `source:dest`
-impl FromStr for BindMount {
-    type Err = String;
-
-    fn from_str(src: &str) -> Result<Self, Self::Err> {
-        let parts: Vec<&str> = src.split(':').collect();
-        if parts.len() != 2 && parts.len() != 3 {
-            return Err("Expected format: source:dest[:ro]".to_string());
-        }
-
-        let source = PathBuf::from(parts[0]);
-        if !source.is_absolute() {
-            return Err("source must be an absolute path".to_string());
-        }
-        if !source.is_dir() {
-            return Err("source doesn't exist or isn't a directory".to_string());
-        }
-
-        let dest = PathBuf::from(parts[1]);
-        if !dest.is_absolute() {
-            return Err("dest must be an absolute path".to_string());
-        }
-
-        // Last part (ro) is optional so we have to check for that.
-        if parts.len() == 3 {
-            let options = parts[2];
-            if options == "ro" {
-                return Ok(BindMount {
-                    source,
-                    dest,
-                    read_only: true,
-                });
-            } else {
-                return Err("Expected format: source:dest[:ro]".to_string());
-            }
-        }
-
-        Ok(BindMount {
-            source,
-            dest,
-            read_only: false,
-        })
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PmemMount {
-    pub dest: PathBuf,
-    pub size: u64,
-}
-
-impl FromStr for PmemMount {
-    type Err = String;
-
-    fn from_str(src: &str) -> Result<Self, Self::Err> {
-        let parts: Vec<&str> = src.split(':').collect();
-        if parts.len() != 2 {
-            return Err("Expected format: dest:<size>".to_string());
-        }
-
-        let dest = PathBuf::from(parts[0]);
-        if !dest.is_absolute() {
-            return Err("dest must be an absolute path".to_string());
-        }
-
-        let size = if let Ok(size) = parts[1].parse() {
-            size
-        } else {
-            return Err("Couldn't parse size as integer".to_string());
-        };
-
-        Ok(PmemMount { dest, size })
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QemuLaunchOpts {
     pub id: String,
-    pub volumes: Vec<BindMount>,
-    pub pmems: Vec<PmemMount>,
-    pub published_ports: Vec<PublishPort>,
-    pub vm_image: VmMachineImage,
-    pub ovmf_uefi_vars_path: PathBuf,
-    pub show_vm_window: bool,
-    pub pubkey: String,
     pub cid: u32,
-    pub is_warmup: bool,
+    pub vm: MachineVmOptions,
+    pub vm_image: VmMachineImage,
+    pub volumes: Vec<BindMount>,
+    pub published_ports: Vec<PublishPort>,
+    pub show_vm_window: bool,
+    pub ssh_pubkey: String,
     pub disable_kvm: bool,
+}
+
+#[derive(Error, Debug)]
+pub enum QemuLaunchError {}
+
+pub async fn launch_qemu(
+    ctx: &mut Context,
+    qemu_launch_opts: QemuLaunchOpts,
+    cancellation_tokens: CancellationTokens,
+    qemu_should_exit: Arc<AtomicBool>,
+    run_dir: &Path,
+    lock: Option<DirLock>,
+) -> Result<(), QemuLaunchError> {
+    let vm_image = qemu_launch_opts.vm_image;
+
+    let VmMachineImage::Linux {
+        arch,
+        linux,
+        overlay_image_path,
+        kernel_path,
+        initrd_path,
+        ovmf_vars_path,
+    } = vm_image
+    else {
+        unimplemented!();
+    };
+
+    let overlay_image_path_str = overlay_image_path.to_string_lossy();
+    let kernel_path_str = kernel_path.to_string_lossy();
+    let initrd_path_str = initrd_path.map(|p| p.to_string_lossy());
+    let ovmf_vars_path_str = ovmf_vars_path.to_string_lossy();
+    let ovmf_vars_system_path_str = ctx.paths().ovmf_vars_system_file().to_string_lossy();
+
+    let vm = qemu_launch_opts.vm;
+    let memory_size = vm
+        .memory_size
+        .unwrap_or_else(|| MemorySize::new(8 * 1024 * 1024 * 1024));
+    let cpu_count = vm.cpu_count.unwrap_or_else(|| CpuCount::new(2));
+
+    let ssh_pubkey_base64 = Base64::encode_string(qemu_launch_opts.ssh_pubkey.as_bytes());
+
+    let cid = qemu_launch_opts.cid;
+
+    let hostfwd: String =
+        qemu_launch_opts
+            .published_ports
+            .iter()
+            .fold(String::new(), |mut output, p| {
+                let _ = write!(
+                    output,
+                    ",hostfwd=:{}:{}-:{}",
+                    p.host_ip.unwrap_or(Ipv4Addr::UNSPECIFIED),
+                    p.host_port.unwrap_or(p.vm_port),
+                    p.vm_port
+                );
+                output
+            });
+
+    let qmp_socket_path = run_dir.join("qmp.sock,server,wait=off");
+    let qmp_socket_path_str = qmp_socket_path.to_string_lossy();
+
+    let mut qemu_cmd = Command::new(ctx.executables().qemu_x86_64().clone());
+    qemu_cmd
+        // Decrease idle CPU usage
+        .args(["-machine", "hpet=off"])
+
+        .args(["-smp", &cpu_count.to_string()])
+
+        // We extracted the kernel and initrd from this image earlier in order to boot it more
+        // quickly.
+        .args(["-kernel", &kernel_path_str])
+        .args(["-append", "rw root=/dev/vda3"])
+
+        // SSH port forwarding
+        .args(["-device", &format!("vhost-vsock-pci,id=vhost-vsock-pci0,guest-cid={cid}")])
+
+        // Network controller
+        .args(["-nic", &format!("user,model=virtio{hostfwd}")])
+
+        // Free Page Reporting allows the guest to signal to the host that memory can be reclaimed.
+        .args(["-device", "virtio-balloon,free-page-reporting=on"])
+
+        // Memory configuration
+        .args(["-m", &format!("{memory_size}")])
+        .args(["-object", &format!("memory-backend-memfd,id=mem0,merge=on,share=on,size={memory_size}")])
+        .args(["-numa", "node,memdev=mem0"])
+
+        // UEFI
+        .args([
+            "-drive",
+            "if=pflash,format=raw,unit=0,file={ovmf_vars_system_path_str},readonly=on",
+        ])
+        .args([
+            "-drive",
+            &format!("if=pflash,format=qcow2,unit=1,file={ovmf_vars_path_str}"),
+        ])
+
+        // Overlay image
+        .args(["-drive", &format!("if=virtio,node-name=overlay-disk,file={overlay_image_path_str}")])
+
+        // QMP API to expose QEMU command API
+        .args(["-qmp", &format!("unix:{qmp_socket_path_str}")])
+
+        // Here we inject the SSH using systemd.system-credentials, see:
+        // https://www.freedesktop.org/software/systemd/man/latest/systemd.system-credentials.html
+        .args([
+            "-smbios",
+            &format!(
+                "type=11,value=io.systemd.credential.binary:ssh.authorized_keys.root={ssh_pubkey_base64}"
+            ),
+        ]);
+
+    if !qemu_launch_opts.disable_kvm {
+        qemu_cmd.args(["-accel", "kvm"]).args(["-cpu", "host"]);
+    }
+
+    if let Some(initrd_path_str) = initrd_path_str {
+        qemu_cmd.args(["-initrd", &initrd_path_str]);
+    }
+
+    // It's important we keep `virtiofsd_handles` in scope here and that we don't drop them too
+    // early as otherwise the process would exit and the VM would be unhappy.
+    let mut virtiofsd_handles = vec![];
+
+    // We need fstab entries for virtiofsd mounts and pmem devices.
+    let mut fstab_entries = vec![];
+
+    // Add virtiofsd-based directory shares
+    for (i, vol) in qemu_launch_opts.volumes.iter().enumerate() {
+        let virtiofsd_child = launch_virtiofsd(&tool_paths.virtiofsd_path, run_dir, vol)
+            .await
+            .wrap_err(format!("Failed to launch virtiofsd for {vol}"))?;
+        virtiofsd_handles.push(virtiofsd_child);
+
+        let socket_path = run_dir.join(vol.socket_name());
+        let socket_path_str = socket_path.to_string_lossy();
+        let tag = vol.tag();
+        let dest_path = vol.dest.to_string_lossy();
+        let read_only = if vol.read_only {
+            String::from(",ro")
+        } else {
+            String::new()
+        };
+        let fstab_entry = format!("{tag} {dest_path} virtiofs defaults{read_only} 0 0");
+        fstab_entries.push(fstab_entry);
+        qemu_cmd
+            .args([
+                "-chardev",
+                &format!("socket,id=char{i},path={socket_path_str}"),
+            ])
+            .args([
+                "-device",
+                &format!("vhost-user-fs-pci,chardev=char{i},tag={tag}"),
+            ]);
+    }
+
+    // Add virtio-pmem devices
+    for (i, pmem) in qemu_launch_opts.pmems.iter().enumerate() {
+        // Systemd will conveniently auto-format the device on mount, neat!
+        let fstab_entry = format!(
+            "/dev/pmem{i} {} ext4 rw,relatime,dax=always,x-systemd.makefs 0 0",
+            pmem.dest.to_string_lossy()
+        );
+        fstab_entries.push(fstab_entry);
+
+        let pmem_file = run_dir.join(format!("pmem{i}.pmem"));
+        qemu_cmd.args([
+            "-object",
+            &format!("memory-backend-file,id=pmem{i},share=on,merge=on,discard-data=on,mem-path={},size={}G", pmem_file.to_string_lossy(), pmem.size)]);
+        qemu_cmd.args([
+            "-device",
+            &format!("virtio-pmem-pci,memdev=pmem{i},id=nv{i}"),
+        ]);
+    }
+
+    if !fstab_entries.is_empty() {
+        let fstab = fstab_entries.join("\n");
+        let fstab_base64 = Base64::encode_string(fstab.as_bytes());
+        qemu_cmd.args([
+            "-smbios",
+            &format!("type=11,value=io.systemd.credential.binary:fstab.extra={fstab_base64}"),
+        ]);
+    }
+
+    if !qemu_launch_opts.show_vm_window {
+        qemu_cmd.arg("-nographic");
+    }
+
+    let qemu_child = qemu_cmd
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()?;
+
+    // Write QEMU's pid into a `qemu-pid` file in the run dir. This allows a cleanup job to run and
+    // some point and remove all the run dirs that have a dead QEMU (which can happen if vmexec is
+    // cancelled at the wrong time).
+    let qemu_pid_path = run_dir.join("qemu.pid");
+    let qemu_pid = qemu_child
+        .id()
+        .ok_or_eyre("QEMU has no pid, maybe it exited early?")?
+        .to_string();
+    fs::write(&qemu_pid_path, &qemu_pid).await?;
+    trace!("Writing QEMU pid {qemu_pid} to {qemu_pid_path:?}");
+
+    // We drop the lock at this point because now we have a live qemu.pid that'll make sure that
+    // this run dir won't be reaped.
+    // `lock` is `None` in case this is a warmup run.
+    if let Some(lock) = lock {
+        trace!("Unlocking {:?}", lock.path());
+        lock.drop_async().await.expect("Couldn't drop lock");
+    }
+
+    let qemu_output = tokio::select! {
+        _ = cancellation_tokens.qemu.cancelled() => {
+            debug!("QEMU task was cancelled");
+            return Ok(());
+        }
+        val = qemu_child.wait_with_output() => {
+            if qemu_should_exit.load(Ordering::SeqCst) {
+                info!("QEMU has finished running");
+                return Ok(());
+            }
+            error!("QEMU process exited early, that's usually a bad sign");
+            val?
+        }
+    };
+
+    if !qemu_output.status.success() {
+        error!("QEMU failed: {}", String::from_utf8(qemu_output.stderr)?);
+        cancellation_tokens.ssh.cancel();
+    }
+
+    Ok(())
 }

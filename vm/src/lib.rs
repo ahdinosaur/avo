@@ -1,8 +1,8 @@
+use avo_machine::Machine;
 use thiserror::Error;
 
 use crate::{
     context::{Context, ContextError},
-    machines::VmMachine,
     runs::VmRunError,
 };
 
@@ -13,7 +13,8 @@ mod images;
 mod machines;
 mod paths;
 mod qemu;
-mod runs;
+mod run;
+mod utils;
 
 #[derive(Error, Debug)]
 pub enum VmError {
@@ -24,8 +25,8 @@ pub enum VmError {
     Run(#[from] VmRunError),
 }
 
-pub async fn run(machine: VmMachine) -> Result<(), VmError> {
-    let ctx = Context::new()?;
+pub async fn run(machine: Machine) -> Result<(), VmError> {
+    let mut ctx = Context::new()?;
     runs::run(&mut ctx, machine).await?;
     Ok(())
 }

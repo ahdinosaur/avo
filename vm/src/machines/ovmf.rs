@@ -4,7 +4,7 @@ use tokio::process::Command;
 
 use crate::paths::Paths;
 
-#[derive(Debug, Error)]
+#[derive(Error, Debug)]
 pub enum ConvertOvmfVarsError {
     #[error("failed to get output from `convert -O qcow $source_image $output_file`")]
     CommandOutput(#[from] tokio::io::Error),
@@ -25,16 +25,16 @@ pub enum ConvertOvmfVarsError {
 pub async fn convert_ovmf_uefi_variables(
     paths: &Paths,
     machine_id: &str,
-    source_image_path: &Path,
 ) -> Result<PathBuf, ConvertOvmfVarsError> {
-    let output_file = paths.ovmf_vars_file(machine_id);
+    let ovmf_vars_system_path = paths.ovmf_vars_system_file();
+    let ovmf_vars_path = paths.ovmf_vars_file(machine_id);
 
     let mut qemu_img_cmd = Command::new("qemu-img");
     qemu_img_cmd
         .arg("convert")
         .args(["-O", "qcow2"])
-        .arg(source_image_path)
-        .arg(&output_file);
+        .arg(&ovmf_vars_system_path)
+        .arg(&ovmf_vars_path);
 
     let qemu_img_output = qemu_img_cmd.output().await?;
     if !qemu_img_output.status.success() {
@@ -43,5 +43,5 @@ pub async fn convert_ovmf_uefi_variables(
         });
     }
 
-    Ok(output_file)
+    Ok(ovmf_vars_path)
 }
