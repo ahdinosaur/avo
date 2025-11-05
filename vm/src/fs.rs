@@ -1,3 +1,4 @@
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use thiserror::Error;
@@ -48,8 +49,14 @@ pub enum FsError {
         source: std::io::Error,
     },
 
-    #[error("Cannot read directory metadata '{path}': {source}")]
+    #[error("Cannot read metadata '{path}': {source}")]
     Metadata {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+
+    #[error("Cannot set permission '{path}': {source}")]
+    SetPermissions {
         path: PathBuf,
         source: std::io::Error,
     },
@@ -194,6 +201,29 @@ pub async fn setup_directory_access<P: AsRef<Path>>(path: P) -> Result<(), FsErr
             path: p.to_path_buf(),
         });
     }
+
+    Ok(())
+}
+
+pub async fn set_file_mode<P: AsRef<Path>>(path: P, mode: u32) -> Result<(), FsError> {
+    let p = path.as_ref();
+
+    let mut permissions = fs::metadata(p)
+        .await
+        .map_err(|source| FsError::Metadata {
+            path: p.to_path_buf(),
+            source,
+        })?
+        .permissions();
+
+    permissions.set_mode(mode);
+
+    fs::set_permissions(p, permissions)
+        .await
+        .map_err(|source| FsError::SetPermissions {
+            path: p.to_path_buf(),
+            source,
+        })?;
 
     Ok(())
 }

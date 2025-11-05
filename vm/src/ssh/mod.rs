@@ -1,23 +1,22 @@
 use std::fmt::Debug;
-use std::fs;
+use std::future::pending;
 use std::io::ErrorKind;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::{env, os::unix::fs::PermissionsExt, sync::Arc, time::Duration};
+use std::{env, sync::Arc, time::Duration};
 
-use base64ct::LineEnding;
-use russh::keys::ssh_key::{private::Ed25519Keypair, rand_core::OsRng};
-use russh::keys::{PrivateKey, PublicKey};
+use russh::keys::PrivateKey;
 use russh::{keys::key::PrivateKeyWithHashAlg, ChannelMsg, Disconnect};
 use serde::{Deserialize, Serialize};
 use termion::raw::IntoRawMode;
-use thiserror::Error;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::Instant;
 use tokio_fd::AsyncFd;
 use tokio_vsock::{VsockAddr, VsockStream};
 
 use crate::run::CancellationTokens;
+use crate::ssh::error::SshError;
+
+mod error;
+mod keypair;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Interactive {
@@ -26,86 +25,16 @@ pub enum Interactive {
     Auto,
 }
 
-#[derive(Error, Debug)]
-pub enum SshError {
-    #[error("I/O error: {0}")]
-    Io(#[from] std::io::Error),
-
-    #[error("SSH error: {0}")]
-    Russh(#[from] russh::Error),
-
-    #[error("Timed out connecting to virtual machine via SSH")]
-    Timeout,
-
-    #[error("SSH authentication (public key) failed")]
-    AuthFailed,
-
-    #[error("TTY requested but no terminal is available")]
-    TtyUnavailable,
-
-    #[error("Failed to set up stdin for interactive mode: {0}")]
-    StdinSetup(String),
-
-    #[error("SSH key encoding error: {0}")]
-    KeyEncoding(String),
-}
-
-type Result<T> = std::result::Result<T, SshError>;
-
-#[derive(Clone, Debug)]
-pub struct GeneratedSshKeypair {
-    pub pubkey_str: String,
-    pub pubkey_path: PathBuf,
-    pub privkey_str: String,
-    pub privkey_path: PathBuf,
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SshLaunchOpts {
     #[serde(skip)]
-    pub privkey: String,
+    pub private_key: String,
     pub tty: bool,
     pub interactive: Interactive,
     pub timeout: Duration,
     // pub env_vars: Vec<EnvVar>,
     pub args: Vec<String>,
     pub cid: u32,
-}
-
-/// Always create a fresh SSH keypair in `dir` and return both the strings and
-/// the file paths. This never reuses any system SSH keys.
-pub fn create_ssh_keypair(dir: &Path) -> Result<GeneratedSshKeypair> {
-    fs::create_dir_all(dir)?;
-
-    let privkey_path = dir.join("id_ed25519");
-    let pubkey_path = privkey_path.with_extension("pub");
-
-    // Always generate a new keypair.
-    let ed25519_keypair = Ed25519Keypair::random(&mut OsRng);
-
-    let pubkey_openssh = PublicKey::from(ed25519_keypair.public)
-        .to_openssh()
-        .map_err(|e| SshError::KeyEncoding(e.to_string()))?;
-    println!("Writing SSH public key to {:?}", pubkey_path);
-    fs::write(&pubkey_path, &pubkey_openssh)?;
-
-    let privkey_openssh = PrivateKey::from(ed25519_keypair)
-        .to_openssh(LineEnding::default())
-        .map_err(|e| SshError::KeyEncoding(e.to_string()))?
-        .to_string();
-    println!("Writing SSH private key to {:?}", privkey_path);
-    fs::write(&privkey_path, &privkey_openssh)?;
-
-    let mut perms = fs::metadata(&privkey_path)?.permissions();
-    perms.set_mode(0o600);
-    fs::set_permissions(&privkey_path, perms)?;
-
-    Ok(GeneratedSshKeypair {
-        pubkey_str: pubkey_openssh,
-        pubkey_path,
-        privkey_str: privkey_openssh,
-        privkey_path,
-    })
 }
 
 #[derive(Debug, Clone)]
@@ -391,7 +320,7 @@ impl Session {
 /// The `cancellation_tokens` are used to cancel a running QEMU task in case
 /// there's a problem with the SSH connection or upon command completion. The
 /// QEMU task can also use it to cancel the SSH task.
-pub async fn connect_ssh_for_command_cancellable(
+pub async fn connect_ssh_for_command(
     ssh_launch_opts: SshLaunchOpts,
     cancellation_tokens: Option<CancellationTokens>,
 ) -> Result<Option<u32>> {
@@ -408,7 +337,7 @@ pub async fn connect_ssh_for_command_cancellable(
     )
     .await
     .inspect_err(|_| {
-        if let Some(cancellation_tokens) = cancellation_tokens {
+        if let Some(cancellation_tokens) = &cancellation_tokens {
             cancellation_tokens.qemu.cancel();
         }
     })?;
@@ -427,8 +356,15 @@ pub async fn connect_ssh_for_command_cancellable(
             .map(|x| shell_escape::escape(x.into()))
             .collect::<Vec<_>>()
             .join(" ");
+
+        let cancel_future = if let Some(tokens) = &cancellation_tokens {
+            tokens.ssh.cancelled()
+        } else {
+            pending()
+        };
+
         let ssh_output = tokio::select! {
-            _ = cancellation_tokens.ssh.cancelled() => {
+            _ = cancel_future => {
                 println!("SSH task was cancelled");
                 return Ok(None)
             }
@@ -436,56 +372,19 @@ pub async fn connect_ssh_for_command_cancellable(
                 val
             }
         };
+        if let Some(cancellation_tokens) = &cancellation_tokens {
+            cancellation_tokens.qemu.cancel();
+        }
+        ssh_output?
+    };
+
+    println!("Exit code: {:?}", exit_code);
+
+    if let Some(cancellation_tokens) = &cancellation_tokens {
         cancellation_tokens.qemu.cancel();
-        ssh_output?
-    };
+    }
 
-    println!("Exit code: {:?}", exit_code);
-    cancellation_tokens.qemu.cancel();
     ssh.close().await?;
-    Ok(Some(exit_code))
-}
 
-/// Connect SSH and run a user-provided command.
-///
-/// If requested, this will be an interactive session.
-pub async fn connect_ssh_for_command(ssh_launch_opts: SshLaunchOpts) -> Result<Option<u32>> {
-    let privkey = PrivateKey::from_openssh(ssh_launch_opts.privkey)
-        .map_err(|e| SshError::KeyEncoding(e.to_string()))?;
-
-    // Session is a wrapper around a russh client.
-    let mut ssh = Session::connect(
-        privkey,
-        ssh_launch_opts.cid,
-        22,
-        ssh_launch_opts.timeout,
-        ssh_launch_opts.tty,
-    )
-    .await?;
-    println!("Connected via SSH");
-
-    let exit_code = {
-        let _raw_term = if ssh_launch_opts.tty {
-            Some(std::io::stdout().into_raw_mode()?)
-        } else {
-            None
-        };
-
-        let escaped_args = &ssh_launch_opts
-            .args
-            .into_iter()
-            .map(|x| shell_escape::escape(x.into()))
-            .collect::<Vec<_>>()
-            .join(" ");
-        let ssh_output = tokio::select! {
-            val = ssh.call(ssh_launch_opts.interactive, ssh_launch_opts.env_vars, escaped_args) => {
-                val
-            }
-        };
-        ssh_output?
-    };
-
-    println!("Exit code: {:?}", exit_code);
-    ssh.close().await?;
     Ok(Some(exit_code))
 }
