@@ -1,8 +1,3 @@
-// ssh/mod.rs
-
-pub mod error;
-pub mod keypair;
-
 use crate::run::CancellationTokens;
 use crate::ssh::error::SshError;
 use russh::client;
@@ -20,6 +15,9 @@ use tokio::signal::unix::{signal, SignalKind};
 use tokio::time::{sleep, Instant};
 use tokio_vsock::{VsockAddr, VsockStream};
 
+pub mod error;
+pub mod keypair;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Interactive {
     Always,
@@ -35,7 +33,6 @@ pub struct EnvVar {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SshLaunchOpts {
-    #[serde(skip)]
     pub private_key: String,
     pub tty: bool,
     pub interactive: Interactive,

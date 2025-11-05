@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::LazyLock,
+};
 
 use directories::ProjectDirs;
 use thiserror::Error;
@@ -26,7 +29,10 @@ impl Paths {
     }
 
     pub fn ovmf_vars_system_file(&self) -> &Path {
-        &PathBuf::from("/usr/share/OVMF/OVMF_VARS_4M.fd")
+        static OVMF_VARS_SYSTEM_FILE: LazyLock<PathBuf> =
+            LazyLock::new(|| PathBuf::from("/usr/share/OVMF/OVMF_VARS_4M.fd"));
+
+        OVMF_VARS_SYSTEM_FILE.as_path()
     }
 
     pub fn data_dir(&self) -> &Path {

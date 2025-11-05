@@ -3,7 +3,7 @@ use thiserror::Error;
 
 use crate::{
     context::{Context, ContextError},
-    runs::VmRunError,
+    run::RunError,
 };
 
 mod context;
@@ -23,11 +23,11 @@ pub enum VmError {
     Context(#[from] ContextError),
 
     #[error(transparent)]
-    Run(#[from] VmRunError),
+    Run(#[from] RunError),
 }
 
 pub async fn run(machine: Machine) -> Result<(), VmError> {
     let mut ctx = Context::new()?;
-    runs::run(&mut ctx, machine).await?;
+    run::run(&mut ctx, &machine).await?;
     Ok(())
 }

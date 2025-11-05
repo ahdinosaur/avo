@@ -46,12 +46,17 @@ pub enum VmMachineImage {
     },
 }
 
+pub fn get_machine_id(machine: &Machine) -> &str {
+    machine.hostname.as_ref()
+}
+
 pub async fn setup_machine_image(
     ctx: &mut Context,
-    machine: Machine,
+    machine: &Machine,
 ) -> Result<VmMachineImage, VmMachineError> {
-    let source_image = get_image(ctx, machine.clone()).await?;
+    let source_image = get_image(ctx, machine).await?;
 
+    #[allow(irrefutable_let_patterns)]
     let VmSourceImage::Linux {
         arch,
         linux,
@@ -61,10 +66,10 @@ pub async fn setup_machine_image(
         unimplemented!();
     };
 
-    let machine_id = machine.hostname.as_ref();
+    let machine_id = get_machine_id(machine);
 
     let overlay_image_path = create_overlay_image(ctx.paths(), machine_id, &image_path).await?;
-    let ovmf_vars_path = convert_ovmf_uefi_variables(ctx.paths(), machine_id, &image_path).await?;
+    let ovmf_vars_path = convert_ovmf_uefi_variables(ctx.paths(), machine_id).await?;
     let VmImageKernelDetails {
         kernel_path,
         initrd_path,

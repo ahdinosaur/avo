@@ -18,8 +18,11 @@ use thiserror::Error;
 use tokio::{fs, process::Command};
 
 use crate::{
-    context::Context, machines::VmMachineImage, qemu::virtiofsd::launch_virtiofsd,
-    run::CancellationTokens, utils::escape_path,
+    machines::VmMachineImage,
+    paths::{ExecutablePaths, Paths},
+    qemu::virtiofsd::launch_virtiofsd,
+    run::CancellationTokens,
+    utils::escape_path,
 };
 
 mod virtiofsd;
@@ -117,7 +120,8 @@ pub enum QemuLaunchError {
 }
 
 pub async fn launch_qemu(
-    ctx: &mut Context,
+    paths: &Paths,
+    executables: &ExecutablePaths,
     machine_id: &str,
     qemu_launch_opts: QemuLaunchOpts,
     cancellation_tokens: CancellationTokens,
@@ -127,9 +131,10 @@ pub async fn launch_qemu(
 ) -> Result<(), QemuLaunchError> {
     let vm_image = qemu_launch_opts.vm_image;
 
+    #[allow(irrefutable_let_patterns)]
     let VmMachineImage::Linux {
-        arch,
-        linux,
+        arch: _,
+        linux: _,
         overlay_image_path,
         kernel_path,
         initrd_path,
@@ -141,9 +146,9 @@ pub async fn launch_qemu(
 
     let overlay_image_path_str = overlay_image_path.to_string_lossy();
     let kernel_path_str = kernel_path.to_string_lossy();
-    let initrd_path_str = initrd_path.map(|p| p.to_string_lossy());
+    let initrd_path_str = initrd_path.map(|p| p.to_string_lossy().into_owned());
     let ovmf_vars_path_str = ovmf_vars_path.to_string_lossy();
-    let ovmf_vars_system_path_str = ctx.paths().ovmf_vars_system_file().to_string_lossy();
+    let _ovmf_vars_system_path_str = paths.ovmf_vars_system_file().to_string_lossy();
 
     let vm = qemu_launch_opts.vm;
     let memory_size = vm
@@ -173,7 +178,7 @@ pub async fn launch_qemu(
     let qmp_socket_path = run_dir.join("qmp.sock,server,wait=off");
     let qmp_socket_path_str = qmp_socket_path.to_string_lossy();
 
-    let mut qemu_cmd = Command::new(ctx.executables().qemu_x86_64().clone());
+    let mut qemu_cmd = Command::new(executables.qemu_x86_64().clone());
     qemu_cmd
         // Decrease idle CPU usage
         .args(["-machine", "hpet=off"])
@@ -242,12 +247,12 @@ pub async fn launch_qemu(
 
     // Add virtiofsd-based directory shares
     for (i, vol) in qemu_launch_opts.volumes.iter().enumerate() {
-        let virtiofsd_child = launch_virtiofsd(ctx, machine_id, vol).await.map_err(|e| {
-            QemuLaunchError::VirtiofsdLaunch {
+        let virtiofsd_child = launch_virtiofsd(paths, executables, machine_id, vol)
+            .await
+            .map_err(|e| QemuLaunchError::VirtiofsdLaunch {
                 volume: vol.clone(),
                 error: e.to_string(),
-            }
-        })?;
+            })?;
         virtiofsd_handles.push(virtiofsd_child);
 
         let socket_path = run_dir.join(vol.socket_name());
@@ -330,7 +335,7 @@ pub async fn launch_qemu(
         cancellation_tokens.ssh.cancel();
 
         return Err(QemuLaunchError::QemuError {
-            stderr: String::from_utf8_lossy(qemu_output.stderr).to_string(),
+            stderr: String::from_utf8_lossy(&qemu_output.stderr).to_string(),
         });
     }
 

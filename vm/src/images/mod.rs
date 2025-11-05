@@ -41,6 +41,7 @@ pub async fn get_images_list() -> Result<VmImagesList, VmImageError> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum VmSourceImage {
     Linux {
         arch: Arch,
@@ -66,7 +67,10 @@ impl VmSourceImage {
     }
 }
 
-pub async fn get_image(ctx: &mut Context, machine: Machine) -> Result<VmSourceImage, VmImageError> {
+pub async fn get_image(
+    ctx: &mut Context,
+    machine: &Machine,
+) -> Result<VmSourceImage, VmImageError> {
     let image_index = find_image_index_for_machine(machine).await?;
 
     let Some(image_index) = image_index else {
@@ -87,7 +91,7 @@ pub async fn get_image(ctx: &mut Context, machine: Machine) -> Result<VmSourceIm
 }
 
 async fn find_image_index_for_machine(
-    machine: Machine,
+    machine: &Machine,
 ) -> Result<Option<VmImageIndex>, VmImageError> {
     let images_list = get_images_list().await?;
     let image_index = images_list

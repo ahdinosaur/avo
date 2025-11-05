@@ -20,6 +20,7 @@ dir-lock = "0.5.0"
 base64ct = { version = "1.6.0", features = ["alloc"] }
 russh = "0.54.6"
 termion = "4.0.5"
-tokio-fd = "0.3.0"
 tokio-vsock = "0.7.2"
+tokio-util = "0.7.17"
 shell-escape = "0.1.5"
+rand = "0.9.2"

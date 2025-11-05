@@ -16,6 +16,18 @@ pub struct SshKeypair {
 const PRIVKEY_FILE: &str = "id_ed25519";
 const PUBKEY_FILE: &str = "id_ed25519.pub";
 
+pub async fn ensure_keypair(directory: &Path) -> Result<SshKeypair, SshError> {
+    if has_keypair(directory).await? {
+        return load_keypair(directory).await;
+    }
+
+    let keypair = generate_keypair()?;
+
+    save_keypair(&keypair, directory).await?;
+
+    Ok(keypair)
+}
+
 pub fn generate_keypair() -> Result<SshKeypair, SshError> {
     let ed25519 = Ed25519Keypair::random(&mut OsRng);
 
@@ -34,7 +46,7 @@ pub fn generate_keypair() -> Result<SshKeypair, SshError> {
     })
 }
 
-pub async fn save_keypair(keypair: SshKeypair, directory: &Path) -> Result<(), SshError> {
+pub async fn save_keypair(keypair: &SshKeypair, directory: &Path) -> Result<(), SshError> {
     fs::create_dir(directory).await?;
 
     let privkey_path = directory.join(PRIVKEY_FILE);
@@ -47,6 +59,16 @@ pub async fn save_keypair(keypair: SshKeypair, directory: &Path) -> Result<(), S
     fs::set_file_mode(&privkey_path, 0o600).await?;
 
     Ok(())
+}
+
+pub async fn has_keypair(directory: &Path) -> Result<bool, SshError> {
+    let privkey_path = directory.join(PRIVKEY_FILE);
+    let pubkey_path = directory.join(PUBKEY_FILE);
+
+    let public_key_exists = fs::path_exists(&pubkey_path).await?;
+    let private_key_exists = fs::path_exists(&privkey_path).await?;
+
+    Ok(public_key_exists && private_key_exists)
 }
 
 pub async fn load_keypair(directory: &Path) -> Result<SshKeypair, SshError> {

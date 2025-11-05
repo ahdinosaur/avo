@@ -5,7 +5,10 @@ use tokio::{
     process::{Child, Command},
 };
 
-use crate::{context::Context, qemu::BindMount};
+use crate::{
+    paths::{ExecutablePaths, Paths},
+    qemu::BindMount,
+};
 
 #[derive(Error, Debug)]
 pub enum LaunchVirtiofsdError {
@@ -17,21 +20,19 @@ pub enum LaunchVirtiofsdError {
 
 /// Launch an instance of virtiofsd for a particular volume
 pub async fn launch_virtiofsd(
-    ctx: &mut Context,
+    paths: &Paths,
+    executables: &ExecutablePaths,
     machine_id: &str,
     volume: &BindMount,
 ) -> Result<Child, LaunchVirtiofsdError> {
-    let socket_path = ctx
-        .paths()
-        .machine_dir(machine_id)
-        .join(volume.socket_name());
+    let socket_path = paths.machine_dir(machine_id).join(volume.socket_name());
 
-    let mut virtiofsd_cmd = Command::new(ctx.executables().unshare());
+    let mut virtiofsd_cmd = Command::new(executables.unshare());
     virtiofsd_cmd
         .arg("-r")
         .arg("--map-auto")
         .arg("--")
-        .arg(ctx.executables().virtiofsd())
+        .arg(executables.virtiofsd())
         .args(["--shared-dir", &volume.source.to_string_lossy()])
         .args(["--socket-path", &socket_path.to_string_lossy()])
         // This seems to allow us to skip past the guest's page cache which is very desireable
