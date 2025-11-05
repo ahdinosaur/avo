@@ -11,6 +11,7 @@ use russh::keys::PrivateKey;
 use russh::ChannelMsg;
 use serde::{Deserialize, Serialize};
 use std::env;
+use std::io::IsTerminal;
 use std::sync::Arc;
 use std::time::Duration;
 use termion::raw::IntoRawMode;
@@ -45,12 +46,9 @@ pub struct SshLaunchOpts {
     pub port: Option<u32>,
 }
 
-/// Minimal SSH client handler that trusts any server key.
-/// Replace with real host key verification for production.
 #[derive(Debug, Clone)]
 struct SshClient;
 
-#[allow(clippy::unused_async)]
 impl client::Handler for SshClient {
     type Error = russh::Error;
 
@@ -122,7 +120,7 @@ pub async fn connect_ssh_for_command(
         .map(|x| shell_escape::escape(x.clone().into()))
         .collect::<Vec<_>>()
         .join(" ");
-    channel.exec(true, &command).await?;
+    channel.exec(true, command).await?;
 
     // 6) Optional raw terminal and resize signal
     let _raw_guard = if opts.tty {
@@ -137,14 +135,13 @@ pub async fn connect_ssh_for_command(
     };
 
     // 7) Determine stdin behavior
-    let forward_stdin = match opts.interactive {
-        Interactive::Always => true,
-        Interactive::Never => false,
-        Interactive::Auto => unsafe { libc::isatty(libc::STDIN_FILENO) == 1 },
-    };
     let mut stdin = tokio::io::stdin();
     let mut stdin_buf = vec![0u8; 4096];
-    let mut stdin_open = forward_stdin;
+    let mut stdin_open = match opts.interactive {
+        Interactive::Always => true,
+        Interactive::Never => false,
+        Interactive::Auto => std::io::stdin().is_terminal(),
+    };
 
     let mut stdout = tokio::io::stdout();
     let mut stderr = tokio::io::stderr();
