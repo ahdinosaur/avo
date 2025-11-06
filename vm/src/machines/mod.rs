@@ -79,7 +79,7 @@ pub async fn setup_machine_image(
     let VmImageKernelDetails {
         kernel_path,
         initrd_path,
-    } = extract_kernel(ctx, machine_id, linux.clone(), &image_path).await?;
+    } = extract_kernel(ctx, machine_id, &image_path).await?;
 
     Ok(VmMachineImage::Linux {
         arch,

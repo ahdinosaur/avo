@@ -56,7 +56,7 @@ impl Paths {
     }
 
     pub fn machines_dir(&self) -> PathBuf {
-        self.runtime_dir().join("vm/machines")
+        self.data_dir().join("vm/machines")
     }
 
     pub fn machine_dir(&self, machine_id: &str) -> PathBuf {
@@ -79,6 +79,7 @@ pub struct ExecutablePathsError(#[from] which::Error);
 #[derive(Debug, Clone)]
 pub struct ExecutablePaths {
     virt_copy_out: PathBuf,
+    virt_get_kernel: PathBuf,
     virtiofsd: PathBuf,
     qemu_x86_64: PathBuf,
     qemu_aarch64: PathBuf,
@@ -88,6 +89,7 @@ pub struct ExecutablePaths {
 impl ExecutablePaths {
     pub fn new() -> Result<ExecutablePaths, ExecutablePathsError> {
         let virt_copy_out = which_global("virt-copy-out")?;
+        let virt_get_kernel = which_global("virt-get-kernel")?;
         let virtiofsd = which_global("virtiofsd")?;
         let qemu_x86_64 = which_global("qemu-system-x86_64")?;
         let qemu_aarch64 = which_global("qemu-system-aarch64")?;
@@ -95,6 +97,7 @@ impl ExecutablePaths {
 
         Ok(ExecutablePaths {
             virt_copy_out,
+            virt_get_kernel,
             virtiofsd,
             qemu_x86_64,
             qemu_aarch64,
@@ -104,6 +107,9 @@ impl ExecutablePaths {
 
     pub fn virt_copy_out(&self) -> &Path {
         &self.virt_copy_out
+    }
+    pub fn virt_get_kernel(&self) -> &Path {
+        &self.virt_get_kernel
     }
 
     pub fn virtiofsd(&self) -> &Path {

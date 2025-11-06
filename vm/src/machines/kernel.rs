@@ -1,8 +1,10 @@
-use avo_system::Linux;
 use thiserror::Error;
 use tokio::process::Command;
 
-use crate::context::Context;
+use crate::{
+    context::Context,
+    fs::{self, FsError},
+};
 use std::path::{Path, PathBuf};
 
 pub struct VmImageKernelDetails {
@@ -16,6 +18,8 @@ pub enum ExtractKernelError {
     CommandOutput(#[from] tokio::io::Error),
     #[error("virt-copy-out failed")]
     CommandError { stderr: String },
+    #[error(transparent)]
+    Fs(#[from] FsError),
 }
 
 /// Extract the kernel and initrd from a given image
@@ -26,39 +30,34 @@ pub enum ExtractKernelError {
 pub async fn extract_kernel(
     ctx: &mut Context,
     machine_id: &str,
-    linux: Linux,
     source_image_path: &Path,
 ) -> Result<VmImageKernelDetails, ExtractKernelError> {
-    let kernel = "vmlinuz-linux";
-    let initrd = if matches!(linux, Linux::Arch) {
-        None
-    } else {
-        Some("initramfs-linux,img")
-    };
-
     let dest_dir = ctx.paths().machine_dir(machine_id);
-    let mut virt_copy_out_cmd = Command::new(ctx.executables().virt_copy_out());
+    let mut virt_get_kernel_cmd = Command::new(ctx.executables().virt_get_kernel());
 
-    let mut files_to_extract = Vec::with_capacity(2);
-    if let Some(initrd) = initrd {
-        files_to_extract.push(format!("/boot/{}", initrd));
-    }
-    files_to_extract.push(format!("/boot/{}", kernel));
-
-    virt_copy_out_cmd
+    virt_get_kernel_cmd
         .args(["-a", &source_image_path.to_string_lossy()])
-        .args(files_to_extract)
-        .arg(&dest_dir);
+        .args(["-o", &dest_dir.to_string_lossy()])
+        .arg("--unversioned-names");
 
-    let virt_copy_out_output = virt_copy_out_cmd.output().await?;
+    let virt_copy_out_output = virt_get_kernel_cmd.output().await?;
     if !virt_copy_out_output.status.success() {
         return Err(ExtractKernelError::CommandError {
             stderr: String::from_utf8_lossy(&virt_copy_out_output.stderr).to_string(),
         });
     }
 
+    let kernel_path = dest_dir.join("vmlinuz");
+    let initrd_path = dest_dir.join("initrd.img");
+
+    let initrd_path = if fs::path_exists(&initrd_path).await? {
+        Some(initrd_path)
+    } else {
+        None
+    };
+
     Ok(VmImageKernelDetails {
-        kernel_path: dest_dir.join(kernel),
-        initrd_path: initrd.map(|initrd| dest_dir.join(initrd)),
+        kernel_path,
+        initrd_path,
     })
 }

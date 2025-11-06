@@ -47,12 +47,15 @@ pub enum RunError {
 
 pub async fn run(ctx: &mut Context, machine: &Machine) -> Result<Option<u32>, RunError> {
     let machine_image = setup_machine_image(ctx, machine).await?;
+    println!("got machine image");
 
     let mut rng = rand::rng();
 
     let machine_id = get_machine_id(machine);
     let machine_dir = ctx.paths().machine_dir(machine_id);
+    println!("going to ensure keypair");
     let ssh_keypair = ensure_keypair(&machine_dir).await?;
+    println!("ensured keypair");
 
     let cid = rng.random();
 
@@ -90,6 +93,7 @@ pub async fn run(ctx: &mut Context, machine: &Machine) -> Result<Option<u32>, Ru
         let qemu_should_exit = Arc::new(AtomicBool::new(false));
 
         async move {
+            println!("call launch_qemu()");
             launch_qemu(
                 &paths,
                 &executables,
@@ -109,6 +113,7 @@ pub async fn run(ctx: &mut Context, machine: &Machine) -> Result<Option<u32>, Ru
         let cancellatation_tokens = cancellatation_tokens.clone();
 
         async move {
+            println!("call connect_ssh_for_command()");
             let exit_code =
                 connect_ssh_for_command(ssh_launch_opts, Some(cancellatation_tokens)).await?;
 

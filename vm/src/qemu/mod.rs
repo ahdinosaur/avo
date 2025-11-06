@@ -129,6 +129,8 @@ pub async fn launch_qemu(
     run_dir: &Path,
     lock: Option<DirLock>,
 ) -> Result<(), QemuLaunchError> {
+    println!("called launch_qemu()");
+
     let vm_image = qemu_launch_opts.vm_image;
 
     #[allow(irrefutable_let_patterns)]
@@ -290,6 +292,8 @@ pub async fn launch_qemu(
         qemu_cmd.arg("-nographic");
     }
 
+    println!("run qemu cmd: {:?}", qemu_cmd);
+
     let qemu_child = qemu_cmd
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -305,7 +309,9 @@ pub async fn launch_qemu(
         .id()
         .ok_or(QemuLaunchError::QemuPidUnavailable)?
         .to_string();
+
     fs::write(&qemu_pid_path, &qemu_pid).await?;
+
     // trace!("Writing QEMU pid {qemu_pid} to {qemu_pid_path:?}");
 
     // We drop the lock at this point because now we have a live qemu.pid that'll make sure that
