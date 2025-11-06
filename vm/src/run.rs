@@ -83,7 +83,6 @@ pub async fn run(ctx: &mut Context, machine: &Machine) -> Result<Option<u32>, Ru
     };
 
     let cancellatation_tokens = CancellationTokens::default();
-    let lock = DirLock::new(&machine_dir).await?;
 
     let mut joinset: JoinSet<Result<Option<u32>, RunError>> = JoinSet::new();
     joinset.spawn({
@@ -103,7 +102,6 @@ pub async fn run(ctx: &mut Context, machine: &Machine) -> Result<Option<u32>, Ru
                 cancellatation_tokens,
                 qemu_should_exit,
                 &machine_dir,
-                Some(lock),
             )
             .await?;
 

@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{fmt::Display, ops::Div};
 
 use serde::{Deserialize, Serialize};
 
@@ -29,5 +29,13 @@ impl MemorySize {
 impl Display for MemorySize {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)
+    }
+}
+
+impl Div<u64> for MemorySize {
+    type Output = MemorySize;
+
+    fn div(self, rhs: u64) -> Self::Output {
+        Self(self.0 / rhs)
     }
 }

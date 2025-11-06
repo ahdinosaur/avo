@@ -21,15 +21,22 @@ Machine configuration:
 
 - qemu
 - virtiofsd
-- virt-copy-out (in libguestfs)
+- virt-get-kernel (in libguestfs)
+- unshare
 
 ### Debian
 
 ```
-sudo apt install qemu-system virtiofsd ovmf libguestfs-tools
+sudo apt install qemu-system virtiofsd ovmf libguestfs-tools unshare
 ```
 
 If on Debian Bookworm, install `virtiofsd` with `cargo install`.
+
+Also:
+
+```shell
+sudo usermod -aG kvm $USER
+```
 
 ## References
 

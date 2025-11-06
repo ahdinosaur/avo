@@ -12,10 +12,10 @@ use std::{
 use avo_machine::MachineVmOptions;
 use avo_system::{CpuCount, MemorySize};
 use base64ct::{Base64, Encoding};
-use dir_lock::DirLock;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::{fs, process::Command};
+use tracing::{debug, error, info};
 
 use crate::{
     machines::VmMachineImage,
@@ -127,9 +127,8 @@ pub async fn launch_qemu(
     cancellation_tokens: CancellationTokens,
     qemu_should_exit: Arc<AtomicBool>,
     run_dir: &Path,
-    lock: Option<DirLock>,
 ) -> Result<(), QemuLaunchError> {
-    println!("called launch_qemu()");
+    debug!("called launch_qemu()");
 
     let vm_image = qemu_launch_opts.vm_image;
 
@@ -150,12 +149,13 @@ pub async fn launch_qemu(
     let kernel_path_str = kernel_path.to_string_lossy();
     let initrd_path_str = initrd_path.map(|p| p.to_string_lossy().into_owned());
     let ovmf_vars_path_str = ovmf_vars_path.to_string_lossy();
-    let _ovmf_vars_system_path_str = paths.ovmf_vars_system_file().to_string_lossy();
+    let ovmf_vars_system_path_str = paths.ovmf_vars_system_file().to_string_lossy();
 
     let vm = qemu_launch_opts.vm;
     let memory_size = vm
         .memory_size
         .unwrap_or_else(|| MemorySize::new(8 * 1024 * 1024 * 1024));
+    let memory_size_in_gb = memory_size / 1024 / 1024 / 1024;
     let cpu_count = vm.cpu_count.unwrap_or_else(|| CpuCount::new(2));
 
     let ssh_pubkey_base64 = Base64::encode_string(qemu_launch_opts.ssh_pubkey.as_bytes());
@@ -199,18 +199,18 @@ pub async fn launch_qemu(
         // Free Page Reporting allows the guest to signal to the host that memory can be reclaimed.
         .args(["-device", "virtio-balloon,free-page-reporting=on"])
         // Memory configuration
-        .args(["-m", &format!("{memory_size}")])
+        .args(["-m", &format!("{memory_size_in_gb}G")])
         .args([
             "-object",
             &format!(
-                "memory-backend-memfd,id=mem0,merge=on,share=on,size={memory_size}"
+                "memory-backend-memfd,id=mem0,merge=on,share=on,size={memory_size_in_gb}G"
             ),
         ])
         .args(["-numa", "node,memdev=mem0"])
         // UEFI
         .args([
             "-drive",
-            "if=pflash,format=raw,unit=0,file={ovmf_vars_system_path_str},readonly=on",
+            &format!("if=pflash,format=raw,unit=0,file={ovmf_vars_system_path_str},readonly=on"),
         ])
         .args([
             "-drive",
@@ -292,7 +292,7 @@ pub async fn launch_qemu(
         qemu_cmd.arg("-nographic");
     }
 
-    println!("run qemu cmd: {:?}", qemu_cmd);
+    info!("run qemu cmd: {:?}", qemu_cmd);
 
     let qemu_child = qemu_cmd
         .stdin(Stdio::piped())
@@ -314,14 +314,6 @@ pub async fn launch_qemu(
 
     // trace!("Writing QEMU pid {qemu_pid} to {qemu_pid_path:?}");
 
-    // We drop the lock at this point because now we have a live qemu.pid that'll make sure that
-    // this run dir won't be reaped.
-    // `lock` is `None` in case this is a warmup run.
-    if let Some(lock) = lock {
-        // trace!("Unlocking {:?}", lock.path());
-        lock.drop_async().await.expect("Couldn't drop lock");
-    }
-
     let qemu_output = tokio::select! {
         _ = cancellation_tokens.qemu.cancelled() => {
             // debug!("QEMU task was cancelled");
@@ -332,7 +324,7 @@ pub async fn launch_qemu(
                 // info!("QEMU has finished running");
                 return Ok(());
             }
-            eprintln!("QEMU process exited early, that's usually a bad sign");
+            error!("QEMU process exited early, that's usually a bad sign");
             val?
         }
     };
