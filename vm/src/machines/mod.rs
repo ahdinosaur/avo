@@ -6,6 +6,7 @@ use thiserror::Error;
 
 use crate::{
     context::Context,
+    fs::{self, FsError},
     images::{get_image, VmImageError, VmSourceImage},
     machines::{
         kernel::{extract_kernel, ExtractKernelError, VmImageKernelDetails},
@@ -31,6 +32,9 @@ pub enum VmMachineError {
 
     #[error(transparent)]
     CreateOverlayImage(#[from] CreateOverlayImageError),
+
+    #[error(transparent)]
+    Fs(#[from] FsError),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,6 +71,8 @@ pub async fn setup_machine_image(
     };
 
     let machine_id = get_machine_id(machine);
+    let machine_dir = ctx.paths().machine_dir(machine_id);
+    fs::setup_directory_access(machine_dir).await?;
 
     let overlay_image_path = create_overlay_image(ctx.paths(), machine_id, &image_path).await?;
     let ovmf_vars_path = convert_ovmf_uefi_variables(ctx.paths(), machine_id).await?;

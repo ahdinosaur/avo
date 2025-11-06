@@ -178,7 +178,7 @@ pub async fn launch_qemu(
     let qmp_socket_path = run_dir.join("qmp.sock,server,wait=off");
     let qmp_socket_path_str = qmp_socket_path.to_string_lossy();
 
-    let mut qemu_cmd = Command::new(executables.qemu_x86_64().clone());
+    let mut qemu_cmd = Command::new(executables.qemu_x86_64());
     qemu_cmd
         // Decrease idle CPU usage
         .args(["-machine", "hpet=off"])

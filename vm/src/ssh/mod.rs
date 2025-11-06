@@ -144,7 +144,7 @@ pub async fn connect_ssh_for_command(
     let mut stderr = tokio::io::stderr();
 
     // 8) Optional cancellation future
-    let mut cancel = cancellation_tokens.as_ref().map(|t| t.ssh.cancelled());
+    let cancel_token = cancellation_tokens.as_ref().map(|t| t.ssh.clone());
 
     // 9) Drive a small event loop with clear semantics:
     // - Forward SSH stdout/stderr to local stdout/stderr
@@ -157,7 +157,7 @@ pub async fn connect_ssh_for_command(
     loop {
         tokio::select! {
             // External cancellation
-            _ = async { if let Some(c) = &mut cancel { c.await } }, if cancel.is_some() => {
+            _ = cancel_token.as_ref().unwrap().cancelled(), if cancel_token.is_some() => {
                 let _ = channel.eof().await;
                 let _ = channel.close().await;
                 let _ = handle.disconnect(russh::Disconnect::ByApplication, "", "English").await;

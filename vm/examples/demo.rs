@@ -8,7 +8,7 @@ async fn main() {
         hostname: "test".parse().unwrap(),
         os: Os::Linux(Linux::Debian { version: 13 }),
         arch: Arch::X86_64,
-        vm: None,
+        vm: Default::default(),
     };
     run(machine).await.unwrap();
 }

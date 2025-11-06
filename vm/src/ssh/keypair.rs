@@ -47,7 +47,7 @@ pub fn generate_keypair() -> Result<SshKeypair, SshError> {
 }
 
 pub async fn save_keypair(keypair: &SshKeypair, directory: &Path) -> Result<(), SshError> {
-    fs::create_dir(directory).await?;
+    fs::setup_directory_access(directory).await?;
 
     let privkey_path = directory.join(PRIVKEY_FILE);
     let pubkey_path = directory.join(PUBKEY_FILE);
