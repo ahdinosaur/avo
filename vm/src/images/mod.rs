@@ -4,6 +4,7 @@ use avo_machine::Machine;
 use avo_system::{Arch, Linux, Os};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tracing::{info, instrument};
 
 mod hash;
 mod list;
@@ -77,13 +78,13 @@ pub async fn get_image(
         panic!("Unable to find matching image for machine");
     };
 
-    println!("image: {:?}", image_index);
+    info!("image: {:?}", image_index);
 
-    println!("fetching...");
+    info!("fetching...");
 
     fetch_image(ctx, &image_index).await?;
 
-    println!("fetched.");
+    info!("fetched.");
 
     let image = get_image_from_index(ctx, &image_index);
 
@@ -116,7 +117,7 @@ async fn fetch_image(ctx: &mut Context, image_index: &VmImageIndex) -> Result<()
         .await?;
 
     let hash = VmImageHash::new(&image_index.hash, &hash_path);
-    hash.validate(&image_index, &image_path).await?;
+    hash.validate(image_index, &image_path).await?;
 
     Ok(())
 }
