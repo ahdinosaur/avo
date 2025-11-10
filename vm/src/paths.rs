@@ -28,6 +28,13 @@ impl Paths {
         }
     }
 
+    pub fn ovmf_code_system_file(&self) -> &Path {
+        static OVMF_CODE_SYSTEM_FILE: LazyLock<PathBuf> =
+            LazyLock::new(|| PathBuf::from("/usr/share/OVMF/OVMF_CODE_4M.fd"));
+
+        OVMF_CODE_SYSTEM_FILE.as_path()
+    }
+
     pub fn ovmf_vars_system_file(&self) -> &Path {
         static OVMF_VARS_SYSTEM_FILE: LazyLock<PathBuf> =
             LazyLock::new(|| PathBuf::from("/usr/share/OVMF/OVMF_VARS_4M.fd"));

@@ -149,7 +149,7 @@ pub async fn launch_qemu(
     let kernel_path_str = kernel_path.to_string_lossy();
     let initrd_path_str = initrd_path.map(|p| p.to_string_lossy().into_owned());
     let ovmf_vars_path_str = ovmf_vars_path.to_string_lossy();
-    let ovmf_vars_system_path_str = paths.ovmf_vars_system_file().to_string_lossy();
+    let ovmf_code_system_path_str = paths.ovmf_code_system_file().to_string_lossy();
 
     let vm = qemu_launch_opts.vm;
     let memory_size = vm
@@ -210,7 +210,7 @@ pub async fn launch_qemu(
         // UEFI
         .args([
             "-drive",
-            &format!("if=pflash,format=raw,unit=0,file={ovmf_vars_system_path_str},readonly=on"),
+            &format!("if=pflash,format=raw,unit=0,file={ovmf_code_system_path_str},readonly=on"),
         ])
         .args([
             "-drive",
