@@ -75,7 +75,7 @@ pub async fn run(ctx: &mut Context, machine: &Machine) -> Result<Option<u32>, Ru
         private_key: ssh_keypair.private_key,
         tty: std::io::stdout().is_terminal(),
         interactive: Interactive::Auto,
-        timeout: Duration::from_secs(20),
+        timeout: Duration::from_secs(120),
         env_vars: vec![],
         args: vec!["echo".into(), "hi".into()],
         cid,
