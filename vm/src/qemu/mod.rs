@@ -188,7 +188,7 @@ pub async fn launch_qemu(
         // We extracted the kernel and initrd from this image earlier in order to boot it more
         // quickly.
         .args(["-kernel", &kernel_path_str])
-        .args(["-append", "rw root=/dev/vda3"])
+        .args(["-append", "rw root=/dev/vda1"])
         // SSH port forwarding
         .args([
             "-device",
