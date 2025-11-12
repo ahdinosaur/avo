@@ -14,7 +14,7 @@ use crate::{
     context::Context,
     instance::{get_machine_id, setup_instance, VmInstanceError},
     qemu::{launch_qemu, PublishPort, QemuLaunchError, QemuLaunchOpts},
-    ssh::{error::SshError, keypair::ensure_keypair, ssh_command, SshLaunchOpts},
+    ssh::{error::SshError, ssh_command, SshLaunchOpts},
 };
 
 #[derive(Debug, Clone, Default)]
@@ -47,7 +47,7 @@ pub async fn run(ctx: &mut Context, machine: &Machine) -> Result<Option<u32>, Ru
     let machine_id = get_machine_id(machine);
     let machine_dir = ctx.paths().machine_dir(machine_id);
 
-    let private_key = vm_instance.ssh_keypair().private_key.clone();
+    let private_key = vm_instance.ssh_keypair.private_key.clone();
 
     let qemu_launch_opts = QemuLaunchOpts {
         vm: machine.vm.clone(),

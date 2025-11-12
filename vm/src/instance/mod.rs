@@ -1,3 +1,8 @@
+mod cloud_init;
+mod kernel;
+mod overlay;
+mod ovmf;
+
 use avo_machine::Machine;
 use avo_system::{Arch, Linux};
 use serde::{Deserialize, Serialize};
@@ -9,7 +14,8 @@ use crate::{
     fs::{self, FsError},
     image::{get_image, VmImage, VmImageError},
     instance::{
-        kernel::{extract_kernel, ExtractKernelError, VmImageKernelDetails},
+        cloud_init::{setup_cloud_init, CloudInitError, VmInstanceCloudInit},
+        kernel::{extract_kernel, ExtractKernelError, VmInstanceKernelDetails},
         overlay::{create_overlay_image, CreateOverlayImageError},
         ovmf::{convert_ovmf_uefi_variables, ConvertOvmfVarsError},
     },
@@ -18,10 +24,6 @@ use crate::{
         keypair::{ensure_keypair, SshKeypair},
     },
 };
-
-mod kernel;
-mod overlay;
-mod ovmf;
 
 #[derive(Error, Debug)]
 pub enum VmInstanceError {
@@ -38,6 +40,9 @@ pub enum VmInstanceError {
     CreateOverlayImage(#[from] CreateOverlayImageError),
 
     #[error(transparent)]
+    CloudInit(#[from] CloudInitError),
+
+    #[error(transparent)]
     Fs(#[from] FsError),
 
     #[error(transparent)]
@@ -45,25 +50,15 @@ pub enum VmInstanceError {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[non_exhaustive]
-pub enum VmInstance {
-    Linux {
-        arch: Arch,
-        linux: Linux,
-        overlay_image_path: PathBuf,
-        ovmf_vars_path: PathBuf,
-        kernel_path: PathBuf,
-        initrd_path: Option<PathBuf>,
-        ssh_keypair: SshKeypair,
-    },
-}
-
-impl VmInstance {
-    pub fn ssh_keypair(&self) -> &SshKeypair {
-        match self {
-            VmInstance::Linux { ssh_keypair, .. } => ssh_keypair,
-        }
-    }
+pub struct VmInstance {
+    pub arch: Arch,
+    pub linux: Linux,
+    pub overlay_image_path: PathBuf,
+    pub ovmf_vars_path: PathBuf,
+    pub kernel_path: PathBuf,
+    pub initrd_path: Option<PathBuf>,
+    pub ssh_keypair: SshKeypair,
+    pub cloud_init_image: PathBuf,
 }
 
 pub fn get_machine_id(machine: &Machine) -> &str {
@@ -76,15 +71,11 @@ pub async fn setup_instance(
 ) -> Result<VmInstance, VmInstanceError> {
     let source_image = get_image(ctx, machine).await?;
 
-    #[allow(irrefutable_let_patterns)]
-    let VmImage::Linux {
+    let VmImage {
         arch,
         linux,
         image_path,
-    } = source_image
-    else {
-        unimplemented!();
-    };
+    } = source_image;
 
     let machine_id = get_machine_id(machine);
     let machine_dir = ctx.paths().machine_dir(machine_id);
@@ -92,14 +83,17 @@ pub async fn setup_instance(
 
     let overlay_image_path = create_overlay_image(ctx.paths(), machine_id, &image_path).await?;
     let ovmf_vars_path = convert_ovmf_uefi_variables(ctx.paths(), machine_id).await?;
-    let VmImageKernelDetails {
+    let VmInstanceKernelDetails {
         kernel_path,
         initrd_path,
     } = extract_kernel(ctx, machine_id, &image_path).await?;
 
     let ssh_keypair = ensure_keypair(&machine_dir).await?;
 
-    Ok(VmInstance::Linux {
+    let VmInstanceCloudInit { cloud_init_image } =
+        setup_cloud_init(ctx, machine, &ssh_keypair).await?;
+
+    Ok(VmInstance {
         arch,
         linux,
         overlay_image_path,
@@ -107,5 +101,6 @@ pub async fn setup_instance(
         kernel_path,
         initrd_path,
         ssh_keypair,
+        cloud_init_image,
     })
 }

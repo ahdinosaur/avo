@@ -42,13 +42,10 @@ pub async fn get_images_list() -> Result<VmImagesList, VmImageError> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[non_exhaustive]
-pub enum VmImage {
-    Linux {
-        arch: Arch,
-        linux: Linux,
-        image_path: PathBuf,
-    },
+pub struct VmImage {
+    pub arch: Arch,
+    pub linux: Linux,
+    pub image_path: PathBuf,
 }
 
 impl VmImage {
@@ -56,7 +53,7 @@ impl VmImage {
         let image_path = paths.image_file(&image_index.to_image_file_name());
         let arch = image_index.arch;
         match &image_index.os {
-            Os::Linux(linux) => VmImage::Linux {
+            Os::Linux(linux) => VmImage {
                 arch,
                 linux: linux.clone(),
                 image_path,

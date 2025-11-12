@@ -138,8 +138,7 @@ pub async fn launch_qemu(
 
     let vm_instance = qemu_launch_opts.vm_instance;
 
-    #[allow(irrefutable_let_patterns)]
-    let VmInstance::Linux {
+    let VmInstance {
         arch: _,
         linux: _,
         overlay_image_path,
@@ -147,10 +146,8 @@ pub async fn launch_qemu(
         initrd_path,
         ovmf_vars_path,
         ssh_keypair,
-    } = vm_instance
-    else {
-        unimplemented!();
-    };
+        cloud_init_image,
+    } = vm_instance;
 
     let overlay_image_path_str = overlay_image_path.to_string_lossy();
     let kernel_path_str = kernel_path.to_string_lossy();

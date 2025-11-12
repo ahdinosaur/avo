@@ -77,6 +77,18 @@ impl Paths {
     pub fn overlay_image_file(&self, machine_id: &str) -> PathBuf {
         self.machine_dir(machine_id).join("overlay.qcow2")
     }
+
+    pub fn cloud_init_meta_data_file(&self, machine_id: &str) -> PathBuf {
+        self.machine_dir(machine_id).join("cloud-init-meta-data")
+    }
+
+    pub fn cloud_init_user_data_file(&self, machine_id: &str) -> PathBuf {
+        self.machine_dir(machine_id).join("cloud-init-user-data")
+    }
+
+    pub fn cloud_init_image_file(&self, machine_id: &str) -> PathBuf {
+        self.machine_dir(machine_id).join("cloud-init.iso")
+    }
 }
 
 #[derive(Error, Debug)]
@@ -90,6 +102,7 @@ pub struct ExecutablePaths {
     virtiofsd: PathBuf,
     qemu_x86_64: PathBuf,
     qemu_aarch64: PathBuf,
+    mkisofs: PathBuf,
     unshare: PathBuf,
 }
 
@@ -100,6 +113,7 @@ impl ExecutablePaths {
         let virtiofsd = which_global("virtiofsd")?;
         let qemu_x86_64 = which_global("qemu-system-x86_64")?;
         let qemu_aarch64 = which_global("qemu-system-aarch64")?;
+        let mkisofs = which_global("mkisofs")?;
         let unshare = which_global("unshare")?;
 
         Ok(ExecutablePaths {
@@ -108,6 +122,7 @@ impl ExecutablePaths {
             virtiofsd,
             qemu_x86_64,
             qemu_aarch64,
+            mkisofs,
             unshare,
         })
     }
@@ -129,6 +144,10 @@ impl ExecutablePaths {
 
     pub fn qemu_aarch64(&self) -> &Path {
         &self.qemu_aarch64
+    }
+
+    pub fn mkisofs(&self) -> &Path {
+        &self.mkisofs
     }
 
     pub fn unshare(&self) -> &Path {

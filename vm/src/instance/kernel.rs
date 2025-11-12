@@ -7,7 +7,7 @@ use crate::{
 };
 use std::path::{Path, PathBuf};
 
-pub struct VmImageKernelDetails {
+pub struct VmInstanceKernelDetails {
     pub kernel_path: PathBuf,
     pub initrd_path: Option<PathBuf>,
 }
@@ -31,7 +31,7 @@ pub async fn extract_kernel(
     ctx: &mut Context,
     machine_id: &str,
     source_image_path: &Path,
-) -> Result<VmImageKernelDetails, ExtractKernelError> {
+) -> Result<VmInstanceKernelDetails, ExtractKernelError> {
     let dest_dir = ctx.paths().machine_dir(machine_id);
     let mut virt_get_kernel_cmd = Command::new(ctx.executables().virt_get_kernel());
 
@@ -56,7 +56,7 @@ pub async fn extract_kernel(
         None
     };
 
-    Ok(VmImageKernelDetails {
+    Ok(VmInstanceKernelDetails {
         kernel_path,
         initrd_path,
     })
