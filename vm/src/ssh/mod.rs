@@ -1,86 +1,164 @@
-use async_ssh2_russh::{russh::client, AsyncSession, Config, NoCheckHandler};
-use std::net::ToSocketAddrs;
-use tokio::io::AsyncBufReadExt;
+use russh::client;
+use russh::keys::key::PrivateKeyWithHashAlg;
+use russh::keys::PrivateKey;
+use russh::ChannelMsg;
+use std::io::{self, ErrorKind};
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::io::{self as aio, AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpStream, ToSocketAddrs as IntoSocketAddrs};
+use tokio::time::timeout;
 
-use tracing::info;
-
-use crate::{run::CancellationTokens, ssh::error::SshError};
+use crate::run::CancellationTokens;
+use crate::ssh::error::SshError;
 
 pub mod error;
 pub mod keypair;
 
-pub struct SshLaunchOpts<Addr>
+#[derive(Debug)]
+pub struct SshLaunchOpts<Addrs>
 where
-    Addr: ToSocketAddrs,
+    Addrs: IntoSocketAddrs + Send,
 {
-    pub addrs: Addr,
-    pub username: String,
     pub private_key: String,
-    pub config: Config,
+    pub addrs: Addrs,
+    pub username: String,
+    pub config: client::Config,
+    pub timeout: Duration,
     pub command: String,
+}
+
+#[derive(Debug, Clone)]
+struct SshClient;
+
+impl client::Handler for SshClient {
+    type Error = russh::Error;
+
+    async fn check_server_key(
+        &mut self,
+        _server_public_key: &russh::keys::PublicKey,
+    ) -> Result<bool, Self::Error> {
+        Ok(true)
+    }
 }
 
 pub async fn ssh_command<Addrs>(
     opts: SshLaunchOpts<Addrs>,
-    _cancellation_tokens: Option<CancellationTokens>,
-) -> Result<u32, SshError>
+    cancellation: Option<CancellationTokens>,
+) -> Result<Option<u32>, SshError>
 where
-    Addrs: ToSocketAddrs,
+    Addrs: IntoSocketAddrs + Send,
 {
-    let SshLaunchOpts {
-        addrs,
-        username,
-        private_key,
-        config,
-        command,
-    } = opts;
+    // Parse private key
+    let private_key =
+        PrivateKey::from_openssh(opts.private_key).map_err(|e| SshError::Russh(e.into()))?;
 
-    let client = ssh_connect_with_retry(addrs, username, config).await?;
+    // TCP connect with timeout
+    let stream = timeout(opts.timeout, TcpStream::connect(opts.addrs))
+        .await
+        .map_err(|_| {
+            SshError::Russh(io::Error::new(ErrorKind::TimedOut, "TCP connect timeout").into())
+        })?
+        .map_err(|e| SshError::Russh(e.into()))?;
 
-    let result = client.execute(&command).await?;
+    // SSH connect
+    let config = Arc::new(opts.config);
+    let mut handle = client::connect_stream(config, stream, SshClient)
+        .await
+        .map_err(SshError::Russh)?;
 
-    info!("SSH stdout: {}", result.stdout);
-    info!("SSH stderr: {}", result.stderr);
-
-    Ok(result.exit_status)
-}
-
-async fn ssh_connect_with_retry<Addrs>(
-    addrs: Addrs,
-    username: String,
-    config: Config,
-) -> Result<AsyncSession<NoCheckHandler>, SshError>
-where
-    Addrs: ToSocketAddrs,
-{
-    loop {
-        match AsyncSession::connect_publickey(
-            config,
-            addrs,
-            username,
-            addr.clone(),
-            &username,
-            auth.clone(),
-            server_check.clone(),
-            config.clone(),
+    // Authenticate
+    let auth = handle
+        .authenticate_publickey(
+            &opts.username,
+            PrivateKeyWithHashAlg::new(Arc::new(private_key), None),
         )
         .await
-        {
-            Ok(client) => return Ok(client),
-            Err(AsyncSshError::SshError(russh::Error::IO(e))) => {
-                match e.kind() {
-                    // The VM is still booting at this point so we're just ignoring these errors
-                    // for some time.
-                    std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::ConnectionReset => {
-                        continue;
-                    }
-                    _ => return Err(SshError::Ssh(AsyncSshError::SshError(russh::Error::IO(e)))),
+        .map_err(SshError::Russh)?;
+    if !auth.success() {
+        return Err(SshError::Russh(
+            io::Error::new(ErrorKind::PermissionDenied, "authentication failed").into(),
+        ));
+    }
+
+    // Open session and exec
+    let mut channel = handle
+        .channel_open_session()
+        .await
+        .map_err(SshError::Russh)?;
+    channel
+        .exec(true, opts.command)
+        .await
+        .map_err(SshError::Russh)?;
+
+    // Plain stdin/stdout/stderr forwarding
+    let mut stdin = aio::stdin();
+    let mut stdout = aio::stdout();
+    let mut stderr = aio::stderr();
+    let mut stdin_buf = [0u8; 8192];
+    let cancel = cancellation.as_ref().map(|t| t.ssh.clone());
+
+    let mut exit_code: Option<u32> = None;
+
+    loop {
+        tokio::select! {
+          // Optional cancellation
+          _ = async { if let Some(c) = &cancel { c.cancelled().await } }, if cancel.is_some() => {
+            let _ = channel.eof().await;
+            let _ = channel.close().await;
+            let _ = handle
+              .disconnect(russh::Disconnect::ByApplication, "", "English")
+              .await;
+            return Ok(None);
+          }
+
+          // Local stdin -> remote
+          read = stdin.read(&mut stdin_buf) => {
+            match read {
+              Ok(0) => {
+                let _ = channel.eof().await;
+              }
+              Ok(n) => {
+                channel.data(&stdin_buf[..n]).await.map_err(SshError::Russh)?;
+              }
+              Err(e) => {
+                let _ = channel.eof().await;
+                return Err(SshError::Russh(e.into()));
+              }
+            }
+          }
+
+          // Remote -> local
+          msg = channel.wait() => {
+            match msg {
+              Some(ChannelMsg::Data { data }) => {
+                stdout.write_all(&data).await?;
+                stdout.flush().await?;
+              }
+              Some(ChannelMsg::ExtendedData { data, ext }) => {
+                if ext == 1 {
+                  stderr.write_all(&data).await?;
+                  stderr.flush().await?;
                 }
+              }
+              Some(ChannelMsg::ExitStatus { exit_status }) => {
+                exit_code = Some(exit_status);
+              }
+              Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) | None => {
+                break;
+              }
+              _ => {}
             }
-            Err(AsyncSshError::SshError(russh::Error::Disconnect)) => {
-                continue;
-            }
-            Err(error) => return Err(SshError::Ssh(error)),
+          }
         }
     }
+
+    // Clean up
+    let _ = channel.eof().await;
+    let _ = channel.close().await;
+    let _ = handle
+        .disconnect(russh::Disconnect::ByApplication, "", "English")
+        .await;
+
+    Ok(exit_code)
 }

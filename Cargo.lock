@@ -147,26 +147,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "async-promise"
-version = "0.1.0"
-source = "git+https://github.com/ahdinosaur/async-ssh2-russh?branch=upgrade-russh-0.54.6#e264d6a1dc2213766e954a5ba742ca66567ca845"
-dependencies = [
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "async-ssh2-russh"
-version = "0.1.0"
-source = "git+https://github.com/ahdinosaur/async-ssh2-russh?branch=upgrade-russh-0.54.6#e264d6a1dc2213766e954a5ba742ca66567ca845"
-dependencies = [
- "async-promise",
- "russh",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "async-trait"
 version = "0.1.89"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -276,7 +256,6 @@ dependencies = [
 name = "avo-vm"
 version = "0.1.0"
 dependencies = [
- "async-ssh2-russh",
  "avo-machine",
  "avo-system",
  "base64ct",

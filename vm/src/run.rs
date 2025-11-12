@@ -1,6 +1,7 @@
 use std::{
     net::Ipv4Addr,
     sync::{atomic::AtomicBool, Arc},
+    time::Duration,
 };
 
 use avo_machine::Machine;
@@ -66,10 +67,11 @@ pub async fn run(ctx: &mut Context, machine: &Machine) -> Result<Option<u32>, Ru
 
     let ssh_launch_opts = SshLaunchOpts {
         private_key: ssh_keypair.private_key,
-        addr: (Ipv4Addr::LOCALHOST, 2222),
+        addrs: (Ipv4Addr::LOCALHOST, 2222),
         username: "root".to_owned(),
         config: Default::default(),
         command: "echo hi".to_owned(),
+        timeout: Duration::from_secs(120),
     };
 
     let cancellatation_tokens = CancellationTokens::default();
@@ -105,7 +107,7 @@ pub async fn run(ctx: &mut Context, machine: &Machine) -> Result<Option<u32>, Ru
             debug!("call ssh_command()");
             let exit_code = ssh_command(ssh_launch_opts, Some(cancellatation_tokens)).await?;
 
-            Ok(Some(exit_code))
+            Ok(exit_code)
         }
     });
 
