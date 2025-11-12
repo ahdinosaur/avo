@@ -97,7 +97,7 @@ impl Display for BindMount {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct QemuLaunchOpts {
     pub vm: MachineVmOptions,
     pub vm_instance: VmInstance,
@@ -145,7 +145,7 @@ pub async fn launch_qemu(
         kernel_path,
         initrd_path,
         ovmf_vars_path,
-        ssh_keypair,
+        ssh_keypair: _,
         cloud_init_image,
     } = vm_instance;
 
@@ -161,7 +161,7 @@ pub async fn launch_qemu(
     let memory_size_in_gb = memory_size / 1024 / 1024 / 1024;
     let cpu_count = vm.cpu_count.unwrap_or_else(|| CpuCount::new(2));
 
-    let ssh_pubkey_base64 = Base64::encode_string(ssh_keypair.public_key.as_bytes());
+    // let ssh_pubkey_base64 = Base64::encode_string(ssh_keypair.public_key.as_bytes());
 
     let mut qemu_cmd = Command::new(executables.qemu_x86_64());
 

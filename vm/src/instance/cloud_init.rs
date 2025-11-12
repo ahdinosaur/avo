@@ -23,6 +23,9 @@ pub enum CloudInitError {
     #[error(transparent)]
     Yaml(#[from] serde_yml::Error),
 
+    #[error(transparent)]
+    SshKey(#[from] russh::keys::ssh_key::Error),
+
     #[error("failed to get output from `mkisofs ...`")]
     CommandOutput(#[from] tokio::io::Error),
 
@@ -74,7 +77,7 @@ pub async fn setup_cloud_init(
     if !Path::new(&user_data_path).exists() {
         let user_data = CloudInitUserData {
             hostname: hostname.to_string(),
-            ssh_authorized_keys: vec![ssh_keypair.public_key.clone()],
+            ssh_authorized_keys: vec![ssh_keypair.public_key.to_openssh()?],
             packages: vec!["openssh".to_owned()],
         };
         fs::write_file(

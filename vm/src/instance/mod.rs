@@ -5,7 +5,6 @@ mod ovmf;
 
 use avo_machine::Machine;
 use avo_system::{Arch, Linux};
-use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use thiserror::Error;
 
@@ -49,7 +48,7 @@ pub enum VmInstanceError {
     Ssh(#[from] SshError),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct VmInstance {
     pub id: String,
     pub dir: PathBuf,
