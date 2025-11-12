@@ -101,7 +101,6 @@ impl Display for BindMount {
 pub struct QemuLaunchOpts {
     pub vm: MachineVmOptions,
     pub vm_image: VmMachineImage,
-    pub cid: u32,
     pub volumes: Vec<BindMount>,
     pub published_ports: Vec<PublishPort>,
     pub show_vm_window: bool,
@@ -168,8 +167,30 @@ pub async fn launch_qemu(
 
     let ssh_pubkey_base64 = Base64::encode_string(qemu_launch_opts.ssh_pubkey.as_bytes());
 
-    let cid = qemu_launch_opts.cid;
+    let mut qemu_cmd = Command::new(executables.qemu_x86_64());
 
+    // Decrease idle CPU usage
+    qemu_cmd
+        .args(["-machine", "hpet=off"])
+        .args(["-smp", &cpu_count.to_string()]);
+
+    // We extracted the kernel and initrd from this image earlier in order to boot it more
+    // quickly.
+    qemu_cmd
+        .args(["-kernel", &kernel_path_str])
+        .args(["-append", "rw root=/dev/vda1"]);
+
+    if let Some(initrd_path_str) = initrd_path_str {
+        qemu_cmd.args(["-initrd", &initrd_path_str]);
+    }
+
+    // Overlay image
+    qemu_cmd.args([
+        "-drive",
+        &format!("if=virtio,node-name=overlay-disk,file={overlay_image_path_str}"),
+    ]);
+
+    // Network controller
     let hostfwd: String =
         qemu_launch_opts
             .published_ports
@@ -184,38 +205,22 @@ pub async fn launch_qemu(
                 );
                 output
             });
+    qemu_cmd.args(["-nic", &format!("user,model=virtio{hostfwd}")]);
 
-    let qmp_socket_path = run_dir.join("qmp.sock,server,wait=off");
-    let qmp_socket_path_str = qmp_socket_path.to_string_lossy();
+    // Free Page Reporting allows the guest to signal to the host that memory can be reclaimed.
+    qemu_cmd.args(["-device", "virtio-balloon,free-page-reporting=on"]);
 
-    let mut qemu_cmd = Command::new(executables.qemu_x86_64());
+    // Memory configuration
     qemu_cmd
-        // Decrease idle CPU usage
-        .args(["-machine", "hpet=off"])
-        .args(["-smp", &cpu_count.to_string()])
-        // We extracted the kernel and initrd from this image earlier in order to boot it more
-        // quickly.
-        .args(["-kernel", &kernel_path_str])
-        .args(["-append", "rw root=/dev/vda1"])
-        // SSH port forwarding
-        .args([
-            "-device",
-            &format!("vhost-vsock-pci,id=vhost-vsock-pci0,guest-cid={cid}"),
-        ])
-        // Network controller
-        .args(["-nic", &format!("user,model=virtio{hostfwd}")])
-        // Free Page Reporting allows the guest to signal to the host that memory can be reclaimed.
-        .args(["-device", "virtio-balloon,free-page-reporting=on"])
-        // Memory configuration
         .args(["-m", &format!("{memory_size_in_gb}G")])
         .args([
             "-object",
-            &format!(
-                "memory-backend-memfd,id=mem0,merge=on,share=on,size={memory_size_in_gb}G"
-            ),
+            &format!("memory-backend-memfd,id=mem0,merge=on,share=on,size={memory_size_in_gb}G"),
         ])
-        .args(["-numa", "node,memdev=mem0"])
-        // UEFI
+        .args(["-numa", "node,memdev=mem0"]);
+
+    // UEFI
+    qemu_cmd
         .args([
             "-drive",
             &format!("if=pflash,format=raw,unit=0,file={ovmf_code_system_path_str},readonly=on"),
@@ -223,29 +228,24 @@ pub async fn launch_qemu(
         .args([
             "-drive",
             &format!("if=pflash,format=qcow2,unit=1,file={ovmf_vars_path_str}"),
-        ])
-        // Overlay image
-        .args([
-            "-drive",
-            &format!("if=virtio,node-name=overlay-disk,file={overlay_image_path_str}"),
-        ])
-        // QMP API to expose QEMU command API
-        .args(["-qmp", &format!("unix:{qmp_socket_path_str}")])
-        // Here we inject the SSH using systemd.system-credentials, see:
-        // https://www.freedesktop.org/software/systemd/man/latest/systemd.system-credentials.html
-        .args([
-            "-smbios",
-            &format!(
-                "type=11,value=io.systemd.credential.binary:ssh.authorized_keys.root={ssh_pubkey_base64}"
-            ),
         ]);
+
+    // QMP API to expose QEMU command API
+    let qmp_socket_path = run_dir.join("qmp.sock,server,wait=off");
+    let qmp_socket_path_str = qmp_socket_path.to_string_lossy();
+    qemu_cmd.args(["-qmp", &format!("unix:{qmp_socket_path_str}")]);
+
+    // Here we inject the SSH using systemd.system-credentials, see:
+    // https://www.freedesktop.org/software/systemd/man/latest/systemd.system-credentials.html
+    qemu_cmd.args([
+        "-smbios",
+        &format!(
+            "type=11,value=io.systemd.credential.binary:ssh.authorized_keys.root={ssh_pubkey_base64}"
+        ),
+    ]);
 
     if !qemu_launch_opts.disable_kvm {
         qemu_cmd.args(["-accel", "kvm"]).args(["-cpu", "host"]);
-    }
-
-    if let Some(initrd_path_str) = initrd_path_str {
-        qemu_cmd.args(["-initrd", &initrd_path_str]);
     }
 
     // It's important we keep `virtiofsd_handles` in scope here and that we don't drop them too
@@ -310,8 +310,8 @@ pub async fn launch_qemu(
         .spawn()?;
 
     // Write QEMU's pid into a `qemu-pid` file in the run dir. This allows a cleanup job to run and
-    // some point and remove all the run dirs that have a dead QEMU (which can happen if vmexec is
-    // cancelled at the wrong time).
+    // some point and remove all the run dirs that have a dead QEMU (which can happen if the
+    // process is cancelled at the wrong time).
     let qemu_pid_path = run_dir.join("qemu.pid");
     let qemu_pid = qemu_child
         .id()

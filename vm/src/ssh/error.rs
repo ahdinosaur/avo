@@ -11,19 +11,7 @@ pub enum SshError {
     Fs(#[from] FsError),
 
     #[error("SSH error: {0}")]
-    Russh(#[from] russh::Error),
-
-    #[error("Timed out connecting to virtual machine via SSH")]
-    Timeout,
-
-    #[error("SSH authentication (public key) failed")]
-    AuthFailed,
-
-    #[error("TTY requested but no terminal is available")]
-    TtyUnavailable,
-
-    #[error("Failed to set up stdin for interactive mode: {0}")]
-    StdinSetup(String),
+    Ssh(#[from] async_ssh2_tokio::Error),
 
     #[error("SSH key encoding error: {0}")]
     KeyEncoding(String),
