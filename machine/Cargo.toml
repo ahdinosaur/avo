@@ -1,10 +1,8 @@
 [package]
-name = "avo-system"
+name = "avo-machine"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+avo-system = { path = "../system", version = "0.1" }
 serde.workspace = true
-
-[dev-dependencies]
-serde_json = "1"
