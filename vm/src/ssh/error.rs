@@ -19,12 +19,6 @@ pub enum SshError {
     #[error("SSH authentication (public key) failed")]
     AuthFailed,
 
-    #[error("TTY requested but no terminal is available")]
-    TtyUnavailable,
-
-    #[error("Failed to set up stdin for interactive mode: {0}")]
-    StdinSetup(String),
-
     #[error("SSH key encoding error: {0}")]
     KeyEncoding(String),
 }
