@@ -63,7 +63,7 @@ impl Paths {
     }
 
     pub fn instances_dir(&self) -> PathBuf {
-        self.data_dir().join("vm/machines")
+        self.data_dir().join("vm/instances")
     }
 
     pub fn instance_dir(&self, instance_id: &str) -> PathBuf {

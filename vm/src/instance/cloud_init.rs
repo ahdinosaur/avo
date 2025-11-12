@@ -1,4 +1,5 @@
 use avo_machine::Machine;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use tokio::process::Command;
@@ -16,12 +17,32 @@ pub struct VmInstanceCloudInit {
 
 #[derive(Error, Debug)]
 pub enum CloudInitError {
-    #[error("failed to get output from `mkisofs ...`")]
-    CommandOutput(#[from] tokio::io::Error),
-    #[error("mkisofs failed")]
-    CommandError { stderr: String },
     #[error(transparent)]
     Fs(#[from] FsError),
+
+    #[error(transparent)]
+    Yaml(#[from] serde_yml::Error),
+
+    #[error("failed to get output from `mkisofs ...`")]
+    CommandOutput(#[from] tokio::io::Error),
+
+    #[error("mkisofs failed")]
+    CommandError { stderr: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct CloudInitMetaData {
+    instance_id: String,
+    local_hostname: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct CloudInitUserData {
+    hostname: String,
+    ssh_authorized_keys: Vec<String>,
+    packages: Vec<String>,
 }
 
 pub async fn setup_cloud_init(
@@ -39,36 +60,26 @@ pub async fn setup_cloud_init(
     let image_path = paths.cloud_init_image_file(instance_id);
 
     if !Path::new(&meta_data_path).exists() {
+        let meta_data = CloudInitMetaData {
+            instance_id: instance_id.to_owned(),
+            local_hostname: hostname.to_string(),
+        };
         fs::write_file(
             &meta_data_path,
-            format!("instance-id: {instance_id}\nlocal-hostname: {hostname}\n").as_bytes(),
+            serde_yml::to_string(&meta_data)?.as_bytes(),
         )
         .await?;
     }
 
     if !Path::new(&user_data_path).exists() {
-        let ssh_public_keys = [&ssh_keypair.public_key];
-        let ssh_keys = format!(
-            "\u{20}\u{20}\u{20}\u{20}ssh-authorized-keys:\n{}",
-            ssh_public_keys
-                .iter()
-                .map(|key| format!("\u{20}\u{20}\u{20}\u{20}\u{20}\u{20}- {key}"))
-                .collect::<Vec<_>>()
-                .join("\n")
-        );
-
+        let user_data = CloudInitUserData {
+            hostname: hostname.to_string(),
+            ssh_authorized_keys: vec![ssh_keypair.public_key.clone()],
+            packages: vec!["openssh".to_owned()],
+        };
         fs::write_file(
             &user_data_path,
-            format!(
-                "\
-                #cloud-config\n\
-                hostname: {hostname}
-                {ssh_keys}\n\
-                packages:\n\
-                \u{20}\u{20}- openssh\n\
-            "
-            )
-            .as_bytes(),
+            format!("#cloud-config\n{}", serde_yml::to_string(&user_data)?).as_bytes(),
         )
         .await?;
     }

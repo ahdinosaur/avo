@@ -149,7 +149,6 @@ pub async fn launch_qemu(
         cloud_init_image,
     } = vm_instance;
 
-    let overlay_image_path_str = overlay_image_path.to_string_lossy();
     let kernel_path_str = kernel_path.to_string_lossy();
     let initrd_path_str = initrd_path.map(|p| p.to_string_lossy().into_owned());
     let ovmf_vars_path_str = ovmf_vars_path.to_string_lossy();
@@ -184,10 +183,13 @@ pub async fn launch_qemu(
     // Overlay image
     qemu_cmd.args([
         "-drive",
-        &format!("if=virtio,node-name=overlay-disk,format=qcow2,file={overlay_image_path_str}"),
+        &format!(
+            "if=virtio,node-name=overlay-disk,format=qcow2,file={}",
+            overlay_image_path.to_string_lossy()
+        ),
     ]);
 
-    // Overlay image
+    // Cloud init image
     qemu_cmd.args([
         "-drive",
         &format!(
@@ -241,6 +243,7 @@ pub async fn launch_qemu(
     let qmp_socket_path_str = qmp_socket_path.to_string_lossy();
     qemu_cmd.args(["-qmp", &format!("unix:{qmp_socket_path_str}")]);
 
+    /*
     // Here we inject the SSH using systemd.system-credentials, see:
     // https://www.freedesktop.org/software/systemd/man/latest/systemd.system-credentials.html
     qemu_cmd.args([
@@ -249,6 +252,7 @@ pub async fn launch_qemu(
             "type=11,value=io.systemd.credential.binary:ssh.authorized_keys.root={ssh_pubkey_base64}"
         ),
     ]);
+    */
 
     if !qemu_launch_opts.disable_kvm {
         qemu_cmd.args(["-accel", "kvm"]).args(["-cpu", "host"]);
