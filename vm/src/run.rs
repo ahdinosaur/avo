@@ -29,9 +29,6 @@ pub enum RunError {
     Instance(#[from] VmInstanceError),
 
     #[error(transparent)]
-    Ssh(#[from] SshError),
-
-    #[error(transparent)]
     DirLock(#[from] dir_lock::Error),
 
     #[error(transparent)]
@@ -39,17 +36,18 @@ pub enum RunError {
 
     #[error(transparent)]
     Join(#[from] JoinError),
+
+    #[error(transparent)]
+    Ssh(#[from] SshError),
 }
 
 pub async fn run(ctx: &mut Context, machine: &Machine) -> Result<Option<u32>, RunError> {
     let vm_instance = setup_instance(ctx, machine).await?;
-    debug!("got machine image");
 
     let machine_id = get_machine_id(machine);
     let machine_dir = ctx.paths().machine_dir(machine_id);
-    debug!("going to ensure keypair");
-    let ssh_keypair = ensure_keypair(&machine_dir).await?;
-    debug!("ensured keypair");
+
+    let private_key = vm_instance.ssh_keypair().private_key.clone();
 
     let qemu_launch_opts = QemuLaunchOpts {
         vm: machine.vm.clone(),
@@ -61,12 +59,11 @@ pub async fn run(ctx: &mut Context, machine: &Machine) -> Result<Option<u32>, Ru
             vm_port: 22,
         }],
         show_vm_window: true,
-        ssh_pubkey: ssh_keypair.public_key,
         disable_kvm: false,
     };
 
     let ssh_launch_opts = SshLaunchOpts {
-        private_key: ssh_keypair.private_key,
+        private_key,
         addrs: (Ipv4Addr::LOCALHOST, 2222),
         username: "root".to_owned(),
         config: Default::default(),

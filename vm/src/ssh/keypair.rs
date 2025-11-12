@@ -3,11 +3,12 @@ use std::path::Path;
 use base64ct::LineEnding;
 use russh::keys::ssh_key::{private::Ed25519Keypair, rand_core::OsRng};
 use russh::keys::{PrivateKey, PublicKey};
+use serde::{Deserialize, Serialize};
 
 use crate::fs;
 use crate::ssh::error::SshError;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SshKeypair {
     pub public_key: String,
     pub private_key: String,

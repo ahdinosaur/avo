@@ -104,7 +104,6 @@ pub struct QemuLaunchOpts {
     pub volumes: Vec<BindMount>,
     pub published_ports: Vec<PublishPort>,
     pub show_vm_window: bool,
-    pub ssh_pubkey: String,
     pub disable_kvm: bool,
 }
 
@@ -147,6 +146,7 @@ pub async fn launch_qemu(
         kernel_path,
         initrd_path,
         ovmf_vars_path,
+        ssh_keypair,
     } = vm_instance
     else {
         unimplemented!();
@@ -165,7 +165,7 @@ pub async fn launch_qemu(
     let memory_size_in_gb = memory_size / 1024 / 1024 / 1024;
     let cpu_count = vm.cpu_count.unwrap_or_else(|| CpuCount::new(2));
 
-    let ssh_pubkey_base64 = Base64::encode_string(qemu_launch_opts.ssh_pubkey.as_bytes());
+    let ssh_pubkey_base64 = Base64::encode_string(ssh_keypair.public_key.as_bytes());
 
     let mut qemu_cmd = Command::new(executables.qemu_x86_64());
 
