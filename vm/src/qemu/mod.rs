@@ -1,3 +1,11 @@
+// TODO:
+// - add features from https://github.com/zTrix/qemu-compose/blob/cb3b3b2f39957521aedbcfb1128865009ea6b536/qemu_compose/instance/qemu_runner.py
+//   - add hostname via io.systemd.credential:system.hostname=
+//     - https://github.com/zTrix/qemu-compose/blob/cb3b3b2f39957521aedbcfb1128865009ea6b536/qemu_compose/instance/qemu_runner.py#L395-L398
+//   - add netdev hostname
+//     - https://github.com/zTrix/qemu-compose/blob/cb3b3b2f39957521aedbcfb1128865009ea6b536/qemu_compose/instance/qemu_runner.py#L526-L534
+//
+
 use std::{
     fmt::{Display, Write},
     net::Ipv4Addr,
