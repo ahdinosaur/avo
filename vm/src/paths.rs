@@ -62,32 +62,32 @@ impl Paths {
         self.images_dir().join(image_file_name)
     }
 
-    pub fn machines_dir(&self) -> PathBuf {
+    pub fn instances_dir(&self) -> PathBuf {
         self.data_dir().join("vm/machines")
     }
 
-    pub fn machine_dir(&self, machine_id: &str) -> PathBuf {
-        self.machines_dir().join(machine_id)
+    pub fn instance_dir(&self, instance_id: &str) -> PathBuf {
+        self.instances_dir().join(instance_id)
     }
 
-    pub fn ovmf_vars_file(&self, machine_id: &str) -> PathBuf {
-        self.machine_dir(machine_id).join("OVMF_VARS.4m.fd.qcow2")
+    pub fn ovmf_vars_file(&self, instance_id: &str) -> PathBuf {
+        self.instance_dir(instance_id).join("OVMF_VARS.4m.fd.qcow2")
     }
 
-    pub fn overlay_image_file(&self, machine_id: &str) -> PathBuf {
-        self.machine_dir(machine_id).join("overlay.qcow2")
+    pub fn overlay_image_file(&self, instance_id: &str) -> PathBuf {
+        self.instance_dir(instance_id).join("overlay.qcow2")
     }
 
-    pub fn cloud_init_meta_data_file(&self, machine_id: &str) -> PathBuf {
-        self.machine_dir(machine_id).join("cloud-init-meta-data")
+    pub fn cloud_init_meta_data_file(&self, instance_id: &str) -> PathBuf {
+        self.instance_dir(instance_id).join("cloud-init-meta-data")
     }
 
-    pub fn cloud_init_user_data_file(&self, machine_id: &str) -> PathBuf {
-        self.machine_dir(machine_id).join("cloud-init-user-data")
+    pub fn cloud_init_user_data_file(&self, instance_id: &str) -> PathBuf {
+        self.instance_dir(instance_id).join("cloud-init-user-data")
     }
 
-    pub fn cloud_init_image_file(&self, machine_id: &str) -> PathBuf {
-        self.machine_dir(machine_id).join("cloud-init.iso")
+    pub fn cloud_init_image_file(&self, instance_id: &str) -> PathBuf {
+        self.instance_dir(instance_id).join("cloud-init.iso")
     }
 }
 

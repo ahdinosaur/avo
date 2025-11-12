@@ -12,7 +12,7 @@ use tracing::debug;
 
 use crate::{
     context::Context,
-    instance::{get_machine_id, setup_instance, VmInstanceError},
+    instance::{setup_instance, VmInstanceError},
     qemu::{launch_qemu, PublishPort, QemuLaunchError, QemuLaunchOpts},
     ssh::{error::SshError, ssh_command, SshLaunchOpts},
 };
@@ -44,9 +44,6 @@ pub enum RunError {
 pub async fn run(ctx: &mut Context, machine: &Machine) -> Result<Option<u32>, RunError> {
     let vm_instance = setup_instance(ctx, machine).await?;
 
-    let machine_id = get_machine_id(machine);
-    let machine_dir = ctx.paths().machine_dir(machine_id);
-
     let private_key = vm_instance.ssh_keypair.private_key.clone();
 
     let qemu_launch_opts = QemuLaunchOpts {
@@ -77,7 +74,6 @@ pub async fn run(ctx: &mut Context, machine: &Machine) -> Result<Option<u32>, Ru
     joinset.spawn({
         let paths = ctx.paths().clone();
         let executables = ctx.executables().clone();
-        let machine_id = machine_id.to_owned();
         let cancellatation_tokens = cancellatation_tokens.clone();
         let qemu_should_exit = Arc::new(AtomicBool::new(false));
 
@@ -86,11 +82,9 @@ pub async fn run(ctx: &mut Context, machine: &Machine) -> Result<Option<u32>, Ru
             launch_qemu(
                 &paths,
                 &executables,
-                &machine_id,
                 qemu_launch_opts,
                 cancellatation_tokens,
                 qemu_should_exit,
-                &machine_dir,
             )
             .await?;
 

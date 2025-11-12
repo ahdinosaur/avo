@@ -51,6 +51,8 @@ pub enum VmInstanceError {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VmInstance {
+    pub id: String,
+    pub dir: PathBuf,
     pub arch: Arch,
     pub linux: Linux,
     pub overlay_image_path: PathBuf,
@@ -61,7 +63,7 @@ pub struct VmInstance {
     pub cloud_init_image: PathBuf,
 }
 
-pub fn get_machine_id(machine: &Machine) -> &str {
+pub fn get_instance_id(machine: &Machine) -> &str {
     machine.hostname.as_ref()
 }
 
@@ -77,23 +79,25 @@ pub async fn setup_instance(
         image_path,
     } = source_image;
 
-    let machine_id = get_machine_id(machine);
-    let machine_dir = ctx.paths().machine_dir(machine_id);
-    fs::setup_directory_access(&machine_dir).await?;
+    let instance_id = get_instance_id(machine);
+    let instance_dir = ctx.paths().instance_dir(instance_id);
+    fs::setup_directory_access(&instance_dir).await?;
 
-    let overlay_image_path = create_overlay_image(ctx.paths(), machine_id, &image_path).await?;
-    let ovmf_vars_path = convert_ovmf_uefi_variables(ctx.paths(), machine_id).await?;
+    let overlay_image_path = create_overlay_image(ctx.paths(), instance_id, &image_path).await?;
+    let ovmf_vars_path = convert_ovmf_uefi_variables(ctx.paths(), instance_id).await?;
     let VmInstanceKernelDetails {
         kernel_path,
         initrd_path,
-    } = extract_kernel(ctx, machine_id, &image_path).await?;
+    } = extract_kernel(ctx, instance_id, &image_path).await?;
 
-    let ssh_keypair = ensure_keypair(&machine_dir).await?;
+    let ssh_keypair = ensure_keypair(&instance_dir).await?;
 
     let VmInstanceCloudInit { cloud_init_image } =
-        setup_cloud_init(ctx, machine, &ssh_keypair).await?;
+        setup_cloud_init(ctx, instance_id, machine, &ssh_keypair).await?;
 
     Ok(VmInstance {
+        id: instance_id.to_owned(),
+        dir: instance_dir,
         arch,
         linux,
         overlay_image_path,

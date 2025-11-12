@@ -1,14 +1,11 @@
-use std::{process::Stdio, time::Duration};
+use std::{path::Path, process::Stdio, time::Duration};
 use thiserror::Error;
 use tokio::{
     io,
     process::{Child, Command},
 };
 
-use crate::{
-    paths::{ExecutablePaths, Paths},
-    qemu::BindMount,
-};
+use crate::{paths::ExecutablePaths, qemu::BindMount};
 
 #[derive(Error, Debug)]
 pub enum LaunchVirtiofsdError {
@@ -20,12 +17,11 @@ pub enum LaunchVirtiofsdError {
 
 /// Launch an instance of virtiofsd for a particular volume
 pub async fn launch_virtiofsd(
-    paths: &Paths,
     executables: &ExecutablePaths,
-    machine_id: &str,
+    instance_dir: &Path,
     volume: &BindMount,
 ) -> Result<Child, LaunchVirtiofsdError> {
-    let socket_path = paths.machine_dir(machine_id).join(volume.socket_name());
+    let socket_path = instance_dir.join(volume.socket_name());
 
     let mut virtiofsd_cmd = Command::new(executables.unshare());
     virtiofsd_cmd

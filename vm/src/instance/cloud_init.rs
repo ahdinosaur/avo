@@ -6,7 +6,6 @@ use tokio::process::Command;
 use crate::{
     context::Context,
     fs::{self, FsError},
-    instance::get_machine_id,
     ssh::keypair::SshKeypair,
 };
 
@@ -27,22 +26,22 @@ pub enum CloudInitError {
 
 pub async fn setup_cloud_init(
     ctx: &mut Context,
+    instance_id: &str,
     machine: &Machine,
     ssh_keypair: &SshKeypair,
 ) -> Result<VmInstanceCloudInit, CloudInitError> {
     let paths = ctx.paths();
 
-    let machine_id = get_machine_id(machine);
     let hostname = machine.hostname.clone();
 
-    let meta_data_path = paths.cloud_init_meta_data_file(machine_id);
-    let user_data_path = paths.cloud_init_user_data_file(machine_id);
-    let image_path = paths.cloud_init_image_file(machine_id);
+    let meta_data_path = paths.cloud_init_meta_data_file(instance_id);
+    let user_data_path = paths.cloud_init_user_data_file(instance_id);
+    let image_path = paths.cloud_init_image_file(instance_id);
 
     if !Path::new(&meta_data_path).exists() {
         fs::write_file(
             &meta_data_path,
-            format!("instance-id: {machine_id}\nlocal-hostname: {hostname}\n").as_bytes(),
+            format!("instance-id: {instance_id}\nlocal-hostname: {hostname}\n").as_bytes(),
         )
         .await?;
     }

@@ -9,7 +9,7 @@
 use std::{
     fmt::{Display, Write},
     net::Ipv4Addr,
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::Stdio,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -128,17 +128,17 @@ pub enum QemuLaunchError {
 pub async fn launch_qemu(
     paths: &Paths,
     executables: &ExecutablePaths,
-    machine_id: &str,
     qemu_launch_opts: QemuLaunchOpts,
     cancellation_tokens: CancellationTokens,
     qemu_should_exit: Arc<AtomicBool>,
-    run_dir: &Path,
 ) -> Result<(), QemuLaunchError> {
     debug!("called launch_qemu()");
 
     let vm_instance = qemu_launch_opts.vm_instance;
 
     let VmInstance {
+        id: _instance_id,
+        dir: instance_dir,
         arch: _,
         linux: _,
         overlay_image_path,
@@ -184,7 +184,16 @@ pub async fn launch_qemu(
     // Overlay image
     qemu_cmd.args([
         "-drive",
-        &format!("if=virtio,node-name=overlay-disk,file={overlay_image_path_str}"),
+        &format!("if=virtio,node-name=overlay-disk,format=qcow2,file={overlay_image_path_str}"),
+    ]);
+
+    // Overlay image
+    qemu_cmd.args([
+        "-drive",
+        &format!(
+            "if=virtio,node-name=cloud-init,format=raw,file={}",
+            cloud_init_image.to_string_lossy()
+        ),
     ]);
 
     // Network controller
@@ -228,7 +237,7 @@ pub async fn launch_qemu(
         ]);
 
     // QMP API to expose QEMU command API
-    let qmp_socket_path = run_dir.join("qmp.sock,server,wait=off");
+    let qmp_socket_path = instance_dir.join("qmp.sock,server,wait=off");
     let qmp_socket_path_str = qmp_socket_path.to_string_lossy();
     qemu_cmd.args(["-qmp", &format!("unix:{qmp_socket_path_str}")]);
 
@@ -254,7 +263,7 @@ pub async fn launch_qemu(
 
     // Add virtiofsd-based directory shares
     for (i, vol) in qemu_launch_opts.volumes.iter().enumerate() {
-        let virtiofsd_child = launch_virtiofsd(paths, executables, machine_id, vol)
+        let virtiofsd_child = launch_virtiofsd(executables, &instance_dir, vol)
             .await
             .map_err(|e| QemuLaunchError::VirtiofsdLaunch {
                 volume: vol.clone(),
@@ -262,7 +271,7 @@ pub async fn launch_qemu(
             })?;
         virtiofsd_handles.push(virtiofsd_child);
 
-        let socket_path = run_dir.join(vol.socket_name());
+        let socket_path = instance_dir.join(vol.socket_name());
         let socket_path_str = socket_path.to_string_lossy();
         let tag = vol.tag();
         let dest_path = vol.dest.to_string_lossy();
@@ -309,7 +318,7 @@ pub async fn launch_qemu(
     // Write QEMU's pid into a `qemu-pid` file in the run dir. This allows a cleanup job to run and
     // some point and remove all the run dirs that have a dead QEMU (which can happen if the
     // process is cancelled at the wrong time).
-    let qemu_pid_path = run_dir.join("qemu.pid");
+    let qemu_pid_path = instance_dir.join("qemu.pid");
     let qemu_pid = qemu_child
         .id()
         .ok_or(QemuLaunchError::QemuPidUnavailable)?

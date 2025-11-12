@@ -29,10 +29,10 @@ pub enum ExtractKernelError {
 /// Original source: https://gitlab.archlinux.org/archlinux/vmexec/-/blob/03b649bdbcdc64d30b2943f61b51165f390b920d/src/qemu.rs#L48-91
 pub async fn extract_kernel(
     ctx: &mut Context,
-    machine_id: &str,
+    instance_id: &str,
     source_image_path: &Path,
 ) -> Result<VmInstanceKernelDetails, ExtractKernelError> {
-    let dest_dir = ctx.paths().machine_dir(machine_id);
+    let dest_dir = ctx.paths().instance_dir(instance_id);
     let mut virt_get_kernel_cmd = Command::new(ctx.executables().virt_get_kernel());
 
     virt_get_kernel_cmd
