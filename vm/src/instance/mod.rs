@@ -7,8 +7,8 @@ use thiserror::Error;
 use crate::{
     context::Context,
     fs::{self, FsError},
-    images::{get_image, VmImageError, VmSourceImage},
-    machines::{
+    image::{get_image, VmImage, VmImageError},
+    instance::{
         kernel::{extract_kernel, ExtractKernelError, VmImageKernelDetails},
         overlay::{create_overlay_image, CreateOverlayImageError},
         ovmf::{convert_ovmf_uefi_variables, ConvertOvmfVarsError},
@@ -20,7 +20,7 @@ mod overlay;
 mod ovmf;
 
 #[derive(Error, Debug)]
-pub enum VmMachineError {
+pub enum VmInstanceError {
     #[error(transparent)]
     Image(#[from] VmImageError),
 
@@ -39,7 +39,7 @@ pub enum VmMachineError {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
-pub enum VmMachineImage {
+pub enum VmInstance {
     Linux {
         arch: Arch,
         linux: Linux,
@@ -54,14 +54,14 @@ pub fn get_machine_id(machine: &Machine) -> &str {
     machine.hostname.as_ref()
 }
 
-pub async fn setup_machine_image(
+pub async fn setup_instance(
     ctx: &mut Context,
     machine: &Machine,
-) -> Result<VmMachineImage, VmMachineError> {
+) -> Result<VmInstance, VmInstanceError> {
     let source_image = get_image(ctx, machine).await?;
 
     #[allow(irrefutable_let_patterns)]
-    let VmSourceImage::Linux {
+    let VmImage::Linux {
         arch,
         linux,
         image_path,
@@ -81,7 +81,7 @@ pub async fn setup_machine_image(
         initrd_path,
     } = extract_kernel(ctx, machine_id, &image_path).await?;
 
-    Ok(VmMachineImage::Linux {
+    Ok(VmInstance::Linux {
         arch,
         linux,
         overlay_image_path,
@@ -90,8 +90,3 @@ pub async fn setup_machine_image(
         initrd_path,
     })
 }
-
-// fn prepare_machine(paths: &Path, run_id: &)
-// fn extract_kernel(paths: &Path, run_id: &)
-// fn convert_ovmf_uefi_variables
-// fn warmup(paths: &Path, run_id: &)

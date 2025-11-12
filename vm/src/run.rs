@@ -12,7 +12,7 @@ use tracing::debug;
 
 use crate::{
     context::Context,
-    machines::{get_machine_id, setup_machine_image, VmMachineError},
+    instance::{get_machine_id, setup_instance, VmInstanceError},
     qemu::{launch_qemu, PublishPort, QemuLaunchError, QemuLaunchOpts},
     ssh::{error::SshError, keypair::ensure_keypair, ssh_command, SshLaunchOpts},
 };
@@ -26,7 +26,7 @@ pub struct CancellationTokens {
 #[derive(Error, Debug)]
 pub enum RunError {
     #[error(transparent)]
-    Machine(#[from] VmMachineError),
+    Instance(#[from] VmInstanceError),
 
     #[error(transparent)]
     Ssh(#[from] SshError),
@@ -42,7 +42,7 @@ pub enum RunError {
 }
 
 pub async fn run(ctx: &mut Context, machine: &Machine) -> Result<Option<u32>, RunError> {
-    let machine_image = setup_machine_image(ctx, machine).await?;
+    let vm_instance = setup_instance(ctx, machine).await?;
     debug!("got machine image");
 
     let machine_id = get_machine_id(machine);
@@ -53,7 +53,7 @@ pub async fn run(ctx: &mut Context, machine: &Machine) -> Result<Option<u32>, Ru
 
     let qemu_launch_opts = QemuLaunchOpts {
         vm: machine.vm.clone(),
-        vm_image: machine_image,
+        vm_instance,
         volumes: vec![],
         published_ports: vec![PublishPort {
             host_ip: Some(Ipv4Addr::LOCALHOST),

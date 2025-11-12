@@ -9,8 +9,8 @@ use crate::{
 mod context;
 mod fs;
 mod http;
-mod images;
-mod machines;
+mod image;
+mod instance;
 mod paths;
 mod qemu;
 mod run;

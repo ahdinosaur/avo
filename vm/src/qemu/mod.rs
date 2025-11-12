@@ -26,7 +26,7 @@ use tokio::{fs, process::Command};
 use tracing::{debug, error, info};
 
 use crate::{
-    machines::VmMachineImage,
+    instance::VmInstance,
     paths::{ExecutablePaths, Paths},
     qemu::virtiofsd::launch_virtiofsd,
     run::CancellationTokens,
@@ -100,7 +100,7 @@ impl Display for BindMount {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QemuLaunchOpts {
     pub vm: MachineVmOptions,
-    pub vm_image: VmMachineImage,
+    pub vm_instance: VmInstance,
     pub volumes: Vec<BindMount>,
     pub published_ports: Vec<PublishPort>,
     pub show_vm_window: bool,
@@ -137,17 +137,17 @@ pub async fn launch_qemu(
 ) -> Result<(), QemuLaunchError> {
     debug!("called launch_qemu()");
 
-    let vm_image = qemu_launch_opts.vm_image;
+    let vm_instance = qemu_launch_opts.vm_instance;
 
     #[allow(irrefutable_let_patterns)]
-    let VmMachineImage::Linux {
+    let VmInstance::Linux {
         arch: _,
         linux: _,
         overlay_image_path,
         kernel_path,
         initrd_path,
         ovmf_vars_path,
-    } = vm_image
+    } = vm_instance
     else {
         unimplemented!();
     };

@@ -4,7 +4,7 @@ use avo_machine::Machine;
 use avo_system::{Arch, Linux, Os};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tracing::{info, instrument};
+use tracing::info;
 
 mod hash;
 mod list;
@@ -13,7 +13,7 @@ use crate::{
     context::Context,
     fs::{self, FsError},
     http::HttpError,
-    images::{
+    image::{
         hash::{VmImageHash, VmImageHashError},
         list::{VmImageIndex, VmImagesList},
     },
@@ -43,7 +43,7 @@ pub async fn get_images_list() -> Result<VmImagesList, VmImageError> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
-pub enum VmSourceImage {
+pub enum VmImage {
     Linux {
         arch: Arch,
         linux: Linux,
@@ -51,12 +51,12 @@ pub enum VmSourceImage {
     },
 }
 
-impl VmSourceImage {
+impl VmImage {
     pub fn new(paths: &Paths, image_index: &VmImageIndex) -> Self {
         let image_path = paths.image_file(&image_index.to_image_file_name());
         let arch = image_index.arch;
         match &image_index.os {
-            Os::Linux(linux) => VmSourceImage::Linux {
+            Os::Linux(linux) => VmImage::Linux {
                 arch,
                 linux: linux.clone(),
                 image_path,
@@ -68,10 +68,7 @@ impl VmSourceImage {
     }
 }
 
-pub async fn get_image(
-    ctx: &mut Context,
-    machine: &Machine,
-) -> Result<VmSourceImage, VmImageError> {
+pub async fn get_image(ctx: &mut Context, machine: &Machine) -> Result<VmImage, VmImageError> {
     let image_index = find_image_index_for_machine(machine).await?;
 
     let Some(image_index) = image_index else {
@@ -122,6 +119,6 @@ async fn fetch_image(ctx: &mut Context, image_index: &VmImageIndex) -> Result<()
     Ok(())
 }
 
-fn get_image_from_index(ctx: &mut Context, image_index: &VmImageIndex) -> VmSourceImage {
-    VmSourceImage::new(ctx.paths(), image_index)
+fn get_image_from_index(ctx: &mut Context, image_index: &VmImageIndex) -> VmImage {
+    VmImage::new(ctx.paths(), image_index)
 }
