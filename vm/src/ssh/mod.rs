@@ -1,7 +1,7 @@
-use async_ssh2_tokio::{
-    AuthMethod, Client, Config, Error as AsyncSshError, ServerCheckMethod,
-    ToSocketAddrsWithHostname,
-};
+use async_ssh2_russh::{russh::client, AsyncSession, Config, NoCheckHandler};
+use std::net::ToSocketAddrs;
+use tokio::io::AsyncBufReadExt;
+
 use tracing::info;
 
 use crate::{run::CancellationTokens, ssh::error::SshError};
@@ -11,34 +11,31 @@ pub mod keypair;
 
 pub struct SshLaunchOpts<Addr>
 where
-    Addr: ToSocketAddrsWithHostname,
+    Addr: ToSocketAddrs,
 {
-    pub addr: Addr,
+    pub addrs: Addr,
     pub username: String,
     pub private_key: String,
-    pub config: async_ssh2_tokio::Config,
+    pub config: Config,
     pub command: String,
 }
 
-pub async fn ssh_command<Addr>(
-    opts: SshLaunchOpts<Addr>,
+pub async fn ssh_command<Addrs>(
+    opts: SshLaunchOpts<Addrs>,
     _cancellation_tokens: Option<CancellationTokens>,
 ) -> Result<u32, SshError>
 where
-    Addr: ToSocketAddrsWithHostname,
+    Addrs: ToSocketAddrs,
 {
     let SshLaunchOpts {
-        addr,
+        addrs,
         username,
         private_key,
         config,
         command,
     } = opts;
 
-    let auth = AuthMethod::with_key(&private_key, None);
-    let server_check = async_ssh2_tokio::ServerCheckMethod::NoCheck;
-
-    let client = ssh_connect_with_retry(addr, &username, auth, server_check, config).await?;
+    let client = ssh_connect_with_retry(addrs, username, config).await?;
 
     let result = client.execute(&command).await?;
 
@@ -48,18 +45,19 @@ where
     Ok(result.exit_status)
 }
 
-async fn ssh_connect_with_retry<Addr>(
-    addr: Addr,
-    username: &str,
-    auth: AuthMethod,
-    server_check: ServerCheckMethod,
+async fn ssh_connect_with_retry<Addrs>(
+    addrs: Addrs,
+    username: String,
     config: Config,
-) -> Result<Client, SshError>
+) -> Result<AsyncSession<NoCheckHandler>, SshError>
 where
-    Addr: ToSocketAddrsWithHostname + Clone,
+    Addrs: ToSocketAddrs,
 {
     loop {
-        match Client::connect_with_config(
+        match AsyncSession::connect_publickey(
+            config,
+            addrs,
+            username,
             addr.clone(),
             &username,
             auth.clone(),

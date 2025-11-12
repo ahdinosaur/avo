@@ -11,7 +11,7 @@ pub enum SshError {
     Fs(#[from] FsError),
 
     #[error("SSH error: {0}")]
-    Ssh(#[from] async_ssh2_tokio::Error),
+    Ssh(#[from] russh::Error),
 
     #[error("SSH key encoding error: {0}")]
     KeyEncoding(String),
