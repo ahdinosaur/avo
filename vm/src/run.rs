@@ -8,12 +8,11 @@ use avo_machine::Machine;
 use thiserror::Error;
 use tokio::task::{JoinError, JoinSet};
 use tokio_util::sync::CancellationToken;
-use tracing::debug;
 
 use crate::{
     context::Context,
     instance::{setup_instance, VmInstanceError},
-    qemu::{launch_qemu, PublishPort, QemuLaunchError, QemuLaunchOpts},
+    qemu::{launch_qemu, QemuLaunchError, QemuLaunchOpts, VmPort, VmVolume},
     ssh::{error::SshError, ssh_command, SshLaunchOpts},
 };
 
@@ -41,22 +40,58 @@ pub enum RunError {
     Ssh(#[from] SshError),
 }
 
-pub async fn run(ctx: &mut Context, machine: &Machine) -> Result<Option<u32>, RunError> {
-    let vm_instance = setup_instance(ctx, machine).await?;
+#[derive(Debug, Clone)]
+pub struct VmRunOptions {
+    pub command: String,
+    pub volumes: Vec<VmVolume>,
+    pub ssh_port: u32,
+    pub other_ports: Vec<VmPort>,
+    pub show_window: bool,
+}
+
+impl Default for VmRunOptions {
+    fn default() -> Self {
+        Self {
+            command: "echo test".into(),
+            volumes: vec![],
+            ssh_port: 2222,
+            other_ports: vec![],
+            show_window: true,
+        }
+    }
+}
+
+pub async fn run(
+    ctx: &mut Context,
+    machine: Machine,
+    options: VmRunOptions,
+) -> Result<Option<u32>, RunError> {
+    let VmRunOptions {
+        command,
+        volumes,
+        ssh_port,
+        other_ports,
+        show_window,
+    } = options;
+
+    let vm_instance = setup_instance(ctx, &machine).await?;
 
     let private_key = vm_instance.ssh_keypair.private_key.clone();
     let username = vm_instance.user.clone();
 
+    let mut ports = vec![VmPort {
+        host_ip: Some(Ipv4Addr::LOCALHOST),
+        host_port: Some(ssh_port),
+        vm_port: 22,
+    }];
+    ports.extend(other_ports);
+
     let qemu_launch_opts = QemuLaunchOpts {
         vm: machine.vm.clone(),
         vm_instance,
-        volumes: vec![],
-        published_ports: vec![PublishPort {
-            host_ip: Some(Ipv4Addr::LOCALHOST),
-            host_port: Some(2222),
-            vm_port: 22,
-        }],
-        show_vm_window: true,
+        volumes,
+        ports,
+        show_vm_window: show_window,
         disable_kvm: false,
     };
 
@@ -65,7 +100,7 @@ pub async fn run(ctx: &mut Context, machine: &Machine) -> Result<Option<u32>, Ru
         addrs: (Ipv4Addr::LOCALHOST, 2222),
         username,
         config: Default::default(),
-        command: "echo hi".to_owned(),
+        command: command.to_owned(),
         timeout: Duration::from_secs(120),
     };
 
@@ -79,7 +114,6 @@ pub async fn run(ctx: &mut Context, machine: &Machine) -> Result<Option<u32>, Ru
         let qemu_should_exit = Arc::new(AtomicBool::new(false));
 
         async move {
-            debug!("call launch_qemu()");
             launch_qemu(
                 &paths,
                 &executables,
@@ -96,7 +130,6 @@ pub async fn run(ctx: &mut Context, machine: &Machine) -> Result<Option<u32>, Ru
         let cancellatation_tokens = cancellatation_tokens.clone();
 
         async move {
-            debug!("call ssh_command()");
             let exit_code = ssh_command(ssh_launch_opts, Some(cancellatation_tokens)).await?;
 
             Ok(exit_code)

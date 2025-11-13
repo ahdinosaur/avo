@@ -36,13 +36,13 @@ use crate::{
 mod virtiofsd;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PublishPort {
+pub struct VmPort {
     pub host_ip: Option<Ipv4Addr>,
     pub host_port: Option<u32>,
     pub vm_port: u32,
 }
 
-impl std::fmt::Display for PublishPort {
+impl Display for VmPort {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut wrote_left = false;
 
@@ -68,13 +68,13 @@ impl std::fmt::Display for PublishPort {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BindMount {
+pub struct VmVolume {
     pub source: PathBuf,
     pub dest: PathBuf,
     pub read_only: bool,
 }
 
-impl BindMount {
+impl VmVolume {
     /// Safely printable/escaped path
     pub fn tag(&self) -> String {
         escape_path(&self.dest.to_string_lossy())
@@ -85,7 +85,7 @@ impl BindMount {
     }
 }
 
-impl Display for BindMount {
+impl Display for VmVolume {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let source = self.source.to_string_lossy();
         let dest = self.dest.to_string_lossy();
@@ -101,8 +101,8 @@ impl Display for BindMount {
 pub struct QemuLaunchOpts {
     pub vm: MachineVmOptions,
     pub vm_instance: VmInstance,
-    pub volumes: Vec<BindMount>,
-    pub published_ports: Vec<PublishPort>,
+    pub volumes: Vec<VmVolume>,
+    pub ports: Vec<VmPort>,
     pub show_vm_window: bool,
     pub disable_kvm: bool,
 }
@@ -110,7 +110,7 @@ pub struct QemuLaunchOpts {
 #[derive(Error, Debug)]
 pub enum QemuLaunchError {
     #[error("failed to launch virtiofsd for volume {volume}: {error}")]
-    VirtiofsdLaunch { volume: BindMount, error: String },
+    VirtiofsdLaunch { volume: VmVolume, error: String },
 
     #[error("QEMU has no pid, maybe it exited early?")]
     QemuPidUnavailable,
@@ -128,13 +128,20 @@ pub enum QemuLaunchError {
 pub async fn launch_qemu(
     paths: &Paths,
     executables: &ExecutablePaths,
-    qemu_launch_opts: QemuLaunchOpts,
+    options: QemuLaunchOpts,
     cancellation_tokens: CancellationTokens,
     qemu_should_exit: Arc<AtomicBool>,
 ) -> Result<(), QemuLaunchError> {
     debug!("called launch_qemu()");
 
-    let vm_instance = qemu_launch_opts.vm_instance;
+    let QemuLaunchOpts {
+        vm,
+        vm_instance,
+        volumes,
+        ports,
+        show_vm_window,
+        disable_kvm,
+    } = options;
 
     let VmInstance {
         id: _instance_id,
@@ -156,7 +163,6 @@ pub async fn launch_qemu(
     let ovmf_vars_path_str = ovmf_vars_path.to_string_lossy();
     let ovmf_code_system_path_str = paths.ovmf_code_system_file().to_string_lossy();
 
-    let vm = qemu_launch_opts.vm;
     let memory_size = vm
         .memory_size
         .unwrap_or_else(|| MemorySize::new(8 * 1024 * 1024 * 1024));
@@ -201,20 +207,16 @@ pub async fn launch_qemu(
     ]);
 
     // Network controller
-    let hostfwd: String =
-        qemu_launch_opts
-            .published_ports
-            .iter()
-            .fold(String::new(), |mut output, p| {
-                let _ = write!(
-                    output,
-                    ",hostfwd=:{}:{}-:{}",
-                    p.host_ip.unwrap_or(Ipv4Addr::UNSPECIFIED),
-                    p.host_port.unwrap_or(p.vm_port),
-                    p.vm_port
-                );
-                output
-            });
+    let hostfwd: String = ports.iter().fold(String::new(), |mut output, p| {
+        let _ = write!(
+            output,
+            ",hostfwd=:{}:{}-:{}",
+            p.host_ip.unwrap_or(Ipv4Addr::UNSPECIFIED),
+            p.host_port.unwrap_or(p.vm_port),
+            p.vm_port
+        );
+        output
+    });
     qemu_cmd.args(["-nic", &format!("user,model=virtio{hostfwd}")]);
 
     // Free Page Reporting allows the guest to signal to the host that memory can be reclaimed.
@@ -256,7 +258,7 @@ pub async fn launch_qemu(
     ]);
     */
 
-    if !qemu_launch_opts.disable_kvm {
+    if !disable_kvm {
         qemu_cmd.args(["-accel", "kvm"]).args(["-cpu", "host"]);
     }
 
@@ -268,7 +270,7 @@ pub async fn launch_qemu(
     let mut fstab_entries = vec![];
 
     // Add virtiofsd-based directory shares
-    for (i, vol) in qemu_launch_opts.volumes.iter().enumerate() {
+    for (i, vol) in volumes.iter().enumerate() {
         let virtiofsd_child = launch_virtiofsd(executables, &instance_dir, vol)
             .await
             .map_err(|e| QemuLaunchError::VirtiofsdLaunch {
@@ -308,7 +310,7 @@ pub async fn launch_qemu(
         ]);
     }
 
-    if !qemu_launch_opts.show_vm_window {
+    if !show_vm_window {
         qemu_cmd.arg("-nographic");
     }
 

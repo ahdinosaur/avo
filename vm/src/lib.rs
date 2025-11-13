@@ -17,6 +17,8 @@ mod run;
 mod ssh;
 mod utils;
 
+pub use crate::run::VmRunOptions;
+
 #[derive(Error, Debug)]
 pub enum VmError {
     #[error(transparent)]
@@ -26,10 +28,10 @@ pub enum VmError {
     Run(#[from] RunError),
 }
 
-pub async fn run(machine: Machine) -> Result<(), VmError> {
+pub async fn run(machine: Machine, options: VmRunOptions) -> Result<(), VmError> {
     install_tracing();
     let mut ctx = Context::new()?;
-    run::run(&mut ctx, &machine).await?;
+    run::run(&mut ctx, machine, options).await?;
     Ok(())
 }
 

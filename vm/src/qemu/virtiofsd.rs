@@ -5,7 +5,7 @@ use tokio::{
     process::{Child, Command},
 };
 
-use crate::{paths::ExecutablePaths, qemu::BindMount};
+use crate::{paths::ExecutablePaths, qemu::VmVolume};
 
 #[derive(Error, Debug)]
 pub enum LaunchVirtiofsdError {
@@ -19,13 +19,13 @@ pub enum LaunchVirtiofsdError {
 pub async fn launch_virtiofsd(
     executables: &ExecutablePaths,
     instance_dir: &Path,
-    volume: &BindMount,
+    volume: &VmVolume,
 ) -> Result<Child, LaunchVirtiofsdError> {
     let socket_path = instance_dir.join(volume.socket_name());
 
-    let mut virtiofsd_cmd = Command::new(executables.unshare());
-    virtiofsd_cmd
-        .arg("-r")
+    let mut cmd = Command::new(executables.unshare());
+
+    cmd.arg("-r")
         .arg("--map-auto")
         .arg("--")
         .arg(executables.virtiofsd())
@@ -47,10 +47,10 @@ pub async fn launch_virtiofsd(
         .args(["--sandbox", "chroot"]);
 
     if volume.read_only {
-        virtiofsd_cmd.arg("--readonly");
+        cmd.arg("--readonly");
     }
 
-    let mut virtiofsd_child = virtiofsd_cmd
+    let mut child = cmd
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -63,13 +63,13 @@ pub async fn launch_virtiofsd(
         // https://gitlab.com/virtio-fs/virtiofsd/-/issues/62
         // As such, we're going to use a timing based approach for the time being.
         _ = tokio::time::sleep(Duration::from_millis(250)) => {},
-        _ = virtiofsd_child.wait() => {
+        _ = child.wait() => {
             eprintln!("virtiofsd process exited early, that's usually a bad sign");
 
-            let virtiofsd_output = virtiofsd_child.wait_with_output().await?;
-            return Err(LaunchVirtiofsdError::CommandError { stderr: String::from_utf8_lossy(&virtiofsd_output.stderr).to_string() });
+            let output = child.wait_with_output().await?;
+            return Err(LaunchVirtiofsdError::CommandError { stderr: String::from_utf8_lossy(&output.stderr).to_string() });
         }
     }
 
-    Ok(virtiofsd_child)
+    Ok(child)
 }
