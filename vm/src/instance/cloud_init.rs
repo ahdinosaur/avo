@@ -34,14 +34,12 @@ pub enum CloudInitError {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
 pub struct CloudInitMetaData {
     instance_id: String,
     local_hostname: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
 pub struct CloudInitUserData {
     hostname: String,
     ssh_authorized_keys: Vec<String>,
@@ -95,8 +93,8 @@ pub async fn setup_cloud_init(
             .arg("-o")
             .arg(&image_path)
             .arg("-graft-points")
-            .arg(format!("/={}", user_data_path.to_string_lossy()))
-            .arg(format!("/={}", meta_data_path.to_string_lossy()))
+            .arg(format!("/meta-data={}", meta_data_path.to_string_lossy()))
+            .arg(format!("/user-data={}", user_data_path.to_string_lossy()))
             .output()
             .await?;
 

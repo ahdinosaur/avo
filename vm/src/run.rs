@@ -62,7 +62,7 @@ pub async fn run(ctx: &mut Context, machine: &Machine) -> Result<Option<u32>, Ru
     let ssh_launch_opts = SshLaunchOpts {
         private_key,
         addrs: (Ipv4Addr::LOCALHOST, 2222),
-        username: "root".to_owned(),
+        username: "debian".to_owned(),
         config: Default::default(),
         command: "echo hi".to_owned(),
         timeout: Duration::from_secs(120),
