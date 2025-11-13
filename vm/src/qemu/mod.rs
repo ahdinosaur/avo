@@ -9,7 +9,7 @@
 use std::{
     fmt::{Display, Write},
     net::Ipv4Addr,
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::Stdio,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -26,7 +26,7 @@ use tokio::{fs, process::Command};
 use tracing::{debug, error, info};
 
 use crate::{
-    machines::VmMachineImage,
+    instance::VmInstance,
     paths::{ExecutablePaths, Paths},
     qemu::virtiofsd::launch_virtiofsd,
     run::CancellationTokens,
@@ -36,13 +36,13 @@ use crate::{
 mod virtiofsd;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PublishPort {
+pub struct VmPort {
     pub host_ip: Option<Ipv4Addr>,
     pub host_port: Option<u32>,
     pub vm_port: u32,
 }
 
-impl std::fmt::Display for PublishPort {
+impl Display for VmPort {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut wrote_left = false;
 
@@ -68,13 +68,13 @@ impl std::fmt::Display for PublishPort {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BindMount {
+pub struct VmVolume {
     pub source: PathBuf,
     pub dest: PathBuf,
     pub read_only: bool,
 }
 
-impl BindMount {
+impl VmVolume {
     /// Safely printable/escaped path
     pub fn tag(&self) -> String {
         escape_path(&self.dest.to_string_lossy())
@@ -85,7 +85,7 @@ impl BindMount {
     }
 }
 
-impl Display for BindMount {
+impl Display for VmVolume {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let source = self.source.to_string_lossy();
         let dest = self.dest.to_string_lossy();
@@ -97,21 +97,20 @@ impl Display for BindMount {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct QemuLaunchOpts {
     pub vm: MachineVmOptions,
-    pub vm_image: VmMachineImage,
-    pub volumes: Vec<BindMount>,
-    pub published_ports: Vec<PublishPort>,
+    pub vm_instance: VmInstance,
+    pub volumes: Vec<VmVolume>,
+    pub ports: Vec<VmPort>,
     pub show_vm_window: bool,
-    pub ssh_pubkey: String,
     pub disable_kvm: bool,
 }
 
 #[derive(Error, Debug)]
 pub enum QemuLaunchError {
     #[error("failed to launch virtiofsd for volume {volume}: {error}")]
-    VirtiofsdLaunch { volume: BindMount, error: String },
+    VirtiofsdLaunch { volume: VmVolume, error: String },
 
     #[error("QEMU has no pid, maybe it exited early?")]
     QemuPidUnavailable,
@@ -129,43 +128,48 @@ pub enum QemuLaunchError {
 pub async fn launch_qemu(
     paths: &Paths,
     executables: &ExecutablePaths,
-    machine_id: &str,
-    qemu_launch_opts: QemuLaunchOpts,
+    options: QemuLaunchOpts,
     cancellation_tokens: CancellationTokens,
     qemu_should_exit: Arc<AtomicBool>,
-    run_dir: &Path,
 ) -> Result<(), QemuLaunchError> {
     debug!("called launch_qemu()");
 
-    let vm_image = qemu_launch_opts.vm_image;
+    let QemuLaunchOpts {
+        vm,
+        vm_instance,
+        volumes,
+        ports,
+        show_vm_window,
+        disable_kvm,
+    } = options;
 
-    #[allow(irrefutable_let_patterns)]
-    let VmMachineImage::Linux {
+    let VmInstance {
+        id: _instance_id,
+        dir: instance_dir,
         arch: _,
         linux: _,
+        kernel_root,
+        user: _,
         overlay_image_path,
         kernel_path,
         initrd_path,
         ovmf_vars_path,
-    } = vm_image
-    else {
-        unimplemented!();
-    };
+        ssh_keypair: _,
+        cloud_init_image,
+    } = vm_instance;
 
-    let overlay_image_path_str = overlay_image_path.to_string_lossy();
     let kernel_path_str = kernel_path.to_string_lossy();
     let initrd_path_str = initrd_path.map(|p| p.to_string_lossy().into_owned());
     let ovmf_vars_path_str = ovmf_vars_path.to_string_lossy();
     let ovmf_code_system_path_str = paths.ovmf_code_system_file().to_string_lossy();
 
-    let vm = qemu_launch_opts.vm;
     let memory_size = vm
         .memory_size
         .unwrap_or_else(|| MemorySize::new(8 * 1024 * 1024 * 1024));
     let memory_size_in_gb = memory_size / 1024 / 1024 / 1024;
     let cpu_count = vm.cpu_count.unwrap_or_else(|| CpuCount::new(2));
 
-    let ssh_pubkey_base64 = Base64::encode_string(qemu_launch_opts.ssh_pubkey.as_bytes());
+    // let ssh_pubkey_base64 = Base64::encode_string(ssh_keypair.public_key.as_bytes());
 
     let mut qemu_cmd = Command::new(executables.qemu_x86_64());
 
@@ -178,7 +182,7 @@ pub async fn launch_qemu(
     // quickly.
     qemu_cmd
         .args(["-kernel", &kernel_path_str])
-        .args(["-append", "rw root=/dev/vda1"]);
+        .args(["-append", &format!("rw root={}", kernel_root)]);
 
     if let Some(initrd_path_str) = initrd_path_str {
         qemu_cmd.args(["-initrd", &initrd_path_str]);
@@ -187,24 +191,32 @@ pub async fn launch_qemu(
     // Overlay image
     qemu_cmd.args([
         "-drive",
-        &format!("if=virtio,node-name=overlay-disk,file={overlay_image_path_str}"),
+        &format!(
+            "if=virtio,node-name=overlay-disk,format=qcow2,file={}",
+            overlay_image_path.to_string_lossy()
+        ),
+    ]);
+
+    // Cloud init image
+    qemu_cmd.args([
+        "-drive",
+        &format!(
+            "if=virtio,node-name=cloud-init,format=raw,file={}",
+            cloud_init_image.to_string_lossy()
+        ),
     ]);
 
     // Network controller
-    let hostfwd: String =
-        qemu_launch_opts
-            .published_ports
-            .iter()
-            .fold(String::new(), |mut output, p| {
-                let _ = write!(
-                    output,
-                    ",hostfwd=:{}:{}-:{}",
-                    p.host_ip.unwrap_or(Ipv4Addr::UNSPECIFIED),
-                    p.host_port.unwrap_or(p.vm_port),
-                    p.vm_port
-                );
-                output
-            });
+    let hostfwd: String = ports.iter().fold(String::new(), |mut output, p| {
+        let _ = write!(
+            output,
+            ",hostfwd=:{}:{}-:{}",
+            p.host_ip.unwrap_or(Ipv4Addr::UNSPECIFIED),
+            p.host_port.unwrap_or(p.vm_port),
+            p.vm_port
+        );
+        output
+    });
     qemu_cmd.args(["-nic", &format!("user,model=virtio{hostfwd}")]);
 
     // Free Page Reporting allows the guest to signal to the host that memory can be reclaimed.
@@ -231,10 +243,11 @@ pub async fn launch_qemu(
         ]);
 
     // QMP API to expose QEMU command API
-    let qmp_socket_path = run_dir.join("qmp.sock,server,wait=off");
+    let qmp_socket_path = instance_dir.join("qmp.sock,server,wait=off");
     let qmp_socket_path_str = qmp_socket_path.to_string_lossy();
     qemu_cmd.args(["-qmp", &format!("unix:{qmp_socket_path_str}")]);
 
+    /*
     // Here we inject the SSH using systemd.system-credentials, see:
     // https://www.freedesktop.org/software/systemd/man/latest/systemd.system-credentials.html
     qemu_cmd.args([
@@ -243,8 +256,9 @@ pub async fn launch_qemu(
             "type=11,value=io.systemd.credential.binary:ssh.authorized_keys.root={ssh_pubkey_base64}"
         ),
     ]);
+    */
 
-    if !qemu_launch_opts.disable_kvm {
+    if !disable_kvm {
         qemu_cmd.args(["-accel", "kvm"]).args(["-cpu", "host"]);
     }
 
@@ -256,8 +270,8 @@ pub async fn launch_qemu(
     let mut fstab_entries = vec![];
 
     // Add virtiofsd-based directory shares
-    for (i, vol) in qemu_launch_opts.volumes.iter().enumerate() {
-        let virtiofsd_child = launch_virtiofsd(paths, executables, machine_id, vol)
+    for (i, vol) in volumes.iter().enumerate() {
+        let virtiofsd_child = launch_virtiofsd(executables, &instance_dir, vol)
             .await
             .map_err(|e| QemuLaunchError::VirtiofsdLaunch {
                 volume: vol.clone(),
@@ -265,7 +279,7 @@ pub async fn launch_qemu(
             })?;
         virtiofsd_handles.push(virtiofsd_child);
 
-        let socket_path = run_dir.join(vol.socket_name());
+        let socket_path = instance_dir.join(vol.socket_name());
         let socket_path_str = socket_path.to_string_lossy();
         let tag = vol.tag();
         let dest_path = vol.dest.to_string_lossy();
@@ -296,7 +310,7 @@ pub async fn launch_qemu(
         ]);
     }
 
-    if !qemu_launch_opts.show_vm_window {
+    if !show_vm_window {
         qemu_cmd.arg("-nographic");
     }
 
@@ -312,7 +326,7 @@ pub async fn launch_qemu(
     // Write QEMU's pid into a `qemu-pid` file in the run dir. This allows a cleanup job to run and
     // some point and remove all the run dirs that have a dead QEMU (which can happen if the
     // process is cancelled at the wrong time).
-    let qemu_pid_path = run_dir.join("qemu.pid");
+    let qemu_pid_path = instance_dir.join("qemu.pid");
     let qemu_pid = qemu_child
         .id()
         .ok_or(QemuLaunchError::QemuPidUnavailable)?

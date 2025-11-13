@@ -1,6 +1,6 @@
 use avo_machine::Machine;
 use avo_system::{Arch, Linux, Os};
-use avo_vm::run;
+use avo_vm::{run, VmRunOptions};
 
 #[tokio::main]
 async fn main() {
@@ -10,5 +10,9 @@ async fn main() {
         arch: Arch::X86_64,
         vm: Default::default(),
     };
-    run(machine).await.unwrap();
+    let options = VmRunOptions {
+        command: "echo hello world".into(),
+        ..Default::default()
+    };
+    run(machine, options).await.unwrap();
 }

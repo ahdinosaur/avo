@@ -24,22 +24,22 @@ pub enum ConvertOvmfVarsError {
 /// Original source: https://gitlab.archlinux.org/archlinux/vmexec/-/blob/03b649bdbcdc64d30b2943f61b51165f390b920d/src/qemu.rs#L93-124
 pub async fn convert_ovmf_uefi_variables(
     paths: &Paths,
-    machine_id: &str,
+    instance_id: &str,
 ) -> Result<PathBuf, ConvertOvmfVarsError> {
     let ovmf_vars_system_path = paths.ovmf_vars_system_file();
-    let ovmf_vars_path = paths.ovmf_vars_file(machine_id);
+    let ovmf_vars_path = paths.ovmf_vars_file(instance_id);
 
-    let mut qemu_img_cmd = Command::new("qemu-img");
-    qemu_img_cmd
+    let output = Command::new("qemu-img")
         .arg("convert")
         .args(["-O", "qcow2"])
         .arg(&ovmf_vars_system_path)
-        .arg(&ovmf_vars_path);
+        .arg(&ovmf_vars_path)
+        .output()
+        .await?;
 
-    let qemu_img_output = qemu_img_cmd.output().await?;
-    if !qemu_img_output.status.success() {
+    if !output.status.success() {
         return Err(ConvertOvmfVarsError::CommandError {
-            stderr: String::from_utf8_lossy(&qemu_img_output.stderr).to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         });
     }
 

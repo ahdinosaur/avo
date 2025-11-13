@@ -21,7 +21,7 @@ pub struct SshLaunchOpts<Addrs>
 where
     Addrs: ToSocketAddrs + Clone + Send,
 {
-    pub private_key: String,
+    pub private_key: PrivateKey,
     pub addrs: Addrs,
     pub username: String,
     pub config: Config,
@@ -47,36 +47,32 @@ pub async fn ssh_command<Addrs: ToSocketAddrs + Clone + Send + Sync + 'static>(
     opts: SshLaunchOpts<Addrs>,
     cancellation_tokens: Option<CancellationTokens>,
 ) -> Result<Option<u32>, SshError> {
-    // 1) Parse and load private key
-    let private_key = PrivateKey::from_openssh(opts.private_key.clone())
-        .map_err(|e| SshError::KeyEncoding(e.to_string()))?;
-
-    // 2) Establish TCP connection with retry/backoff
+    // Establish TCP connection with retry/backoff
     let stream = connect_tcp_with_retry(opts.addrs.clone(), opts.timeout).await?;
 
-    // 3) Create SSH client and connect
+    // Create SSH client and connect
     let config = Arc::new(opts.config);
     let handler = SshClient {};
     let mut handle = connect_stream(config, stream, handler.clone()).await?;
 
-    // 4) Authenticate using the provided private key and username
+    // Authenticate using the provided private key and username
     let auth = handle
         .authenticate_publickey(
             &opts.username,
-            PrivateKeyWithHashAlg::new(Arc::new(private_key), None),
+            PrivateKeyWithHashAlg::new(Arc::new(opts.private_key), None),
         )
         .await?;
     if !auth.success() {
         return Err(SshError::AuthFailed);
     }
 
-    // 5) Open session channel
+    // Open session channel
     let mut channel = handle.channel_open_session().await?;
 
-    // 6) Execute command
+    // Execute command
     channel.exec(true, opts.command.clone()).await?;
 
-    // 7) Local I/O setup
+    // Local I/O setup
     let mut stdin = tokio::io::stdin();
     let mut stdin_buf = vec![0u8; 4096];
     let mut stdin_open = true;
@@ -84,10 +80,10 @@ pub async fn ssh_command<Addrs: ToSocketAddrs + Clone + Send + Sync + 'static>(
     let mut stdout = tokio::io::stdout();
     let mut stderr = tokio::io::stderr();
 
-    // 8) Optional cancellation token
+    // Optional cancellation token
     let cancel_token = cancellation_tokens.as_ref().map(|t| t.ssh.clone());
 
-    // 9) Event loop: forward data, monitor cancellation, gather exit code
+    // Event loop: forward data, monitor cancellation, gather exit code
     let mut exit_code: Option<u32> = None;
 
     loop {

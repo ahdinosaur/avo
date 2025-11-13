@@ -7,7 +7,7 @@ use crate::{
 };
 use std::path::{Path, PathBuf};
 
-pub struct VmImageKernelDetails {
+pub struct VmInstanceKernelDetails {
     pub kernel_path: PathBuf,
     pub initrd_path: Option<PathBuf>,
 }
@@ -29,26 +29,26 @@ pub enum ExtractKernelError {
 /// Original source: https://gitlab.archlinux.org/archlinux/vmexec/-/blob/03b649bdbcdc64d30b2943f61b51165f390b920d/src/qemu.rs#L48-91
 pub async fn extract_kernel(
     ctx: &mut Context,
-    machine_id: &str,
+    instance_id: &str,
     source_image_path: &Path,
-) -> Result<VmImageKernelDetails, ExtractKernelError> {
-    let dest_dir = ctx.paths().machine_dir(machine_id);
-    let mut virt_get_kernel_cmd = Command::new(ctx.executables().virt_get_kernel());
+) -> Result<VmInstanceKernelDetails, ExtractKernelError> {
+    let instance_dir = ctx.paths().instance_dir(instance_id);
 
-    virt_get_kernel_cmd
+    let output = Command::new(ctx.executables().virt_get_kernel())
         .args(["-a", &source_image_path.to_string_lossy()])
-        .args(["-o", &dest_dir.to_string_lossy()])
-        .arg("--unversioned-names");
+        .args(["-o", &instance_dir.to_string_lossy()])
+        .arg("--unversioned-names")
+        .output()
+        .await?;
 
-    let virt_copy_out_output = virt_get_kernel_cmd.output().await?;
-    if !virt_copy_out_output.status.success() {
+    if !output.status.success() {
         return Err(ExtractKernelError::CommandError {
-            stderr: String::from_utf8_lossy(&virt_copy_out_output.stderr).to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         });
     }
 
-    let kernel_path = dest_dir.join("vmlinuz");
-    let initrd_path = dest_dir.join("initrd.img");
+    let kernel_path = instance_dir.join("vmlinuz");
+    let initrd_path = instance_dir.join("initrd.img");
 
     let initrd_path = if fs::path_exists(&initrd_path).await? {
         Some(initrd_path)
@@ -56,7 +56,7 @@ pub async fn extract_kernel(
         None
     };
 
-    Ok(VmImageKernelDetails {
+    Ok(VmInstanceKernelDetails {
         kernel_path,
         initrd_path,
     })

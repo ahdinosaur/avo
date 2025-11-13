@@ -19,6 +19,6 @@ pub enum SshError {
     #[error("SSH authentication (public key) failed")]
     AuthFailed,
 
-    #[error("SSH key encoding error: {0}")]
-    KeyEncoding(String),
+    #[error("SSH keys error: {0}")]
+    RusshKey(#[from] russh::keys::ssh_key::Error),
 }

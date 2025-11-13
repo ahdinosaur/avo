@@ -4,18 +4,18 @@ use avo_machine::Machine;
 use avo_system::{Arch, Linux, Os};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tracing::{info, instrument};
+use tracing::info;
 
 mod hash;
-mod list;
+mod index;
 
 use crate::{
     context::Context,
     fs::{self, FsError},
     http::HttpError,
-    images::{
+    image::{
         hash::{VmImageHash, VmImageHashError},
-        list::{VmImageIndex, VmImagesList},
+        index::{VmImageIndex, VmImagesList},
     },
     paths::Paths,
 };
@@ -42,24 +42,32 @@ pub async fn get_images_list() -> Result<VmImagesList, VmImageError> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[non_exhaustive]
-pub enum VmSourceImage {
-    Linux {
-        arch: Arch,
-        linux: Linux,
-        image_path: PathBuf,
-    },
+pub struct VmImage {
+    pub arch: Arch,
+    pub linux: Linux,
+    pub image_path: PathBuf,
+    pub kernel_root: String,
+    pub user: String,
 }
 
-impl VmSourceImage {
-    pub fn new(paths: &Paths, image_index: &VmImageIndex) -> Self {
+impl VmImage {
+    pub fn new(paths: &Paths, image_index: VmImageIndex) -> Self {
         let image_path = paths.image_file(&image_index.to_image_file_name());
-        let arch = image_index.arch;
-        match &image_index.os {
-            Os::Linux(linux) => VmSourceImage::Linux {
+        let VmImageIndex {
+            arch,
+            os,
+            image: _,
+            hash: _,
+            kernel_root,
+            user,
+        } = image_index;
+        match os {
+            Os::Linux(linux) => VmImage {
                 arch,
-                linux: linux.clone(),
+                linux,
                 image_path,
+                kernel_root,
+                user,
             },
             _ => {
                 unimplemented!()
@@ -68,10 +76,7 @@ impl VmSourceImage {
     }
 }
 
-pub async fn get_image(
-    ctx: &mut Context,
-    machine: &Machine,
-) -> Result<VmSourceImage, VmImageError> {
+pub async fn get_image(ctx: &mut Context, machine: &Machine) -> Result<VmImage, VmImageError> {
     let image_index = find_image_index_for_machine(machine).await?;
 
     let Some(image_index) = image_index else {
@@ -86,7 +91,7 @@ pub async fn get_image(
 
     info!("fetched.");
 
-    let image = get_image_from_index(ctx, &image_index);
+    let image = get_image_from_index(ctx, image_index);
 
     Ok(image)
 }
@@ -122,6 +127,6 @@ async fn fetch_image(ctx: &mut Context, image_index: &VmImageIndex) -> Result<()
     Ok(())
 }
 
-fn get_image_from_index(ctx: &mut Context, image_index: &VmImageIndex) -> VmSourceImage {
-    VmSourceImage::new(ctx.paths(), image_index)
+fn get_image_from_index(ctx: &mut Context, image_index: VmImageIndex) -> VmImage {
+    VmImage::new(ctx.paths(), image_index)
 }
