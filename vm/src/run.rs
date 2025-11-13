@@ -45,6 +45,7 @@ pub async fn run(ctx: &mut Context, machine: &Machine) -> Result<Option<u32>, Ru
     let vm_instance = setup_instance(ctx, machine).await?;
 
     let private_key = vm_instance.ssh_keypair.private_key.clone();
+    let username = vm_instance.user.clone();
 
     let qemu_launch_opts = QemuLaunchOpts {
         vm: machine.vm.clone(),
@@ -62,7 +63,7 @@ pub async fn run(ctx: &mut Context, machine: &Machine) -> Result<Option<u32>, Ru
     let ssh_launch_opts = SshLaunchOpts {
         private_key,
         addrs: (Ipv4Addr::LOCALHOST, 2222),
-        username: "debian".to_owned(),
+        username,
         config: Default::default(),
         command: "echo hi".to_owned(),
         timeout: Duration::from_secs(120),

@@ -4,7 +4,7 @@ use tokio::io::AsyncReadExt;
 
 use crate::{
     fs::{self, FsError},
-    image::list::{VmImageHashRef, VmImageIndex},
+    image::index::{VmImageHashRef, VmImageIndex},
 };
 
 #[derive(Error, Debug)]

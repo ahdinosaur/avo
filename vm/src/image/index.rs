@@ -8,6 +8,8 @@ pub struct VmImageIndex {
     pub os: Os,
     pub image: VmImageRef,
     pub hash: VmImageHashRef,
+    pub kernel_root: String,
+    pub user: String,
 }
 
 impl VmImageIndex {

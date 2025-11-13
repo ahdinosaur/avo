@@ -54,6 +54,8 @@ pub struct VmInstance {
     pub dir: PathBuf,
     pub arch: Arch,
     pub linux: Linux,
+    pub kernel_root: String,
+    pub user: String,
     pub overlay_image_path: PathBuf,
     pub ovmf_vars_path: PathBuf,
     pub kernel_path: PathBuf,
@@ -76,6 +78,8 @@ pub async fn setup_instance(
         arch,
         linux,
         image_path,
+        kernel_root,
+        user,
     } = source_image;
 
     let instance_id = get_instance_id(machine);
@@ -99,6 +103,8 @@ pub async fn setup_instance(
         dir: instance_dir,
         arch,
         linux,
+        kernel_root,
+        user,
         overlay_image_path,
         ovmf_vars_path,
         kernel_path,

@@ -141,6 +141,8 @@ pub async fn launch_qemu(
         dir: instance_dir,
         arch: _,
         linux: _,
+        kernel_root,
+        user: _,
         overlay_image_path,
         kernel_path,
         initrd_path,
@@ -174,7 +176,7 @@ pub async fn launch_qemu(
     // quickly.
     qemu_cmd
         .args(["-kernel", &kernel_path_str])
-        .args(["-append", "rw root=/dev/vda1"]);
+        .args(["-append", &format!("rw root={}", kernel_root)]);
 
     if let Some(initrd_path_str) = initrd_path_str {
         qemu_cmd.args(["-initrd", &initrd_path_str]);

@@ -7,7 +7,7 @@ use thiserror::Error;
 use tracing::info;
 
 mod hash;
-mod list;
+mod index;
 
 use crate::{
     context::Context,
@@ -15,7 +15,7 @@ use crate::{
     http::HttpError,
     image::{
         hash::{VmImageHash, VmImageHashError},
-        list::{VmImageIndex, VmImagesList},
+        index::{VmImageIndex, VmImagesList},
     },
     paths::Paths,
 };
@@ -46,17 +46,28 @@ pub struct VmImage {
     pub arch: Arch,
     pub linux: Linux,
     pub image_path: PathBuf,
+    pub kernel_root: String,
+    pub user: String,
 }
 
 impl VmImage {
-    pub fn new(paths: &Paths, image_index: &VmImageIndex) -> Self {
+    pub fn new(paths: &Paths, image_index: VmImageIndex) -> Self {
         let image_path = paths.image_file(&image_index.to_image_file_name());
-        let arch = image_index.arch;
-        match &image_index.os {
+        let VmImageIndex {
+            arch,
+            os,
+            image: _,
+            hash: _,
+            kernel_root,
+            user,
+        } = image_index;
+        match os {
             Os::Linux(linux) => VmImage {
                 arch,
-                linux: linux.clone(),
+                linux,
                 image_path,
+                kernel_root,
+                user,
             },
             _ => {
                 unimplemented!()
@@ -80,7 +91,7 @@ pub async fn get_image(ctx: &mut Context, machine: &Machine) -> Result<VmImage, 
 
     info!("fetched.");
 
-    let image = get_image_from_index(ctx, &image_index);
+    let image = get_image_from_index(ctx, image_index);
 
     Ok(image)
 }
@@ -116,6 +127,6 @@ async fn fetch_image(ctx: &mut Context, image_index: &VmImageIndex) -> Result<()
     Ok(())
 }
 
-fn get_image_from_index(ctx: &mut Context, image_index: &VmImageIndex) -> VmImage {
+fn get_image_from_index(ctx: &mut Context, image_index: VmImageIndex) -> VmImage {
     VmImage::new(ctx.paths(), image_index)
 }

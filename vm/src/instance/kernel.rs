@@ -32,23 +32,23 @@ pub async fn extract_kernel(
     instance_id: &str,
     source_image_path: &Path,
 ) -> Result<VmInstanceKernelDetails, ExtractKernelError> {
-    let dest_dir = ctx.paths().instance_dir(instance_id);
-    let mut virt_get_kernel_cmd = Command::new(ctx.executables().virt_get_kernel());
+    let instance_dir = ctx.paths().instance_dir(instance_id);
 
-    virt_get_kernel_cmd
+    let output = Command::new(ctx.executables().virt_get_kernel())
         .args(["-a", &source_image_path.to_string_lossy()])
-        .args(["-o", &dest_dir.to_string_lossy()])
-        .arg("--unversioned-names");
+        .args(["-o", &instance_dir.to_string_lossy()])
+        .arg("--unversioned-names")
+        .output()
+        .await?;
 
-    let virt_copy_out_output = virt_get_kernel_cmd.output().await?;
-    if !virt_copy_out_output.status.success() {
+    if !output.status.success() {
         return Err(ExtractKernelError::CommandError {
-            stderr: String::from_utf8_lossy(&virt_copy_out_output.stderr).to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         });
     }
 
-    let kernel_path = dest_dir.join("vmlinuz");
-    let initrd_path = dest_dir.join("initrd.img");
+    let kernel_path = instance_dir.join("vmlinuz");
+    let initrd_path = instance_dir.join("initrd.img");
 
     let initrd_path = if fs::path_exists(&initrd_path).await? {
         Some(initrd_path)
