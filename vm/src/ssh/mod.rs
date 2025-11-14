@@ -1,5 +1,6 @@
 pub mod error;
 pub mod keypair;
+pub mod port;
 
 use russh::{
     client::{connect_stream, Config, Handler},

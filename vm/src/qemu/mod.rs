@@ -38,8 +38,8 @@ mod virtiofsd;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VmPort {
     pub host_ip: Option<Ipv4Addr>,
-    pub host_port: Option<u32>,
-    pub vm_port: u32,
+    pub host_port: Option<u16>,
+    pub vm_port: u16,
 }
 
 impl Display for VmPort {
@@ -155,6 +155,7 @@ pub async fn launch_qemu(
         initrd_path,
         ovmf_vars_path,
         ssh_keypair: _,
+        ssh_port: _,
         cloud_init_image,
     } = vm_instance;
 

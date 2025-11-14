@@ -18,10 +18,7 @@ use crate::{
         overlay::{create_overlay_image, CreateOverlayImageError},
         ovmf::{convert_ovmf_uefi_variables, ConvertOvmfVarsError},
     },
-    ssh::{
-        error::SshError,
-        keypair::{ensure_keypair, SshKeypair},
-    },
+    ssh::{error::SshError, keypair::SshKeypair, port::SshPort},
 };
 
 #[derive(Error, Debug)]
@@ -61,6 +58,7 @@ pub struct VmInstance {
     pub kernel_path: PathBuf,
     pub initrd_path: Option<PathBuf>,
     pub ssh_keypair: SshKeypair,
+    pub ssh_port: SshPort,
     pub cloud_init_image: PathBuf,
 }
 
@@ -93,7 +91,8 @@ pub async fn setup_instance(
         initrd_path,
     } = extract_kernel(ctx, instance_id, &image_path).await?;
 
-    let ssh_keypair = ensure_keypair(&instance_dir).await?;
+    let ssh_keypair = SshKeypair::load_or_create(&instance_dir).await?;
+    let ssh_port = SshPort::load_or_create(&instance_dir).await?;
 
     let VmInstanceCloudInit { cloud_init_image } =
         setup_cloud_init(ctx, instance_id, machine, &ssh_keypair).await?;
@@ -110,6 +109,7 @@ pub async fn setup_instance(
         kernel_path,
         initrd_path,
         ssh_keypair,
+        ssh_port,
         cloud_init_image,
     })
 }
