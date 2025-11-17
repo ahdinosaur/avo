@@ -273,6 +273,7 @@ dependencies = [
  "russh",
  "serde",
  "serde-saphyr",
+ "serde_json",
  "sha2",
  "shell-escape",
  "termion",

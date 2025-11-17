@@ -1,13 +1,128 @@
+mod handle;
+mod paths;
 mod run;
 mod setup;
 
+pub use self::paths::*;
 pub use self::run::*;
 pub use self::setup::*;
 
+use avo_system::Arch;
+use avo_system::CpuCount;
+use avo_system::Linux;
+use avo_system::MemorySize;
+use nix::{
+    sys::signal::{kill, Signal},
+    unistd::Pid,
+};
 use serde::{Deserialize, Serialize};
-use std::{fmt::Display, net::Ipv4Addr, path::PathBuf};
+use std::num::ParseIntError;
+use std::{fmt::Display, net::Ipv4Addr, path::PathBuf, str::FromStr};
+use thiserror::Error;
 
-use crate::{instance::VmInstance, utils::escape_path};
+use crate::context::Context;
+use crate::fs;
+use crate::fs::FsError;
+use crate::utils::escape_path;
+
+#[derive(Error, Debug)]
+pub enum InstanceError {
+    #[error(transparent)]
+    Setup(#[from] InstanceSetupError),
+
+    #[error(transparent)]
+    Start(#[from] InstanceStartError),
+
+    #[error(transparent)]
+    Exec(#[from] InstanceExecError),
+
+    #[error("failed to serialize or deserialize state")]
+    StateSerde(#[source] serde_json::Error),
+
+    #[error("failed to read state")]
+    StateRead(#[source] fs::FsError),
+
+    #[error("failed to write state")]
+    StateWrite(#[source] fs::FsError),
+
+    #[error("failed to read pid")]
+    ReadPid(#[source] FsError),
+
+    #[error("failed to parse pid")]
+    ParsePid(#[source] ParseIntError),
+
+    #[error("failed to kill pid")]
+    KillPid(#[source] nix::errno::Errno),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Instance {
+    pub id: String,
+    pub dir: PathBuf,
+    pub arch: Arch,
+    pub linux: Linux,
+    pub kernel_root: String,
+    pub user: String,
+    pub has_initrd: bool,
+    pub ssh_port: u16,
+    pub memory_size: Option<MemorySize>,
+    pub cpu_count: Option<CpuCount>,
+    pub volumes: Vec<VmVolume>,
+    pub ports: Vec<VmPort>,
+    pub graphics: Option<bool>,
+    pub kvm: Option<bool>,
+}
+
+impl Instance {
+    pub fn paths(&self) -> InstancePaths {
+        InstancePaths::new(&self.dir)
+    }
+
+    pub async fn setup(
+        ctx: &mut Context,
+        options: InstanceSetupOptions<'_>,
+    ) -> Result<Self, InstanceError> {
+        Ok(setup_instance(ctx, options).await?)
+    }
+
+    pub async fn load(&self) -> Result<Self, InstanceError> {
+        let state_path = self.paths().state();
+        let state_str = fs::read_file_to_string(state_path)
+            .await
+            .map_err(InstanceError::StateRead)?;
+        let instance = serde_json::from_str(&state_str).map_err(InstanceError::StateSerde)?;
+        Ok(instance)
+    }
+
+    pub async fn save(&self) -> Result<(), InstanceError> {
+        let state_path = self.paths().state();
+        let state = serde_json::to_string_pretty(self).map_err(InstanceError::StateSerde)?;
+        fs::write_file(state_path, state.as_bytes())
+            .await
+            .map_err(InstanceError::StateWrite)?;
+        Ok(())
+    }
+
+    pub async start
+
+
+    pub async fn is_running(&self) -> Result<bool, InstanceError> {
+        let pid_exists = fs::path_exists(&self.paths().qemu_pid_path())
+            .await
+            .map_err(InstanceError::ReadPid)?;
+        Ok(pid_exists)
+    }
+
+    pub async fn stop(&self) -> Result<(), InstanceError> {
+        let pid_str = fs::read_file_to_string(&self.paths().qemu_pid_path())
+            .await
+            .map_err(InstanceError::ReadPid)?;
+        let pid_int: i32 = FromStr::from_str(&pid_str).map_err(InstanceError::ParsePid)?;
+        let pid = Pid::from_raw(pid_int);
+        kill(pid, Some(Signal::SIGKILL)).map_err(InstanceError::KillPid)?;
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VmPort {

@@ -9,7 +9,7 @@ use tracing::debug;
 
 use self::virtiofsd::{launch_virtiofsd, LaunchVirtiofsdError};
 use crate::{
-    emulator::{VmPort, VmVolume},
+    instance::{VmPort, VmVolume},
     paths::ExecutablePaths,
 };
 
@@ -172,12 +172,10 @@ impl Qemu {
         self
     }
 
-    /// Use -nographic to disable the GUI window.
-    pub fn nographic(&mut self, enabled: bool) -> &mut Self {
-        if enabled {
+    pub fn graphics(&mut self, enabled: bool) -> &mut Self {
+        if !enabled {
             self.command.arg("-nographic");
         }
-
         self
     }
 

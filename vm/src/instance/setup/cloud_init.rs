@@ -1,19 +1,16 @@
 use avo_machine::Machine;
+use avo_system::Hostname;
+use russh::keys::PublicKey;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use thiserror::Error;
 
 use crate::{
     cmd::{Command, CommandError},
-    context::Context,
     fs::{self, FsError},
-    ssh::keypair::SshKeypair,
+    instance::VmInstancePaths,
+    paths::ExecutablePaths,
 };
-
-#[derive(Debug, Clone)]
-pub struct VmInstanceCloudInit {
-    pub cloud_init_image: PathBuf,
-}
 
 #[derive(Error, Debug)]
 pub enum CloudInitError {
@@ -44,18 +41,15 @@ pub struct CloudInitUserData {
 }
 
 pub async fn setup_cloud_init(
-    ctx: &mut Context,
+    executables: &ExecutablePaths,
+    paths: &VmInstancePaths<'_>,
     instance_id: &str,
-    machine: &Machine,
-    ssh_keypair: &SshKeypair,
-) -> Result<VmInstanceCloudInit, CloudInitError> {
-    let paths = ctx.paths();
-
-    let hostname = machine.hostname.clone();
-
-    let meta_data_path = paths.cloud_init_meta_data_file(instance_id);
-    let user_data_path = paths.cloud_init_user_data_file(instance_id);
-    let image_path = paths.cloud_init_image_file(instance_id);
+    hostname: &Hostname,
+    ssh_public_key: &PublicKey,
+) -> Result<(), CloudInitError> {
+    let meta_data_path = paths.cloud_init_meta_data_path();
+    let user_data_path = paths.cloud_init_user_data_path();
+    let image_path = paths.cloud_init_image_path();
 
     if !fs::path_exists(&meta_data_path).await? {
         let meta_data = CloudInitMetaData {
@@ -72,7 +66,7 @@ pub async fn setup_cloud_init(
     if !fs::path_exists(&user_data_path).await? {
         let user_data = CloudInitUserData {
             hostname: hostname.to_string(),
-            ssh_authorized_keys: vec![ssh_keypair.public_key.to_openssh()?],
+            ssh_authorized_keys: vec![ssh_public_key.to_openssh()?],
             packages: vec!["openssh".to_owned()],
         };
         fs::write_file(
@@ -83,7 +77,7 @@ pub async fn setup_cloud_init(
     }
 
     if !fs::path_exists(&image_path).await? {
-        Command::new(ctx.executables().mkisofs())
+        Command::new(executables.mkisofs())
             .arg("-RJ")
             .arg("-V")
             .arg("cidata")
@@ -96,7 +90,5 @@ pub async fn setup_cloud_init(
             .await?;
     }
 
-    Ok(VmInstanceCloudInit {
-        cloud_init_image: image_path,
-    })
+    Ok(())
 }

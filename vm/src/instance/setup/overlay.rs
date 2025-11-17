@@ -1,10 +1,10 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use thiserror::Error;
 
 use crate::{
     cmd::{Command, CommandError},
     fs::{self, FsError},
-    paths::Paths,
+    instance::VmInstancePaths,
 };
 
 #[derive(Error, Debug)]
@@ -16,17 +16,18 @@ pub enum CreateOverlayImageError {
     Command(#[from] CommandError),
 }
 /// Create an overlay image based on a source image
-pub async fn create_overlay_image(
-    paths: &Paths,
-    instance_id: &str,
+pub async fn setup_overlay(
+    paths: &VmInstancePaths<'_>,
     source_image_path: &Path,
-) -> Result<PathBuf, CreateOverlayImageError> {
-    let overlay_image_path = paths.overlay_image_file(instance_id);
-
-    let source_image_str = source_image_path.to_string_lossy();
-    let backing_file = format!("backing_file={source_image_str},backing_fmt=qcow2,nocow=on");
+) -> Result<(), CreateOverlayImageError> {
+    let overlay_image_path = paths.overlay_image_path();
 
     if !fs::path_exists(&overlay_image_path).await? {
+        let backing_file = format!(
+            "backing_file={},backing_fmt=qcow2,nocow=on",
+            source_image_path.display()
+        );
+
         Command::new("qemu-img")
             .arg("create")
             .args(["-o", &backing_file])
@@ -36,5 +37,5 @@ pub async fn create_overlay_image(
             .await?;
     }
 
-    Ok(overlay_image_path)
+    Ok(())
 }

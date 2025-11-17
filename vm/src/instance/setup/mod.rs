@@ -3,9 +3,7 @@ mod kernel;
 mod overlay;
 mod ovmf;
 
-use avo_machine::Machine;
-use avo_system::{Arch, Linux};
-use std::path::PathBuf;
+use avo_machine::{Machine, MachineVmOptions};
 use thiserror::Error;
 
 use crate::{
@@ -13,16 +11,27 @@ use crate::{
     fs::{self, FsError},
     image::{get_image, VmImage, VmImageError},
     instance::{
-        cloud_init::{setup_cloud_init, CloudInitError, VmInstanceCloudInit},
-        kernel::{extract_kernel, ExtractKernelError, VmInstanceKernelDetails},
-        overlay::{create_overlay_image, CreateOverlayImageError},
-        ovmf::{convert_ovmf_uefi_variables, ConvertOvmfVarsError},
+        setup::{
+            cloud_init::{setup_cloud_init, CloudInitError},
+            kernel::{setup_kernel, ExtractKernelError, VmInstanceKernelDetails},
+            overlay::{setup_overlay, CreateOverlayImageError},
+            ovmf::{setup_ovmf_uefi_variables, ConvertOvmfVarsError},
+        },
+        Instance, InstancePaths, VmPort, VmVolume,
     },
-    ssh::{error::SshError, keypair::SshKeypair, port::SshPort},
+    ssh::{error::SshError, keypair::SshKeypair},
+    utils::get_free_tcp_port,
 };
 
+pub struct InstanceSetupOptions<'a> {
+    instance_id: &'a str,
+    machine: &'a Machine,
+    ports: Vec<VmPort>,
+    volumes: Vec<VmVolume>,
+}
+
 #[derive(Error, Debug)]
-pub enum SetupInstanceError {
+pub enum InstanceSetupError {
     #[error(transparent)]
     Image(#[from] VmImageError),
 
@@ -43,36 +52,34 @@ pub enum SetupInstanceError {
 
     #[error(transparent)]
     Ssh(#[from] SshError),
-}
 
-#[derive(Debug, Clone)]
-pub struct VmInstance {
-    pub id: String,
-    pub dir: PathBuf,
-    pub arch: Arch,
-    pub linux: Linux,
-    pub kernel_root: String,
-    pub user: String,
-    pub overlay_image_path: PathBuf,
-    pub ovmf_vars_path: PathBuf,
-    pub kernel_path: PathBuf,
-    pub initrd_path: Option<PathBuf>,
-    pub ssh_keypair: SshKeypair,
-    pub ssh_port: SshPort,
-    pub cloud_init_image: PathBuf,
+    #[error("no open ports available")]
+    NoOpenPortsAvailable,
 }
 
 pub async fn setup_instance(
     ctx: &mut Context,
-    instance_id: &str,
-    machine: &Machine,
-) -> Result<VmInstance, VmInstanceError> {
+    options: InstanceSetupOptions<'_>,
+) -> Result<Instance, InstanceSetupError> {
+    let InstanceSetupOptions {
+        instance_id,
+        machine,
+        ports,
+        volumes,
+    } = options;
+
     let source_image = get_image(ctx, machine).await?;
+
+    let MachineVmOptions {
+        memory_size,
+        cpu_count,
+        graphics,
+    } = machine.vm.clone().unwrap_or_default();
 
     let VmImage {
         arch,
         linux,
-        image_path,
+        image_path: source_image_path,
         kernel_root,
         user,
     } = source_image;
@@ -80,32 +87,42 @@ pub async fn setup_instance(
     let instance_dir = ctx.paths().instance_dir(instance_id);
     fs::setup_directory_access(&instance_dir).await?;
 
-    let overlay_image_path = create_overlay_image(ctx.paths(), instance_id, &image_path).await?;
-    let ovmf_vars_path = convert_ovmf_uefi_variables(ctx.paths(), instance_id).await?;
-    let VmInstanceKernelDetails {
-        kernel_path,
-        initrd_path,
-    } = extract_kernel(ctx, instance_id, &image_path).await?;
+    let executables = ctx.executables();
+    let instance_paths = InstancePaths::new(&instance_dir);
+
+    setup_overlay(&instance_paths, &source_image_path).await?;
+    setup_ovmf_uefi_variables(executables, &instance_paths).await?;
+
+    let VmInstanceKernelDetails { has_initrd } =
+        setup_kernel(executables, &instance_paths, &source_image_path).await?;
 
     let ssh_keypair = SshKeypair::load_or_create(&instance_dir).await?;
-    let ssh_port = SshPort::load_or_create(&instance_dir).await?;
+    let ssh_port = get_free_tcp_port().ok_or(InstanceSetupError::NoOpenPortsAvailable)?;
 
-    let VmInstanceCloudInit { cloud_init_image } =
-        setup_cloud_init(ctx, instance_id, machine, &ssh_keypair).await?;
+    setup_cloud_init(
+        executables,
+        &instance_paths,
+        instance_id,
+        &machine.hostname,
+        &ssh_keypair.public_key,
+    )
+    .await?;
 
-    Ok(VmInstance {
+    Ok(Instance {
         id: instance_id.to_owned(),
         dir: instance_dir,
         arch,
         linux,
         kernel_root,
         user,
-        overlay_image_path,
-        ovmf_vars_path,
-        kernel_path,
-        initrd_path,
-        ssh_keypair,
+        has_initrd,
         ssh_port,
-        cloud_init_image,
+        memory_size,
+        cpu_count,
+        volumes,
+        ports,
+        graphics,
+        // TODO set via global avo config
+        kvm: None,
     })
 }
