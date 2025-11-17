@@ -94,7 +94,7 @@ pub async fn run(
 
     let ssh_launch_opts = SshLaunchOpts {
         private_key,
-        addrs: (Ipv4Addr::LOCALHOST, 2222),
+        addrs: (Ipv4Addr::LOCALHOST, ssh_port),
         username,
         config: Default::default(),
         command: command.to_owned(),
