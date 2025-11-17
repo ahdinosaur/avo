@@ -51,34 +51,39 @@ impl Qemu {
         }
     }
 
-    pub fn easy(&mut self) {
+    pub fn easy(&mut self) -> &mut Self {
         // Disable HPET to decrease idle CPU usage: -machine hpet=off
         self.command.args(["-machine", "hpet=off"]);
 
         // Enable virtio balloon with free-page-reporting.
         self.command
             .args(["-device", "virtio-balloon,free-page-reporting=on"]);
+
+        self
     }
 
     // Enable KVM accelerator.
-    pub fn kvm(&mut self, enabled: bool) {
+    pub fn kvm(&mut self, enabled: bool) -> &mut Self {
         if enabled {
             self.command.args(["-accel", "kvm"]).args(["-cpu", "host"]);
         }
+        self
     }
 
     /// Set env var for QEMU process.
-    pub fn env(&mut self, k: &str, v: &str) {
+    pub fn env(&mut self, k: &str, v: &str) -> &mut Self {
         self.command.env(k, v);
+        self
     }
 
     /// Set CPU count: -smp <n>
-    pub fn cpu_count(&mut self, cpus: impl ToString) {
+    pub fn cpu_count(&mut self, cpus: impl ToString) -> &mut Self {
         self.command.args(["-smp", &cpus.to_string()]);
+        self
     }
 
     /// Configure memory: -m <GB> and memfd NUMA backend for that size.
-    pub fn memory(&mut self, memory_in_gb: u64) {
+    pub fn memory(&mut self, memory_in_gb: u64) -> &mut Self {
         self.command
             .args(["-m", &format!("{memory_in_gb}G")])
             .args([
@@ -86,33 +91,41 @@ impl Qemu {
                 &format!("memory-backend-memfd,id=mem0,merge=on,share=on,size={memory_in_gb}G"),
             ])
             .args(["-numa", "node,memdev=mem0"]);
+
+        self
     }
 
     /// Kernel, append, and optional initrd.
-    pub fn kernel(&mut self, kernel_path: &Path, kernel_args: Option<&str>) {
+    pub fn kernel(&mut self, kernel_path: &Path, kernel_args: Option<&str>) -> &mut Self {
         self.command
             .args(["-kernel", &kernel_path.to_string_lossy()]);
         if let Some(kernel_args) = kernel_args {
             self.command.args(["-append", kernel_args]);
         }
+
+        self
     }
 
-    pub fn initrd(&mut self, initrd_path: &Path) {
+    pub fn initrd(&mut self, initrd_path: &Path) -> &mut Self {
         self.command
             .args(["-initrd", &initrd_path.to_string_lossy()]);
+
+        self
     }
 
     /// Add a virtio drive with explicit node name, format and file path.
-    pub fn virtio_drive(&mut self, node_name: &str, format: &str, file: &Path) {
+    pub fn virtio_drive(&mut self, node_name: &str, format: &str, file: &Path) -> &mut Self {
         let file = file.display();
         self.command.args([
             "-drive",
             &format!("if=virtio,node-name={node_name},format={format},file={file}"),
         ]);
+
+        self
     }
 
     /// Add UEFI pflash code and vars drives.
-    pub fn plash_drives(&mut self, code_path: &Path, vars_path: &Path) {
+    pub fn plash_drives(&mut self, code_path: &Path, vars_path: &Path) -> &mut Self {
         let code_path = code_path.display();
         let vars_path = vars_path.display();
         self.command
@@ -124,17 +137,20 @@ impl Qemu {
                 "-drive",
                 &format!("if=pflash,format=qcow2,unit=1,file={vars_path}"),
             ]);
+
+        self
     }
 
-    /// QMP over UNIX socket: -qmp unix:<path_with_opts>
-    /// Example path_with_opts: "/path/qmp.sock,server,wait=off"
-    pub fn qmp_unix(&mut self, path_with_opts: &str) {
+    /// QMP over UNIX socket.
+    pub fn qmp_socket(&mut self, qmp_socket_path: &Path) -> &mut Self {
+        let qmp_socket_path = qmp_socket_path.display();
         self.command
-            .args(["-qmp", &format!("unix:{path_with_opts}")]);
+            .args(["-qmp", &format!("unix:{qmp_socket_path},server,wait=off")]);
+        self
     }
 
     /// Add user-mode NIC with model 'virtio' and hostfwd rules based on VmPort.
-    pub fn ports(&mut self, ports: &[VmPort]) {
+    pub fn ports(&mut self, ports: &[VmPort]) -> &mut Self {
         let hostfwd: String = ports.iter().fold(String::new(), |mut s, p| {
             let _ = write!(
                 s,
@@ -147,17 +163,22 @@ impl Qemu {
         });
         self.command
             .args(["-nic", &format!("user,model=virtio{hostfwd}")]);
+
+        self
     }
 
-    pub fn pid_file<P: AsRef<Path>>(&mut self, path: P) {
+    pub fn pid_file<P: AsRef<Path>>(&mut self, path: P) -> &mut Self {
         self.command.arg("-pidfile").arg(path.as_ref());
+        self
     }
 
     /// Use -nographic to disable the GUI window.
-    pub fn nographic(&mut self, enabled: bool) {
+    pub fn nographic(&mut self, enabled: bool) -> &mut Self {
         if enabled {
             self.command.arg("-nographic");
         }
+
+        self
     }
 
     /// Add a virtiofsd-backed volume:
@@ -169,7 +190,7 @@ impl Qemu {
         executables: &ExecutablePaths,
         instance_dir: &Path,
         volume: &VmVolume,
-    ) -> Result<(), QemuError> {
+    ) -> Result<&mut Self, QemuError> {
         debug!("Launching virtiofsd for volume: {}", volume);
 
         let child = launch_virtiofsd(executables, instance_dir, volume)
@@ -203,11 +224,11 @@ impl Qemu {
                 &format!("vhost-user-fs-pci,chardev=char{idx},tag={tag}"),
             ]);
 
-        Ok(())
+        Ok(self)
     }
 
     /// Inject fstab entries via SMBIOS type 11 credentials as a base64 blob.
-    pub fn inject_fstab_smbios(&mut self) {
+    pub fn inject_fstab_smbios(&mut self) -> &mut Self {
         if !self.fstab_entries.is_empty() {
             let fstab = self.fstab_entries.join("\n");
             let fstab_base64 = Base64::encode_string(fstab.as_bytes());
@@ -216,6 +237,8 @@ impl Qemu {
                 &format!("type=11,value=io.systemd.credential.binary:fstab.extra={fstab_base64}"),
             ]);
         }
+
+        self
     }
 
     pub async fn spawn(self) -> Result<Child, QemuError> {

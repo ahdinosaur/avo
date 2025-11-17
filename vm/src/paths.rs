@@ -93,6 +93,10 @@ impl Paths {
     pub fn qemu_pid_file(&self, instance_id: &str) -> PathBuf {
         self.instance_dir(instance_id).join("qemu.pid")
     }
+
+    pub fn qemu_qmp_socket(&self, instance_id: &str) -> PathBuf {
+        self.instance_dir(instance_id).join("qmp.sock")
+    }
 }
 
 #[derive(Error, Debug)]

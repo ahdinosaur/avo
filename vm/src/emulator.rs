@@ -134,17 +134,11 @@ impl Emulator {
             cloud_init_image,
         } = vm_instance;
 
-        let kernel_path_str = kernel_path.to_string_lossy().to_string();
-        let initrd_path_str = initrd_path.map(|p| p.to_string_lossy().into_owned());
-
         let memory_size = vm
             .memory_size
             .unwrap_or_else(|| MemorySize::new(8 * 1024 * 1024 * 1024));
         let memory_size_in_gb: u64 = u64::from(memory_size) / 1024 / 1024 / 1024;
         let cpu_count = vm.cpu_count.unwrap_or_else(|| CpuCount::new(2));
-
-        let qmp_socket_path = instance_dir.join("qmp.sock,server,wait=off");
-        let qmp_socket_path_str = qmp_socket_path.to_string_lossy().to_string();
 
         let mut qemu = Qemu::new(executables.qemu_x86_64());
 
@@ -155,18 +149,17 @@ impl Emulator {
 
         qemu.kernel(&kernel_path, Some(&format!("rw root={}", kernel_root)));
         if let Some(initrd) = initrd_path {
-            qemu = qemu.initrd(&initrd);
+            qemu.initrd(&initrd);
         }
 
-        qemu.ports(&ports)
-            .qmp_unix(&qmp_socket_path_str)
+        qemu.qmp_socket(&paths.qemu_qmp_socket(&instance_id))
             .kvm(!disable_kvm)
             .pid_file(&paths.qemu_pid_file(&instance_id))
-            .nographic(!show_vm_window);
+            .nographic(!show_vm_window)
+            .ports(&ports);
 
         // Overlay and cloud-init drives
-        qemu = qemu
-            .virtio_drive("overlay-disk", "qcow2", &overlay_image_path)
+        qemu.virtio_drive("overlay-disk", "qcow2", &overlay_image_path)
             .virtio_drive("cloud-init", "raw", &cloud_init_image);
 
         // virtiofsd-based directory shares and fstab injection
@@ -179,7 +172,7 @@ impl Emulator {
         info!("run qemu cmd: {:?}", qemu);
 
         // Spawn QEMU
-        let mut child = qemu.spawn().await?;
+        let child = qemu.spawn().await?;
 
         let pid = child.id().ok_or(EmulatorError::PidUnavailable)?;
 
