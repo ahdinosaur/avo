@@ -1,6 +1,6 @@
 use avo_machine::Machine;
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use thiserror::Error;
 use tokio::process::Command;
 
@@ -60,7 +60,7 @@ pub async fn setup_cloud_init(
     let user_data_path = paths.cloud_init_user_data_file(instance_id);
     let image_path = paths.cloud_init_image_file(instance_id);
 
-    if !Path::new(&meta_data_path).exists() {
+    if !fs::path_exists(&meta_data_path).await? {
         let meta_data = CloudInitMetaData {
             instance_id: instance_id.to_owned(),
             local_hostname: hostname.to_string(),
@@ -72,7 +72,7 @@ pub async fn setup_cloud_init(
         .await?;
     }
 
-    if !Path::new(&user_data_path).exists() {
+    if !fs::path_exists(&user_data_path).await? {
         let user_data = CloudInitUserData {
             hostname: hostname.to_string(),
             ssh_authorized_keys: vec![ssh_keypair.public_key.to_openssh()?],
@@ -85,7 +85,7 @@ pub async fn setup_cloud_init(
         .await?;
     }
 
-    if !Path::new(&image_path).exists() {
+    if !fs::path_exists(&image_path).await? {
         let output = Command::new(ctx.executables().mkisofs())
             .arg("-RJ")
             .arg("-V")

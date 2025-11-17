@@ -2,12 +2,19 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 use tokio::process::Command;
 
-use crate::paths::Paths;
+use crate::{
+    fs::{self, FsError},
+    paths::Paths,
+};
 
 #[derive(Error, Debug)]
 pub enum CreateOverlayImageError {
+    #[error(transparent)]
+    Fs(#[from] FsError),
+
     #[error("failed to get output from `qemu-img create ...`")]
     CommandOutput(#[from] tokio::io::Error),
+
     #[error("qemu-img create failed: {stderr}")]
     CommandError { stderr: String },
 }
@@ -22,18 +29,20 @@ pub async fn create_overlay_image(
     let source_image_str = source_image_path.to_string_lossy();
     let backing_file = format!("backing_file={source_image_str},backing_fmt=qcow2,nocow=on");
 
-    let output = Command::new("qemu-img")
-        .arg("create")
-        .args(["-o", &backing_file])
-        .args(["-f", "qcow2"])
-        .arg(&overlay_image_path)
-        .output()
-        .await?;
+    if !fs::path_exists(&overlay_image_path).await? {
+        let output = Command::new("qemu-img")
+            .arg("create")
+            .args(["-o", &backing_file])
+            .args(["-f", "qcow2"])
+            .arg(&overlay_image_path)
+            .output()
+            .await?;
 
-    if !output.status.success() {
-        return Err(CreateOverlayImageError::CommandError {
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        });
+        if !output.status.success() {
+            return Err(CreateOverlayImageError::CommandError {
+                stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+            });
+        }
     }
 
     Ok(overlay_image_path)

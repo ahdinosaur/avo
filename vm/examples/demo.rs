@@ -10,9 +10,10 @@ async fn main() {
         arch: Arch::X86_64,
         vm: Default::default(),
     };
+    let instance_id = machine.hostname.as_ref();
+    let command = "echo hello world";
     let options = VmRunOptions {
-        command: "echo hello world".into(),
         ..Default::default()
     };
-    run(machine, options).await.unwrap();
+    run(instance_id, &machine, command, options).await.unwrap();
 }

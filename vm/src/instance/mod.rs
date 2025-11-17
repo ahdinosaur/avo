@@ -62,12 +62,9 @@ pub struct VmInstance {
     pub cloud_init_image: PathBuf,
 }
 
-pub fn get_instance_id(machine: &Machine) -> &str {
-    machine.hostname.as_ref()
-}
-
 pub async fn setup_instance(
     ctx: &mut Context,
+    instance_id: &str,
     machine: &Machine,
 ) -> Result<VmInstance, VmInstanceError> {
     let source_image = get_image(ctx, machine).await?;
@@ -80,7 +77,6 @@ pub async fn setup_instance(
         user,
     } = source_image;
 
-    let instance_id = get_instance_id(machine);
     let instance_dir = ctx.paths().instance_dir(instance_id);
     fs::setup_directory_access(&instance_dir).await?;
 

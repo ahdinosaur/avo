@@ -2,12 +2,19 @@ use std::path::PathBuf;
 use thiserror::Error;
 use tokio::process::Command;
 
-use crate::paths::Paths;
+use crate::{
+    fs::{self, FsError},
+    paths::Paths,
+};
 
 #[derive(Error, Debug)]
 pub enum ConvertOvmfVarsError {
+    #[error(transparent)]
+    Fs(#[from] FsError),
+
     #[error("failed to get output from `convert -O qcow $source_image $output_file`")]
     CommandOutput(#[from] tokio::io::Error),
+
     #[error("qemu-img convert failed")]
     CommandError { stderr: String },
 }
@@ -29,18 +36,20 @@ pub async fn convert_ovmf_uefi_variables(
     let ovmf_vars_system_path = paths.ovmf_vars_system_file();
     let ovmf_vars_path = paths.ovmf_vars_file(instance_id);
 
-    let output = Command::new("qemu-img")
-        .arg("convert")
-        .args(["-O", "qcow2"])
-        .arg(&ovmf_vars_system_path)
-        .arg(&ovmf_vars_path)
-        .output()
-        .await?;
+    if !fs::path_exists(&ovmf_vars_path).await? {
+        let output = Command::new("qemu-img")
+            .arg("convert")
+            .args(["-O", "qcow2"])
+            .arg(&ovmf_vars_system_path)
+            .arg(&ovmf_vars_path)
+            .output()
+            .await?;
 
-    if !output.status.success() {
-        return Err(ConvertOvmfVarsError::CommandError {
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        });
+        if !output.status.success() {
+            return Err(ConvertOvmfVarsError::CommandError {
+                stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+            });
+        }
     }
 
     Ok(ovmf_vars_path)

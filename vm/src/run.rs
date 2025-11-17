@@ -42,7 +42,6 @@ pub enum RunError {
 
 #[derive(Debug, Clone)]
 pub struct VmRunOptions {
-    pub command: String,
     pub volumes: Vec<VmVolume>,
     pub ports: Vec<VmPort>,
     pub show_window: bool,
@@ -51,7 +50,6 @@ pub struct VmRunOptions {
 impl Default for VmRunOptions {
     fn default() -> Self {
         Self {
-            command: "echo test".into(),
             volumes: vec![],
             ports: vec![],
             show_window: true,
@@ -61,17 +59,18 @@ impl Default for VmRunOptions {
 
 pub async fn run(
     ctx: &mut Context,
-    machine: Machine,
+    instance_id: &str,
+    machine: &Machine,
+    command: &str,
     options: VmRunOptions,
 ) -> Result<Option<u32>, RunError> {
     let VmRunOptions {
-        command,
         volumes,
         ports: other_ports,
         show_window,
     } = options;
 
-    let vm_instance = setup_instance(ctx, &machine).await?;
+    let vm_instance = setup_instance(ctx, instance_id, machine).await?;
 
     let private_key = vm_instance.ssh_keypair.private_key.clone();
     let username = vm_instance.user.clone();

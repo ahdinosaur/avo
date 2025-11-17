@@ -28,10 +28,15 @@ pub enum VmError {
     Run(#[from] RunError),
 }
 
-pub async fn run(machine: Machine, options: VmRunOptions) -> Result<(), VmError> {
+pub async fn run(
+    instance_id: &str,
+    machine: &Machine,
+    command: &str,
+    options: VmRunOptions,
+) -> Result<(), VmError> {
     install_tracing();
     let mut ctx = Context::new()?;
-    run::run(&mut ctx, machine, options).await?;
+    run::run(&mut ctx, instance_id, machine, command, options).await?;
     Ok(())
 }
 
