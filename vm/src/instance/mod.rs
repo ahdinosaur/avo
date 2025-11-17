@@ -1,11 +1,13 @@
+mod exec;
 mod handle;
 mod paths;
-mod run;
 mod setup;
+mod start;
 
+pub use self::exec::*;
 pub use self::paths::*;
-pub use self::run::*;
 pub use self::setup::*;
+pub use self::start::*;
 
 use avo_system::Arch;
 use avo_system::CpuCount;
@@ -23,6 +25,9 @@ use thiserror::Error;
 use crate::context::Context;
 use crate::fs;
 use crate::fs::FsError;
+use crate::instance::exec::InstanceExecError;
+use crate::ssh::error::SshError;
+use crate::ssh::keypair::SshKeypair;
 use crate::utils::escape_path;
 
 #[derive(Error, Debug)]
@@ -103,8 +108,9 @@ impl Instance {
         Ok(())
     }
 
-    pub async start
-
+    pub async fn start(&self, ctx: &mut Context) -> Result<(), InstanceError> {
+        Ok(instance_start(ctx.executables(), self).await?)
+    }
 
     pub async fn is_running(&self) -> Result<bool, InstanceError> {
         let pid_exists = fs::path_exists(&self.paths().qemu_pid_path())
@@ -121,6 +127,14 @@ impl Instance {
         let pid = Pid::from_raw(pid_int);
         kill(pid, Some(Signal::SIGKILL)).map_err(InstanceError::KillPid)?;
         Ok(())
+    }
+
+    pub async fn ssh_keypair(&self) -> Result<SshKeypair, SshError> {
+        SshKeypair::load_or_create(&self.dir).await
+    }
+
+    pub async fn exec(&self, command: &str) -> Result<u32, InstanceError> {
+        Ok(instance_exec(self, command).await?)
     }
 }
 

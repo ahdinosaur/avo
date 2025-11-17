@@ -1,19 +1,12 @@
-use avo_machine::Machine;
 use avo_system::{CpuCount, MemorySize};
-use std::{net::Ipv4Addr, path::PathBuf, time::Duration};
+use std::net::Ipv4Addr;
 use thiserror::Error;
-use tokio::task::JoinError;
 use tracing::info;
 
 use crate::{
-    context::Context,
-    instance::{
-        setup::{setup_instance, SetupInstanceError},
-        Instance, InstanceHandle, VmPort, VmVolume,
-    },
+    instance::{Instance, VmPort},
     paths::ExecutablePaths,
     qemu::{Qemu, QemuError},
-    ssh::{error::SshError, ssh_command, SshLaunchOpts},
 };
 
 #[derive(Error, Debug)]
@@ -25,7 +18,7 @@ pub enum InstanceStartError {
 pub async fn instance_start(
     executables: &ExecutablePaths,
     instance: &Instance,
-) -> Result<Option<u32>, InstanceStartError> {
+) -> Result<(), InstanceStartError> {
     let Instance {
         id: instance_id,
         dir: instance_dir,
@@ -70,7 +63,7 @@ pub async fn instance_start(
         &paths.kernel_path(),
         Some(&format!("rw root={}", kernel_root)),
     );
-    if has_initrd {
+    if *has_initrd {
         qemu.initrd(&paths.initrd_path());
     }
 
@@ -95,38 +88,5 @@ pub async fn instance_start(
 
     let child = qemu.spawn().await?;
 
-    Ok(InstanceHandle::new(instance_dir))
-}
-
-/*
-#[derive(Error, Debug)]
-pub enum InstanceAttachError {}
-*/
-
-pub async fn instance_attach(ctx: &mut Context, instance_id: &str) -> InstanceHandle {
-    let paths = ctx.paths();
-    let instance_dir = paths.instance_dir(instance_id);
-    InstanceHandle::new(instance_dir)
-}
-
-#[derive(Error, Debug)]
-pub enum InstanceExecError {
-    #[error(transparent)]
-    Ssh(#[from] SshError),
-}
-
-pub async fn instance_exec(
-    ctx: &mut Context,
-    instance_handle: &InstanceHandle,
-    command: &str,
-) -> Result<Option<u32>, InstanceExecError> {
-    let ssh_keypair = instance_handle.ssh_keypair().await?;
-    let ssh_launch_opts = SshLaunchOpts {
-        private_key: ssh_keypair.private_key,
-        addrs: (Ipv4Addr::LOCALHOST, ssh_port),
-        username,
-        config: Default::default(),
-        command: command.to_owned(),
-        timeout: Duration::from_secs(120),
-    };
+    Ok(())
 }

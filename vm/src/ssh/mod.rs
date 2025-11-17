@@ -14,7 +14,6 @@ use tokio::{
     time::{sleep, Instant},
 };
 
-use crate::run::CancellationTokens;
 use crate::ssh::error::SshError;
 
 #[derive(Debug)]
@@ -46,8 +45,7 @@ impl Handler for SshClient {
 
 pub async fn ssh_command<Addrs: ToSocketAddrs + Clone + Send + Sync + 'static>(
     opts: SshLaunchOpts<Addrs>,
-    cancellation_tokens: Option<CancellationTokens>,
-) -> Result<Option<u32>, SshError> {
+) -> Result<u32, SshError> {
     // Establish TCP connection with retry/backoff
     let stream = connect_tcp_with_retry(opts.addrs.clone(), opts.timeout).await?;
 
@@ -81,25 +79,11 @@ pub async fn ssh_command<Addrs: ToSocketAddrs + Clone + Send + Sync + 'static>(
     let mut stdout = tokio::io::stdout();
     let mut stderr = tokio::io::stderr();
 
-    // Optional cancellation token
-    let cancel_token = cancellation_tokens.as_ref().map(|t| t.ssh.clone());
-
-    // Event loop: forward data, monitor cancellation, gather exit code
+    // Event loop: forward data, gather exit code
     let mut exit_code: Option<u32> = None;
 
     loop {
         tokio::select! {
-            // External cancellation
-            _ = cancel_token.as_ref().unwrap().cancelled(), if cancel_token.is_some() => {
-                let _ = channel.eof().await;
-                let _ = channel.close().await;
-                let _ = handle.disconnect(russh::Disconnect::ByApplication, "", "English").await;
-                if let Some(tokens) = &cancellation_tokens {
-                    tokens.qemu.cancel();
-                }
-                return Ok(None);
-            }
-
             // Local stdin -> remote
             read = stdin.read(&mut stdin_buf), if stdin_open => {
                 match read {
@@ -150,7 +134,7 @@ pub async fn ssh_command<Addrs: ToSocketAddrs + Clone + Send + Sync + 'static>(
         .disconnect(russh::Disconnect::ByApplication, "", "English")
         .await;
 
-    Ok(Some(exit_code.unwrap_or(255)))
+    Ok(exit_code.unwrap_or(255))
 }
 
 async fn connect_tcp_with_retry<Addrs>(
