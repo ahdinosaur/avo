@@ -6,6 +6,7 @@ use crate::{
     run::RunError,
 };
 
+mod cmd;
 mod context;
 mod fs;
 mod http;

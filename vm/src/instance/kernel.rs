@@ -1,11 +1,11 @@
+use std::path::{Path, PathBuf};
 use thiserror::Error;
-use tokio::process::Command;
 
 use crate::{
+    cmd::{Command, CommandError},
     context::Context,
     fs::{self, FsError},
 };
-use std::path::{Path, PathBuf};
 
 pub struct VmInstanceKernelDetails {
     pub kernel_path: PathBuf,
@@ -17,11 +17,8 @@ pub enum ExtractKernelError {
     #[error(transparent)]
     Fs(#[from] FsError),
 
-    #[error("failed to get output from `virt-copy-out ...`")]
-    CommandOutput(#[from] tokio::io::Error),
-
-    #[error("virt-copy-out failed")]
-    CommandError { stderr: String },
+    #[error(transparent)]
+    Command(#[from] CommandError),
 }
 
 /// Extract the kernel and initrd from a given image
@@ -40,18 +37,12 @@ pub async fn extract_kernel(
     let initrd_path = instance_dir.join("initrd.img");
 
     if !fs::path_exists(&kernel_path).await? {
-        let output = Command::new(ctx.executables().virt_get_kernel())
+        Command::new(ctx.executables().virt_get_kernel())
             .args(["-a", &source_image_path.to_string_lossy()])
             .args(["-o", &instance_dir.to_string_lossy()])
             .arg("--unversioned-names")
-            .output()
+            .run()
             .await?;
-
-        if !output.status.success() {
-            return Err(ExtractKernelError::CommandError {
-                stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-            });
-        }
     }
 
     let initrd_path = if fs::path_exists(&initrd_path).await? {

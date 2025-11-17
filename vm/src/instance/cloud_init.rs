@@ -2,9 +2,9 @@ use avo_machine::Machine;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use thiserror::Error;
-use tokio::process::Command;
 
 use crate::{
+    cmd::{Command, CommandError},
     context::Context,
     fs::{self, FsError},
     ssh::keypair::SshKeypair,
@@ -21,16 +21,13 @@ pub enum CloudInitError {
     Fs(#[from] FsError),
 
     #[error(transparent)]
-    Yaml(#[from] serde_yml::Error),
+    Yaml(#[from] serde_saphyr::ser_error::Error),
 
     #[error(transparent)]
     SshKey(#[from] russh::keys::ssh_key::Error),
 
-    #[error("failed to get output from `mkisofs ...`")]
-    CommandOutput(#[from] tokio::io::Error),
-
-    #[error("mkisofs failed")]
-    CommandError { stderr: String },
+    #[error(transparent)]
+    Command(#[from] CommandError),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,7 +64,7 @@ pub async fn setup_cloud_init(
         };
         fs::write_file(
             &meta_data_path,
-            serde_yml::to_string(&meta_data)?.as_bytes(),
+            serde_saphyr::to_string(&meta_data)?.as_bytes(),
         )
         .await?;
     }
@@ -80,13 +77,13 @@ pub async fn setup_cloud_init(
         };
         fs::write_file(
             &user_data_path,
-            format!("#cloud-config\n{}", serde_yml::to_string(&user_data)?).as_bytes(),
+            format!("#cloud-config\n{}", serde_saphyr::to_string(&user_data)?).as_bytes(),
         )
         .await?;
     }
 
     if !fs::path_exists(&image_path).await? {
-        let output = Command::new(ctx.executables().mkisofs())
+        Command::new(ctx.executables().mkisofs())
             .arg("-RJ")
             .arg("-V")
             .arg("cidata")
@@ -95,14 +92,8 @@ pub async fn setup_cloud_init(
             .arg("-graft-points")
             .arg(format!("/meta-data={}", meta_data_path.to_string_lossy()))
             .arg(format!("/user-data={}", user_data_path.to_string_lossy()))
-            .output()
+            .run()
             .await?;
-
-        if !output.status.success() {
-            return Err(CloudInitError::CommandError {
-                stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-            });
-        }
     }
 
     Ok(VmInstanceCloudInit {
