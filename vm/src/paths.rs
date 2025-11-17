@@ -89,6 +89,10 @@ impl Paths {
     pub fn cloud_init_image_file(&self, instance_id: &str) -> PathBuf {
         self.instance_dir(instance_id).join("cloud-init.iso")
     }
+
+    pub fn qemu_pid_file(&self, instance_id: &str) -> PathBuf {
+        self.instance_dir(instance_id).join("qemu.pid")
+    }
 }
 
 #[derive(Error, Debug)]
