@@ -1,25 +1,18 @@
 use avo_machine::Machine;
 use thiserror::Error;
 
-use crate::{
-    context::{Context, ContextError},
-    run::RunError,
-};
+use crate::context::{Context, ContextError};
 
 mod cmd;
 mod context;
-mod emulator;
 mod fs;
 mod http;
 mod image;
 mod instance;
 mod paths;
 mod qemu;
-mod run;
 mod ssh;
 mod utils;
-
-pub use crate::run::VmRunOptions;
 
 #[derive(Error, Debug)]
 pub enum VmError {
