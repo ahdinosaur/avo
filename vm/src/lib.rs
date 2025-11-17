@@ -8,6 +8,7 @@ use crate::{
 
 mod cmd;
 mod context;
+mod emulator;
 mod fs;
 mod http;
 mod image;

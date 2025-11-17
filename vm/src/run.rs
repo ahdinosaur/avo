@@ -11,8 +11,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     context::Context,
+    emulator::EmulatorError,
+    emulator::{Emulator, EmulatorLaunchOptions, VmPort, VmVolume},
     instance::{setup_instance, VmInstanceError},
-    qemu::{launch_qemu, QemuLaunchError, QemuLaunchOpts, VmPort, VmVolume},
     ssh::{error::SshError, ssh_command, SshLaunchOpts},
 };
 
@@ -31,7 +32,7 @@ pub enum RunError {
     DirLock(#[from] dir_lock::Error),
 
     #[error(transparent)]
-    Qemu(#[from] QemuLaunchError),
+    Emulator(#[from] EmulatorError),
 
     #[error(transparent)]
     Join(#[from] JoinError),
