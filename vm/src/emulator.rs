@@ -11,6 +11,7 @@ use tracing::info;
 
 use crate::{
     context::Context,
+    fs::{self, FsError},
     instance::VmInstance,
     qemu::{Qemu, QemuError},
     utils::escape_path,
@@ -134,6 +135,8 @@ impl Emulator {
             cloud_init_image,
         } = vm_instance;
 
+        let pid_file_path = paths.qemu_pid_file(&instance_id);
+
         let memory_size = vm
             .memory_size
             .unwrap_or_else(|| MemorySize::new(8 * 1024 * 1024 * 1024));
@@ -154,7 +157,7 @@ impl Emulator {
 
         qemu.qmp_socket(&paths.qemu_qmp_socket(&instance_id))
             .kvm(!disable_kvm)
-            .pid_file(&paths.qemu_pid_file(&instance_id))
+            .pid_file(&pid_file_path)
             .nographic(!show_vm_window)
             .ports(&ports);
 
@@ -174,26 +177,33 @@ impl Emulator {
         // Spawn QEMU
         let child = qemu.spawn().await?;
 
-        let pid = child.id().ok_or(EmulatorError::PidUnavailable)?;
-
-        Ok(EmulatorHandle { pid })
+        Ok(EmulatorHandle { pid_file_path })
     }
 }
 
 pub struct EmulatorHandle {
     pid: u32,
+    pid_file_path: PathBuf,
 }
 
 #[derive(Error, Debug)]
 pub enum EmulatorHandleError {
     #[error(transparent)]
+    Fs(#[from] FsError),
+
+    #[error(transparent)]
     Nix(#[from] nix::errno::Errno),
 }
 
 impl EmulatorHandle {
-    fn kill(&self, signal: Signal) -> Result<(), EmulatorHandleError> {
+    pub async fn is_running(&self) -> Result<bool, EmulatorHandleError> {
+        let pid_exists = fs::path_exists(&self.pid_file_path).await?;
+        Ok(pid_exists)
+    }
+
+    pub fn stop(&self) -> Result<(), EmulatorHandleError> {
         let pid = Pid::from_raw(self.pid as i32);
-        kill(pid, Some(signal))?;
+        kill(pid, Some(Signal::SIGKILL))?;
         Ok(())
     }
 }
