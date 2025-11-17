@@ -1,111 +1,71 @@
-mod cloud_init;
-mod kernel;
-mod overlay;
-mod ovmf;
+mod run;
+mod setup;
 
-use avo_machine::Machine;
-use avo_system::{Arch, Linux};
-use std::path::PathBuf;
-use thiserror::Error;
+pub use self::run::*;
+pub use self::setup::*;
 
-use crate::{
-    context::Context,
-    fs::{self, FsError},
-    image::{get_image, VmImage, VmImageError},
-    instance::{
-        cloud_init::{setup_cloud_init, CloudInitError, VmInstanceCloudInit},
-        kernel::{extract_kernel, ExtractKernelError, VmInstanceKernelDetails},
-        overlay::{create_overlay_image, CreateOverlayImageError},
-        ovmf::{convert_ovmf_uefi_variables, ConvertOvmfVarsError},
-    },
-    ssh::{error::SshError, keypair::SshKeypair, port::SshPort},
-};
+use serde::{Deserialize, Serialize};
+use std::{fmt::Display, net::Ipv4Addr, path::PathBuf};
 
-#[derive(Error, Debug)]
-pub enum VmInstanceError {
-    #[error(transparent)]
-    Image(#[from] VmImageError),
+use crate::{instance::VmInstance, utils::escape_path};
 
-    #[error(transparent)]
-    ConvertOvmfVars(#[from] ConvertOvmfVarsError),
-
-    #[error(transparent)]
-    ExtractKernel(#[from] ExtractKernelError),
-
-    #[error(transparent)]
-    CreateOverlayImage(#[from] CreateOverlayImageError),
-
-    #[error(transparent)]
-    CloudInit(#[from] CloudInitError),
-
-    #[error(transparent)]
-    Fs(#[from] FsError),
-
-    #[error(transparent)]
-    Ssh(#[from] SshError),
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VmPort {
+    pub host_ip: Option<Ipv4Addr>,
+    pub host_port: Option<u16>,
+    pub vm_port: u16,
 }
 
-#[derive(Debug, Clone)]
-pub struct VmInstance {
-    pub id: String,
-    pub dir: PathBuf,
-    pub arch: Arch,
-    pub linux: Linux,
-    pub kernel_root: String,
-    pub user: String,
-    pub overlay_image_path: PathBuf,
-    pub ovmf_vars_path: PathBuf,
-    pub kernel_path: PathBuf,
-    pub initrd_path: Option<PathBuf>,
-    pub ssh_keypair: SshKeypair,
-    pub ssh_port: SshPort,
-    pub cloud_init_image: PathBuf,
+impl Display for VmPort {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut wrote_left = false;
+
+        if let Some(ip) = self.host_ip {
+            write!(f, "{}", ip)?;
+            wrote_left = true;
+        }
+
+        if let Some(port) = self.host_port {
+            if wrote_left {
+                write!(f, ":")?;
+            }
+            write!(f, "{}", port)?;
+            wrote_left = true;
+        }
+
+        if wrote_left {
+            write!(f, "->")?;
+        }
+
+        write!(f, "{}/tcp", self.vm_port)
+    }
 }
 
-pub async fn setup_instance(
-    ctx: &mut Context,
-    instance_id: &str,
-    machine: &Machine,
-) -> Result<VmInstance, VmInstanceError> {
-    let source_image = get_image(ctx, machine).await?;
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VmVolume {
+    pub source: PathBuf,
+    pub dest: PathBuf,
+    pub read_only: bool,
+}
 
-    let VmImage {
-        arch,
-        linux,
-        image_path,
-        kernel_root,
-        user,
-    } = source_image;
+impl VmVolume {
+    pub fn tag(&self) -> String {
+        escape_path(&self.dest.to_string_lossy())
+    }
 
-    let instance_dir = ctx.paths().instance_dir(instance_id);
-    fs::setup_directory_access(&instance_dir).await?;
+    pub fn socket_name(&self) -> String {
+        format!("{}.sock", self.tag())
+    }
+}
 
-    let overlay_image_path = create_overlay_image(ctx.paths(), instance_id, &image_path).await?;
-    let ovmf_vars_path = convert_ovmf_uefi_variables(ctx.paths(), instance_id).await?;
-    let VmInstanceKernelDetails {
-        kernel_path,
-        initrd_path,
-    } = extract_kernel(ctx, instance_id, &image_path).await?;
-
-    let ssh_keypair = SshKeypair::load_or_create(&instance_dir).await?;
-    let ssh_port = SshPort::load_or_create(&instance_dir).await?;
-
-    let VmInstanceCloudInit { cloud_init_image } =
-        setup_cloud_init(ctx, instance_id, machine, &ssh_keypair).await?;
-
-    Ok(VmInstance {
-        id: instance_id.to_owned(),
-        dir: instance_dir,
-        arch,
-        linux,
-        kernel_root,
-        user,
-        overlay_image_path,
-        ovmf_vars_path,
-        kernel_path,
-        initrd_path,
-        ssh_keypair,
-        ssh_port,
-        cloud_init_image,
-    })
+impl Display for VmVolume {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let source = self.source.to_string_lossy();
+        let dest = self.dest.to_string_lossy();
+        if self.read_only {
+            write!(f, "{source}:{dest}:ro")
+        } else {
+            write!(f, "{source}:{dest}")
+        }
+    }
 }
