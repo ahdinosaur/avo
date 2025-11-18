@@ -1,14 +1,12 @@
-use avo_machine::Machine;
 use avo_system::Hostname;
 use russh::keys::PublicKey;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 use thiserror::Error;
 
 use crate::{
     cmd::{Command, CommandError},
     fs::{self, FsError},
-    instance::VmInstancePaths,
+    instance::InstancePaths,
     paths::ExecutablePaths,
 };
 
@@ -42,7 +40,7 @@ pub struct CloudInitUserData {
 
 pub async fn setup_cloud_init(
     executables: &ExecutablePaths,
-    paths: &VmInstancePaths<'_>,
+    paths: &InstancePaths<'_>,
     instance_id: &str,
     hostname: &Hostname,
     ssh_public_key: &PublicKey,

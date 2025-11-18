@@ -1,6 +1,6 @@
 use avo_machine::Machine;
 use avo_system::{Arch, Linux, Os};
-use avo_vm::{run, VmRunOptions};
+use avo_vm::{run, RunOptions};
 
 #[tokio::main]
 async fn main() {
@@ -11,9 +11,15 @@ async fn main() {
         vm: Default::default(),
     };
     let instance_id = machine.hostname.as_ref();
+    let ports = vec![];
+    let volumes = vec![];
     let command = "echo hello world";
-    let options = VmRunOptions {
-        ..Default::default()
+    let options = RunOptions {
+        instance_id,
+        machine: &machine,
+        ports,
+        volumes,
+        command,
     };
-    run(instance_id, &machine, command, options).await.unwrap();
+    run(options).await.unwrap();
 }

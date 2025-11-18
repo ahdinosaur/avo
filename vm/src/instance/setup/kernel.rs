@@ -4,7 +4,7 @@ use thiserror::Error;
 use crate::{
     cmd::{Command, CommandError},
     fs::{self, FsError},
-    instance::VmInstancePaths,
+    instance::InstancePaths,
     paths::ExecutablePaths,
 };
 
@@ -28,7 +28,7 @@ pub enum ExtractKernelError {
 /// Original source: https://gitlab.archlinux.org/archlinux/vmexec/-/blob/03b649bdbcdc64d30b2943f61b51165f390b920d/src/qemu.rs#L48-91
 pub async fn setup_kernel(
     executables: &ExecutablePaths,
-    paths: &VmInstancePaths<'_>,
+    paths: &InstancePaths<'_>,
     source_image_path: &Path,
 ) -> Result<VmInstanceKernelDetails, ExtractKernelError> {
     let kernel_path = paths.kernel_path();

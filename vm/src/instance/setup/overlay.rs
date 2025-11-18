@@ -4,7 +4,7 @@ use thiserror::Error;
 use crate::{
     cmd::{Command, CommandError},
     fs::{self, FsError},
-    instance::VmInstancePaths,
+    instance::InstancePaths,
 };
 
 #[derive(Error, Debug)]
@@ -17,7 +17,7 @@ pub enum CreateOverlayImageError {
 }
 /// Create an overlay image based on a source image
 pub async fn setup_overlay(
-    paths: &VmInstancePaths<'_>,
+    paths: &InstancePaths<'_>,
     source_image_path: &Path,
 ) -> Result<(), CreateOverlayImageError> {
     let overlay_image_path = paths.overlay_image_path();

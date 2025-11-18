@@ -5,7 +5,7 @@ use tokio::{
     process::{Child, Command},
 };
 
-use crate::{emulator::VmVolume, paths::ExecutablePaths};
+use crate::{instance::VmVolume, paths::ExecutablePaths};
 
 #[derive(Error, Debug)]
 pub enum LaunchVirtiofsdError {

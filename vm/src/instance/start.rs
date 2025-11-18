@@ -20,7 +20,7 @@ pub async fn instance_start(
     instance: &Instance,
 ) -> Result<(), InstanceStartError> {
     let Instance {
-        id: instance_id,
+        id: _instance_id,
         dir: instance_dir,
         arch: _,
         linux: _,
@@ -37,8 +37,7 @@ pub async fn instance_start(
     } = instance;
     let paths = instance.paths();
 
-    let volumes = instance.volumes;
-    let other_ports = instance.ports;
+    let other_ports = ports.clone();
     let mut ports = vec![VmPort {
         host_ip: Some(Ipv4Addr::LOCALHOST),
         host_port: Some(*ssh_port),
@@ -78,7 +77,7 @@ pub async fn instance_start(
         .virtio_drive("cloud-init", "raw", &paths.cloud_init_image_path());
 
     // virtiofsd-based directory shares and fstab injection
-    for vol in &volumes {
+    for vol in volumes {
         qemu.volume(executables, &instance_dir, vol).await?;
     }
     // Inject fstab via SMBIOS (must be run after virtiofsd)
@@ -86,7 +85,7 @@ pub async fn instance_start(
 
     info!("run qemu cmd: {:?}", qemu);
 
-    let child = qemu.spawn().await?;
+    let _child = qemu.spawn().await?;
 
     Ok(())
 }

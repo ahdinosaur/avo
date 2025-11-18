@@ -30,11 +30,11 @@ pub enum VmError {
 }
 
 pub struct RunOptions<'a> {
-    instance_id: &'a str,
-    machine: &'a Machine,
-    ports: Vec<VmPort>,
-    volumes: Vec<VmVolume>,
-    command: &'a str,
+    pub instance_id: &'a str,
+    pub machine: &'a Machine,
+    pub ports: Vec<VmPort>,
+    pub volumes: Vec<VmVolume>,
+    pub command: &'a str,
 }
 
 pub async fn run(options: RunOptions<'_>) -> Result<(), VmError> {
@@ -58,7 +58,9 @@ pub async fn run(options: RunOptions<'_>) -> Result<(), VmError> {
             ports,
             volumes,
         };
-        Instance::setup(&mut ctx, setup_options).await?
+        let inst = Instance::setup(&mut ctx, setup_options).await?;
+        inst.save().await?;
+        inst
     };
 
     if !instance.is_qemu_running().await? {
@@ -69,7 +71,7 @@ pub async fn run(options: RunOptions<'_>) -> Result<(), VmError> {
                 break;
             }
 
-            sleep(Duration::from_millis(100));
+            sleep(Duration::from_millis(100)).await;
         }
     }
 
