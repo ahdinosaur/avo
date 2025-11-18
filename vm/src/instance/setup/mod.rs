@@ -24,10 +24,10 @@ use crate::{
 };
 
 pub struct InstanceSetupOptions<'a> {
-    instance_id: &'a str,
-    machine: &'a Machine,
-    ports: Vec<VmPort>,
-    volumes: Vec<VmVolume>,
+    pub instance_id: &'a str,
+    pub machine: &'a Machine,
+    pub ports: Vec<VmPort>,
+    pub volumes: Vec<VmVolume>,
 }
 
 #[derive(Error, Debug)]

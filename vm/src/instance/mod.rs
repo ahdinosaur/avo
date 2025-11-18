@@ -29,6 +29,7 @@ use crate::instance::exec::InstanceExecError;
 use crate::ssh::error::SshError;
 use crate::ssh::keypair::SshKeypair;
 use crate::utils::escape_path;
+use crate::utils::is_tcp_port_open;
 
 #[derive(Error, Debug)]
 pub enum InstanceError {
@@ -41,6 +42,9 @@ pub enum InstanceError {
     #[error(transparent)]
     Exec(#[from] InstanceExecError),
 
+    #[error("failed to check whether instance dir exists")]
+    DirExists(#[source] fs::FsError),
+
     #[error("failed to serialize or deserialize state")]
     StateSerde(#[source] serde_json::Error),
 
@@ -49,6 +53,9 @@ pub enum InstanceError {
 
     #[error("failed to write state")]
     StateWrite(#[source] fs::FsError),
+
+    #[error("failed to remove instance dir")]
+    RemoveDir(#[source] fs::FsError),
 
     #[error("failed to read pid")]
     ReadPid(#[source] FsError),
@@ -90,8 +97,18 @@ impl Instance {
         Ok(setup_instance(ctx, options).await?)
     }
 
-    pub async fn load(&self) -> Result<Self, InstanceError> {
-        let state_path = self.paths().state();
+    pub async fn exists(ctx: &mut Context, instance_id: &str) -> Result<bool, InstanceError> {
+        let instance_dir = ctx.paths().instance_dir(instance_id);
+        let exists = fs::path_exists(instance_dir)
+            .await
+            .map_err(InstanceError::DirExists)?;
+        Ok(exists)
+    }
+
+    pub async fn load(ctx: &mut Context, instance_id: &str) -> Result<Self, InstanceError> {
+        let instance_dir = ctx.paths().instance_dir(instance_id);
+        let paths = InstancePaths::new(&instance_dir);
+        let state_path = paths.state();
         let state_str = fs::read_file_to_string(state_path)
             .await
             .map_err(InstanceError::StateRead)?;
@@ -108,15 +125,26 @@ impl Instance {
         Ok(())
     }
 
+    pub async fn remove(self) -> Result<(), InstanceError> {
+        fs::remove_dir(self.dir)
+            .await
+            .map_err(InstanceError::RemoveDir)?;
+        Ok(())
+    }
+
     pub async fn start(&self, ctx: &mut Context) -> Result<(), InstanceError> {
         Ok(instance_start(ctx.executables(), self).await?)
     }
 
-    pub async fn is_running(&self) -> Result<bool, InstanceError> {
+    pub async fn is_qemu_running(&self) -> Result<bool, InstanceError> {
         let pid_exists = fs::path_exists(&self.paths().qemu_pid_path())
             .await
             .map_err(InstanceError::ReadPid)?;
         Ok(pid_exists)
+    }
+
+    pub fn is_ssh_open(&self) -> bool {
+        is_tcp_port_open(self.ssh_port)
     }
 
     pub async fn stop(&self) -> Result<(), InstanceError> {
