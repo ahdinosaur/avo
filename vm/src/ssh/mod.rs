@@ -2,7 +2,7 @@ pub mod error;
 pub mod keypair;
 
 use russh::{
-    client::{connect_stream, Config, Handler},
+    client::{connect_stream, Config, Handle, Handler},
     keys::{key::PrivateKeyWithHashAlg, PrivateKey},
     ChannelMsg,
 };
@@ -13,11 +13,10 @@ use tokio::{
     time::{sleep, Instant},
 };
 
-use crate::run::CancellationTokens;
 use crate::ssh::error::SshError;
 
 #[derive(Debug)]
-pub struct SshLaunchOpts<Addrs>
+pub struct SshCommandOptions<Addrs>
 where
     Addrs: ToSocketAddrs + Clone + Send,
 {
@@ -44,22 +43,27 @@ impl Handler for SshClient {
 }
 
 pub async fn ssh_command<Addrs: ToSocketAddrs + Clone + Send + Sync + 'static>(
-    opts: SshLaunchOpts<Addrs>,
-    cancellation_tokens: Option<CancellationTokens>,
-) -> Result<Option<u32>, SshError> {
-    // Establish TCP connection with retry/backoff
-    let stream = connect_tcp_with_retry(opts.addrs.clone(), opts.timeout).await?;
+    options: SshCommandOptions<Addrs>,
+) -> Result<u32, SshError> {
+    let SshCommandOptions {
+        private_key,
+        addrs,
+        username,
+        config,
+        timeout,
+        command,
+    } = options;
 
     // Create SSH client and connect
-    let config = Arc::new(opts.config);
+    let config = Arc::new(config);
     let handler = SshClient {};
-    let mut handle = connect_stream(config, stream, handler.clone()).await?;
+    let mut handle = connect_with_retry(addrs, config, handler, timeout).await?;
 
     // Authenticate using the provided private key and username
     let auth = handle
         .authenticate_publickey(
-            &opts.username,
-            PrivateKeyWithHashAlg::new(Arc::new(opts.private_key), None),
+            &username,
+            PrivateKeyWithHashAlg::new(Arc::new(private_key), None),
         )
         .await?;
     if !auth.success() {
@@ -70,7 +74,7 @@ pub async fn ssh_command<Addrs: ToSocketAddrs + Clone + Send + Sync + 'static>(
     let mut channel = handle.channel_open_session().await?;
 
     // Execute command
-    channel.exec(true, opts.command.clone()).await?;
+    channel.exec(true, command).await?;
 
     // Local I/O setup
     let mut stdin = tokio::io::stdin();
@@ -80,25 +84,11 @@ pub async fn ssh_command<Addrs: ToSocketAddrs + Clone + Send + Sync + 'static>(
     let mut stdout = tokio::io::stdout();
     let mut stderr = tokio::io::stderr();
 
-    // Optional cancellation token
-    let cancel_token = cancellation_tokens.as_ref().map(|t| t.ssh.clone());
-
-    // Event loop: forward data, monitor cancellation, gather exit code
+    // Event loop: forward data, gather exit code
     let mut exit_code: Option<u32> = None;
 
     loop {
         tokio::select! {
-            // External cancellation
-            _ = cancel_token.as_ref().unwrap().cancelled(), if cancel_token.is_some() => {
-                let _ = channel.eof().await;
-                let _ = channel.close().await;
-                let _ = handle.disconnect(russh::Disconnect::ByApplication, "", "English").await;
-                if let Some(tokens) = &cancellation_tokens {
-                    tokens.qemu.cancel();
-                }
-                return Ok(None);
-            }
-
             // Local stdin -> remote
             read = stdin.read(&mut stdin_buf), if stdin_open => {
                 match read {
@@ -149,22 +139,24 @@ pub async fn ssh_command<Addrs: ToSocketAddrs + Clone + Send + Sync + 'static>(
         .disconnect(russh::Disconnect::ByApplication, "", "English")
         .await;
 
-    Ok(Some(exit_code.unwrap_or(255)))
+    Ok(exit_code.unwrap_or(255))
 }
 
-async fn connect_tcp_with_retry<Addrs>(
+async fn connect_with_retry<Addrs, H>(
     addrs: Addrs,
+    config: Arc<Config>,
+    handler: H,
     timeout: Duration,
-) -> Result<TcpStream, SshError>
+) -> Result<Handle<H>, SshError>
 where
     Addrs: ToSocketAddrs + Clone + Send,
+    H: Handler<Error = russh::Error> + Clone + Send + 'static,
 {
     let start = Instant::now();
-    let mut backoff_ms = 50u64;
 
     loop {
-        match TcpStream::connect(addrs.clone()).await {
-            Ok(stream) => return Ok(stream),
+        let stream = match TcpStream::connect(addrs.clone()).await {
+            Ok(stream) => Ok::<Option<TcpStream>, SshError>(Some(stream)),
             Err(ref e)
                 if matches!(
                     e.kind(),
@@ -177,10 +169,28 @@ where
                 if start.elapsed() > timeout {
                     return Err(SshError::Timeout);
                 }
-                sleep(Duration::from_millis(backoff_ms)).await;
-                backoff_ms = (backoff_ms * 2).min(1_000);
+                Ok(None)
             }
             Err(e) => return Err(SshError::Io(e)),
+        }?;
+
+        if let Some(stream) = stream {
+            match connect_stream(config.clone(), stream, handler.clone()).await {
+                Ok(handle) => return Ok(handle),
+                Err(russh::Error::IO(ref error))
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::ConnectionReset
+                    ) =>
+                {
+                    if start.elapsed() > timeout {
+                        return Err(SshError::Timeout);
+                    }
+                }
+                Err(error) => return Err(SshError::from(error)),
+            };
         }
+
+        sleep(Duration::from_millis(100)).await;
     }
 }

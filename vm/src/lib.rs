@@ -1,11 +1,4 @@
-use avo_machine::Machine;
-use thiserror::Error;
-
-use crate::{
-    context::{Context, ContextError},
-    run::RunError,
-};
-
+mod cmd;
 mod context;
 mod fs;
 mod http;
@@ -13,11 +6,20 @@ mod image;
 mod instance;
 mod paths;
 mod qemu;
-mod run;
 mod ssh;
 mod utils;
 
-pub use crate::run::VmRunOptions;
+pub use crate::instance::{VmPort, VmVolume};
+
+use avo_machine::Machine;
+use std::time::Duration;
+use thiserror::Error;
+use tokio::time::sleep;
+
+use crate::{
+    context::{Context, ContextError},
+    instance::{Instance, InstanceError, InstanceSetupOptions},
+};
 
 #[derive(Error, Debug)]
 pub enum VmError {
@@ -25,13 +27,59 @@ pub enum VmError {
     Context(#[from] ContextError),
 
     #[error(transparent)]
-    Run(#[from] RunError),
+    Instance(#[from] InstanceError),
 }
 
-pub async fn run(machine: Machine, options: VmRunOptions) -> Result<(), VmError> {
+pub struct RunOptions<'a> {
+    pub instance_id: &'a str,
+    pub machine: &'a Machine,
+    pub ports: Vec<VmPort>,
+    pub volumes: Vec<VmVolume>,
+    pub command: &'a str,
+    pub timeout: Duration,
+}
+
+pub async fn run(options: RunOptions<'_>) -> Result<(), VmError> {
     install_tracing();
     let mut ctx = Context::new()?;
-    run::run(&mut ctx, machine, options).await?;
+
+    let RunOptions {
+        instance_id,
+        machine,
+        ports,
+        volumes,
+        command,
+        timeout,
+    } = options;
+
+    let instance = if Instance::exists(&mut ctx, instance_id).await? {
+        Instance::load(&mut ctx, instance_id).await?
+    } else {
+        let setup_options = InstanceSetupOptions {
+            instance_id,
+            machine,
+            ports,
+            volumes,
+        };
+        let inst = Instance::setup(&mut ctx, setup_options).await?;
+        inst.save().await?;
+        inst
+    };
+
+    if !instance.is_qemu_running().await? {
+        instance.start(&mut ctx).await?;
+
+        loop {
+            if instance.is_ssh_open() {
+                break;
+            }
+
+            sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    instance.exec(command, timeout).await?;
+
     Ok(())
 }
 

@@ -1,363 +1,252 @@
-// TODO:
-// - add features from https://github.com/zTrix/qemu-compose/blob/cb3b3b2f39957521aedbcfb1128865009ea6b536/qemu_compose/instance/qemu_runner.py
-//   - add hostname via io.systemd.credential:system.hostname=
-//     - https://github.com/zTrix/qemu-compose/blob/cb3b3b2f39957521aedbcfb1128865009ea6b536/qemu_compose/instance/qemu_runner.py#L395-L398
-//   - add netdev hostname
-//     - https://github.com/zTrix/qemu-compose/blob/cb3b3b2f39957521aedbcfb1128865009ea6b536/qemu_compose/instance/qemu_runner.py#L526-L534
-//
-
-use std::{
-    fmt::{Display, Write},
-    net::Ipv4Addr,
-    path::PathBuf,
-    process::Stdio,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-};
-
-use avo_machine::MachineVmOptions;
-use avo_system::{CpuCount, MemorySize};
-use base64ct::{Base64, Encoding};
-use serde::{Deserialize, Serialize};
-use thiserror::Error;
-use tokio::{fs, process::Command};
-use tracing::{debug, error, info};
-
-use crate::{
-    instance::VmInstance,
-    paths::{ExecutablePaths, Paths},
-    qemu::virtiofsd::launch_virtiofsd,
-    run::CancellationTokens,
-    utils::escape_path,
-};
-
 mod virtiofsd;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct VmPort {
-    pub host_ip: Option<Ipv4Addr>,
-    pub host_port: Option<u32>,
-    pub vm_port: u32,
-}
+use base64ct::{Base64, Encoding};
+use std::fmt::{Debug, Write};
+use std::{ffi::OsStr, net::Ipv4Addr, path::Path};
+use thiserror::Error;
+use tokio::process::{Child, Command};
+use tracing::debug;
 
-impl Display for VmPort {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut wrote_left = false;
-
-        if let Some(ip) = self.host_ip {
-            write!(f, "{}", ip)?;
-            wrote_left = true;
-        }
-
-        if let Some(port) = self.host_port {
-            if wrote_left {
-                write!(f, ":")?;
-            }
-            write!(f, "{}", port)?;
-            wrote_left = true;
-        }
-
-        if wrote_left {
-            write!(f, "->")?;
-        }
-
-        write!(f, "{}/tcp", self.vm_port)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct VmVolume {
-    pub source: PathBuf,
-    pub dest: PathBuf,
-    pub read_only: bool,
-}
-
-impl VmVolume {
-    /// Safely printable/escaped path
-    pub fn tag(&self) -> String {
-        escape_path(&self.dest.to_string_lossy())
-    }
-
-    pub fn socket_name(&self) -> String {
-        format!("{}.sock", self.tag())
-    }
-}
-
-impl Display for VmVolume {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let source = self.source.to_string_lossy();
-        let dest = self.dest.to_string_lossy();
-        if self.read_only {
-            write!(f, "{source}:{dest}:ro")
-        } else {
-            write!(f, "{source}:{dest}")
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct QemuLaunchOpts {
-    pub vm: MachineVmOptions,
-    pub vm_instance: VmInstance,
-    pub volumes: Vec<VmVolume>,
-    pub ports: Vec<VmPort>,
-    pub show_vm_window: bool,
-    pub disable_kvm: bool,
-}
+use self::virtiofsd::{launch_virtiofsd, LaunchVirtiofsdError};
+use crate::{
+    instance::{VmPort, VmVolume},
+    paths::ExecutablePaths,
+};
 
 #[derive(Error, Debug)]
-pub enum QemuLaunchError {
-    #[error("failed to launch virtiofsd for volume {volume}: {error}")]
-    VirtiofsdLaunch { volume: VmVolume, error: String },
-
-    #[error("QEMU has no pid, maybe it exited early?")]
-    QemuPidUnavailable,
+pub enum QemuError {
+    #[error("failed to launch virtiofsd for volume {volume}: {source}")]
+    Virtiofsd {
+        volume: VmVolume,
+        #[source]
+        source: LaunchVirtiofsdError,
+    },
 
     #[error(transparent)]
     Io(#[from] std::io::Error),
-
-    #[error(transparent)]
-    Utf8(#[from] std::string::FromUtf8Error),
-
-    #[error("QEMU failed: {stderr}")]
-    QemuError { stderr: String },
 }
 
-pub async fn launch_qemu(
-    paths: &Paths,
-    executables: &ExecutablePaths,
-    options: QemuLaunchOpts,
-    cancellation_tokens: CancellationTokens,
-    qemu_should_exit: Arc<AtomicBool>,
-) -> Result<(), QemuLaunchError> {
-    debug!("called launch_qemu()");
+pub struct Qemu {
+    command: Command,
+    // Keep virtiofsd processes alive as long as Qemu is alive.
+    virtiofsd_handles: Vec<Child>,
+    // Fstab entries to be injected via SMBIOS credentials.
+    fstab_entries: Vec<String>,
+}
 
-    let QemuLaunchOpts {
-        vm,
-        vm_instance,
-        volumes,
-        ports,
-        show_vm_window,
-        disable_kvm,
-    } = options;
+impl Debug for Qemu {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.command.fmt(f)
+    }
+}
 
-    let VmInstance {
-        id: _instance_id,
-        dir: instance_dir,
-        arch: _,
-        linux: _,
-        kernel_root,
-        user: _,
-        overlay_image_path,
-        kernel_path,
-        initrd_path,
-        ovmf_vars_path,
-        ssh_keypair: _,
-        cloud_init_image,
-    } = vm_instance;
-
-    let kernel_path_str = kernel_path.to_string_lossy();
-    let initrd_path_str = initrd_path.map(|p| p.to_string_lossy().into_owned());
-    let ovmf_vars_path_str = ovmf_vars_path.to_string_lossy();
-    let ovmf_code_system_path_str = paths.ovmf_code_system_file().to_string_lossy();
-
-    let memory_size = vm
-        .memory_size
-        .unwrap_or_else(|| MemorySize::new(8 * 1024 * 1024 * 1024));
-    let memory_size_in_gb = memory_size / 1024 / 1024 / 1024;
-    let cpu_count = vm.cpu_count.unwrap_or_else(|| CpuCount::new(2));
-
-    // let ssh_pubkey_base64 = Base64::encode_string(ssh_keypair.public_key.as_bytes());
-
-    let mut qemu_cmd = Command::new(executables.qemu_x86_64());
-
-    // Decrease idle CPU usage
-    qemu_cmd
-        .args(["-machine", "hpet=off"])
-        .args(["-smp", &cpu_count.to_string()]);
-
-    // We extracted the kernel and initrd from this image earlier in order to boot it more
-    // quickly.
-    qemu_cmd
-        .args(["-kernel", &kernel_path_str])
-        .args(["-append", &format!("rw root={}", kernel_root)]);
-
-    if let Some(initrd_path_str) = initrd_path_str {
-        qemu_cmd.args(["-initrd", &initrd_path_str]);
+impl Qemu {
+    /// Create a new emulator for a specific QEMU binary path.
+    pub fn new<S: AsRef<OsStr>>(qemu_binary: S) -> Qemu {
+        let command = Command::new(qemu_binary);
+        Qemu {
+            command,
+            virtiofsd_handles: Vec::new(),
+            fstab_entries: Vec::new(),
+        }
     }
 
-    // Overlay image
-    qemu_cmd.args([
-        "-drive",
-        &format!(
-            "if=virtio,node-name=overlay-disk,format=qcow2,file={}",
-            overlay_image_path.to_string_lossy()
-        ),
-    ]);
+    pub fn easy(&mut self) -> &mut Self {
+        // Disable HPET to decrease idle CPU usage: -machine hpet=off
+        self.command.args(["-machine", "hpet=off"]);
 
-    // Cloud init image
-    qemu_cmd.args([
-        "-drive",
-        &format!(
-            "if=virtio,node-name=cloud-init,format=raw,file={}",
-            cloud_init_image.to_string_lossy()
-        ),
-    ]);
+        // Enable virtio balloon with free-page-reporting.
+        self.command
+            .args(["-device", "virtio-balloon,free-page-reporting=on"]);
 
-    // Network controller
-    let hostfwd: String = ports.iter().fold(String::new(), |mut output, p| {
-        let _ = write!(
-            output,
-            ",hostfwd=:{}:{}-:{}",
-            p.host_ip.unwrap_or(Ipv4Addr::UNSPECIFIED),
-            p.host_port.unwrap_or(p.vm_port),
-            p.vm_port
-        );
-        output
-    });
-    qemu_cmd.args(["-nic", &format!("user,model=virtio{hostfwd}")]);
+        self
+    }
 
-    // Free Page Reporting allows the guest to signal to the host that memory can be reclaimed.
-    qemu_cmd.args(["-device", "virtio-balloon,free-page-reporting=on"]);
+    // Enable KVM accelerator.
+    pub fn kvm(&mut self, enabled: bool) -> &mut Self {
+        if enabled {
+            self.command.args(["-accel", "kvm"]).args(["-cpu", "host"]);
+        }
+        self
+    }
 
-    // Memory configuration
-    qemu_cmd
-        .args(["-m", &format!("{memory_size_in_gb}G")])
-        .args([
-            "-object",
-            &format!("memory-backend-memfd,id=mem0,merge=on,share=on,size={memory_size_in_gb}G"),
-        ])
-        .args(["-numa", "node,memdev=mem0"]);
+    /// Set env var for QEMU process.
+    #[allow(dead_code)]
+    pub fn env(&mut self, k: &str, v: &str) -> &mut Self {
+        self.command.env(k, v);
+        self
+    }
 
-    // UEFI
-    qemu_cmd
-        .args([
+    /// Set CPU count: -smp <n>
+    pub fn cpu_count(&mut self, cpus: impl ToString) -> &mut Self {
+        self.command.args(["-smp", &cpus.to_string()]);
+        self
+    }
+
+    /// Configure memory: -m <GB> and memfd NUMA backend for that size.
+    pub fn memory(&mut self, memory_in_gb: u64) -> &mut Self {
+        self.command
+            .args(["-m", &format!("{memory_in_gb}G")])
+            .args([
+                "-object",
+                &format!("memory-backend-memfd,id=mem0,merge=on,share=on,size={memory_in_gb}G"),
+            ])
+            .args(["-numa", "node,memdev=mem0"]);
+
+        self
+    }
+
+    /// Kernel, append, and optional initrd.
+    pub fn kernel(&mut self, kernel_path: &Path, kernel_args: Option<&str>) -> &mut Self {
+        self.command
+            .args(["-kernel", &kernel_path.to_string_lossy()]);
+        if let Some(kernel_args) = kernel_args {
+            self.command.args(["-append", kernel_args]);
+        }
+
+        self
+    }
+
+    pub fn initrd(&mut self, initrd_path: &Path) -> &mut Self {
+        self.command
+            .args(["-initrd", &initrd_path.to_string_lossy()]);
+
+        self
+    }
+
+    /// Add a virtio drive with explicit node name, format and file path.
+    pub fn virtio_drive(&mut self, node_name: &str, format: &str, file: &Path) -> &mut Self {
+        let file = file.display();
+        self.command.args([
             "-drive",
-            &format!("if=pflash,format=raw,unit=0,file={ovmf_code_system_path_str},readonly=on"),
-        ])
-        .args([
-            "-drive",
-            &format!("if=pflash,format=qcow2,unit=1,file={ovmf_vars_path_str}"),
+            &format!("if=virtio,node-name={node_name},format={format},file={file}"),
         ]);
 
-    // QMP API to expose QEMU command API
-    let qmp_socket_path = instance_dir.join("qmp.sock,server,wait=off");
-    let qmp_socket_path_str = qmp_socket_path.to_string_lossy();
-    qemu_cmd.args(["-qmp", &format!("unix:{qmp_socket_path_str}")]);
-
-    /*
-    // Here we inject the SSH using systemd.system-credentials, see:
-    // https://www.freedesktop.org/software/systemd/man/latest/systemd.system-credentials.html
-    qemu_cmd.args([
-        "-smbios",
-        &format!(
-            "type=11,value=io.systemd.credential.binary:ssh.authorized_keys.root={ssh_pubkey_base64}"
-        ),
-    ]);
-    */
-
-    if !disable_kvm {
-        qemu_cmd.args(["-accel", "kvm"]).args(["-cpu", "host"]);
+        self
     }
 
-    // It's important we keep `virtiofsd_handles` in scope here and that we don't drop them too
-    // early as otherwise the process would exit and the VM would be unhappy.
-    let mut virtiofsd_handles = vec![];
+    /// Add UEFI pflash code and vars drives.
+    pub fn plash_drives(&mut self, code_path: &Path, vars_path: &Path) -> &mut Self {
+        let code_path = code_path.display();
+        let vars_path = vars_path.display();
+        self.command
+            .args([
+                "-drive",
+                &format!("if=pflash,format=raw,unit=0,file={code_path},readonly=on",),
+            ])
+            .args([
+                "-drive",
+                &format!("if=pflash,format=qcow2,unit=1,file={vars_path}"),
+            ]);
 
-    // We need fstab entries for virtiofsd mounts and pmem devices.
-    let mut fstab_entries = vec![];
+        self
+    }
 
-    // Add virtiofsd-based directory shares
-    for (i, vol) in volumes.iter().enumerate() {
-        let virtiofsd_child = launch_virtiofsd(executables, &instance_dir, vol)
+    /// QMP over UNIX socket.
+    pub fn qmp_socket(&mut self, qmp_socket_path: &Path) -> &mut Self {
+        let qmp_socket_path = qmp_socket_path.display();
+        self.command
+            .args(["-qmp", &format!("unix:{qmp_socket_path},server,wait=off")]);
+        self
+    }
+
+    /// Add user-mode NIC with model 'virtio' and hostfwd rules based on VmPort.
+    pub fn ports(&mut self, ports: &[VmPort]) -> &mut Self {
+        let hostfwd: String = ports.iter().fold(String::new(), |mut s, p| {
+            let _ = write!(
+                s,
+                ",hostfwd=:{}:{}-:{}",
+                p.host_ip.unwrap_or(Ipv4Addr::UNSPECIFIED),
+                p.host_port.unwrap_or(p.vm_port),
+                p.vm_port
+            );
+            s
+        });
+        self.command
+            .args(["-nic", &format!("user,model=virtio{hostfwd}")]);
+
+        self
+    }
+
+    pub fn pid_file<P: AsRef<Path>>(&mut self, path: P) -> &mut Self {
+        self.command.arg("-pidfile").arg(path.as_ref());
+        self
+    }
+
+    pub fn graphics(&mut self, enabled: bool) -> &mut Self {
+        if !enabled {
+            self.command.arg("-nographic");
+        }
+        self
+    }
+
+    /// Add a virtiofsd-backed volume:
+    /// - launches virtiofsd and retains its Child handle
+    /// - adds the vhost-user-fs-pci device and chardev
+    /// - registers an fstab entry to later inject via SMBIOS
+    pub async fn volume(
+        &mut self,
+        executables: &ExecutablePaths,
+        instance_dir: &Path,
+        volume: &VmVolume,
+    ) -> Result<&mut Self, QemuError> {
+        debug!("Launching virtiofsd for volume: {}", volume);
+
+        let child = launch_virtiofsd(executables, instance_dir, volume)
             .await
-            .map_err(|e| QemuLaunchError::VirtiofsdLaunch {
-                volume: vol.clone(),
-                error: e.to_string(),
+            .map_err(|error| QemuError::Virtiofsd {
+                volume: volume.clone(),
+                source: error,
             })?;
-        virtiofsd_handles.push(virtiofsd_child);
 
-        let socket_path = instance_dir.join(vol.socket_name());
+        self.virtiofsd_handles.push(child);
+
+        let socket_path = instance_dir.join(volume.socket_name());
         let socket_path_str = socket_path.to_string_lossy();
-        let tag = vol.tag();
-        let dest_path = vol.dest.to_string_lossy();
-        let read_only = if vol.read_only {
-            String::from(",ro")
-        } else {
-            String::new()
-        };
+        let tag = volume.tag();
+
+        // Make the mount read-only if requested.
+        let dest_path = volume.dest.to_string_lossy();
+        let read_only = if volume.read_only { ",ro" } else { "" };
         let fstab_entry = format!("{tag} {dest_path} virtiofs defaults{read_only} 0 0");
-        fstab_entries.push(fstab_entry);
-        qemu_cmd
+        self.fstab_entries.push(fstab_entry);
+
+        // Use a sequential chardev id.
+        let idx = self.virtiofsd_handles.len() - 1;
+        self.command
             .args([
                 "-chardev",
-                &format!("socket,id=char{i},path={socket_path_str}"),
+                &format!("socket,id=char{idx},path={socket_path_str}"),
             ])
             .args([
                 "-device",
-                &format!("vhost-user-fs-pci,chardev=char{i},tag={tag}"),
+                &format!("vhost-user-fs-pci,chardev=char{idx},tag={tag}"),
             ]);
+
+        Ok(self)
     }
 
-    if !fstab_entries.is_empty() {
-        let fstab = fstab_entries.join("\n");
-        let fstab_base64 = Base64::encode_string(fstab.as_bytes());
-        qemu_cmd.args([
-            "-smbios",
-            &format!("type=11,value=io.systemd.credential.binary:fstab.extra={fstab_base64}"),
-        ]);
-    }
-
-    if !show_vm_window {
-        qemu_cmd.arg("-nographic");
-    }
-
-    info!("run qemu cmd: {:?}", qemu_cmd);
-
-    let qemu_child = qemu_cmd
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()?;
-
-    // Write QEMU's pid into a `qemu-pid` file in the run dir. This allows a cleanup job to run and
-    // some point and remove all the run dirs that have a dead QEMU (which can happen if the
-    // process is cancelled at the wrong time).
-    let qemu_pid_path = instance_dir.join("qemu.pid");
-    let qemu_pid = qemu_child
-        .id()
-        .ok_or(QemuLaunchError::QemuPidUnavailable)?
-        .to_string();
-
-    fs::write(&qemu_pid_path, &qemu_pid).await?;
-
-    // trace!("Writing QEMU pid {qemu_pid} to {qemu_pid_path:?}");
-
-    let qemu_output = tokio::select! {
-        _ = cancellation_tokens.qemu.cancelled() => {
-            // debug!("QEMU task was cancelled");
-            return Ok(());
+    /// Inject fstab entries via SMBIOS type 11 credentials as a base64 blob.
+    pub fn inject_fstab_smbios(&mut self) -> &mut Self {
+        if !self.fstab_entries.is_empty() {
+            let fstab = self.fstab_entries.join("\n");
+            let fstab_base64 = Base64::encode_string(fstab.as_bytes());
+            self.command.args([
+                "-smbios",
+                &format!("type=11,value=io.systemd.credential.binary:fstab.extra={fstab_base64}"),
+            ]);
         }
-        val = qemu_child.wait_with_output() => {
-            if qemu_should_exit.load(Ordering::SeqCst) {
-                // info!("QEMU has finished running");
-                return Ok(());
-            }
-            error!("QEMU process exited early, that's usually a bad sign");
-            val?
-        }
-    };
 
-    if !qemu_output.status.success() {
-        cancellation_tokens.ssh.cancel();
-
-        return Err(QemuLaunchError::QemuError {
-            stderr: String::from_utf8_lossy(&qemu_output.stderr).to_string(),
-        });
+        self
     }
 
-    Ok(())
+    pub async fn spawn(self) -> Result<Child, QemuError> {
+        let mut command = self.command;
+
+        command.arg("-daemonize");
+
+        let child = command.spawn()?;
+
+        Ok(child)
+    }
 }

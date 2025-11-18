@@ -22,12 +22,13 @@ Machine configuration:
 - qemu
 - virtiofsd
 - virt-get-kernel (in libguestfs)
+- mkisofs (genisoimage)
 - unshare
 
 ### Debian
 
 ```
-sudo apt install qemu-system virtiofsd ovmf libguestfs-tools unshare
+sudo apt install qemu-system virtiofsd ovmf libguestfs-tools genisoimage unshare
 ```
 
 If on Debian Bookworm, install `virtiofsd` with `cargo install`.

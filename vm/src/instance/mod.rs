@@ -1,115 +1,230 @@
-mod cloud_init;
-mod kernel;
-mod overlay;
-mod ovmf;
+mod exec;
+mod paths;
+mod setup;
+mod start;
 
-use avo_machine::Machine;
-use avo_system::{Arch, Linux};
-use std::path::PathBuf;
+pub use self::exec::*;
+pub use self::paths::*;
+pub use self::setup::*;
+pub use self::start::*;
+
+use avo_system::Arch;
+use avo_system::CpuCount;
+use avo_system::Linux;
+use avo_system::MemorySize;
+use nix::{
+    sys::signal::{kill, Signal},
+    unistd::Pid,
+};
+use serde::{Deserialize, Serialize};
+use std::num::ParseIntError;
+use std::time::Duration;
+use std::{fmt::Display, net::Ipv4Addr, path::PathBuf, str::FromStr};
 use thiserror::Error;
 
-use crate::{
-    context::Context,
-    fs::{self, FsError},
-    image::{get_image, VmImage, VmImageError},
-    instance::{
-        cloud_init::{setup_cloud_init, CloudInitError, VmInstanceCloudInit},
-        kernel::{extract_kernel, ExtractKernelError, VmInstanceKernelDetails},
-        overlay::{create_overlay_image, CreateOverlayImageError},
-        ovmf::{convert_ovmf_uefi_variables, ConvertOvmfVarsError},
-    },
-    ssh::{
-        error::SshError,
-        keypair::{ensure_keypair, SshKeypair},
-    },
-};
+use crate::context::Context;
+use crate::fs;
+use crate::fs::FsError;
+use crate::instance::exec::InstanceExecError;
+use crate::ssh::error::SshError;
+use crate::ssh::keypair::SshKeypair;
+use crate::utils::escape_path;
+use crate::utils::is_tcp_port_open;
 
 #[derive(Error, Debug)]
-pub enum VmInstanceError {
+pub enum InstanceError {
     #[error(transparent)]
-    Image(#[from] VmImageError),
+    Setup(#[from] InstanceSetupError),
 
     #[error(transparent)]
-    ConvertOvmfVars(#[from] ConvertOvmfVarsError),
+    Start(#[from] InstanceStartError),
 
     #[error(transparent)]
-    ExtractKernel(#[from] ExtractKernelError),
+    Exec(#[from] InstanceExecError),
 
-    #[error(transparent)]
-    CreateOverlayImage(#[from] CreateOverlayImageError),
+    #[error("failed to check whether instance dir exists")]
+    DirExists(#[source] fs::FsError),
 
-    #[error(transparent)]
-    CloudInit(#[from] CloudInitError),
+    #[error("failed to serialize or deserialize state")]
+    StateSerde(#[source] serde_json::Error),
 
-    #[error(transparent)]
-    Fs(#[from] FsError),
+    #[error("failed to read state")]
+    StateRead(#[source] fs::FsError),
 
-    #[error(transparent)]
-    Ssh(#[from] SshError),
+    #[error("failed to write state")]
+    StateWrite(#[source] fs::FsError),
+
+    #[error("failed to remove instance dir")]
+    RemoveDir(#[source] fs::FsError),
+
+    #[error("failed to read pid")]
+    ReadPid(#[source] FsError),
+
+    #[error("failed to parse pid")]
+    ParsePid(#[source] ParseIntError),
+
+    #[error("failed to kill pid")]
+    KillPid(#[source] nix::errno::Errno),
 }
 
-#[derive(Debug, Clone)]
-pub struct VmInstance {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Instance {
     pub id: String,
     pub dir: PathBuf,
     pub arch: Arch,
     pub linux: Linux,
     pub kernel_root: String,
     pub user: String,
-    pub overlay_image_path: PathBuf,
-    pub ovmf_vars_path: PathBuf,
-    pub kernel_path: PathBuf,
-    pub initrd_path: Option<PathBuf>,
-    pub ssh_keypair: SshKeypair,
-    pub cloud_init_image: PathBuf,
+    pub has_initrd: bool,
+    pub ssh_port: u16,
+    pub memory_size: Option<MemorySize>,
+    pub cpu_count: Option<CpuCount>,
+    pub volumes: Vec<VmVolume>,
+    pub ports: Vec<VmPort>,
+    pub graphics: Option<bool>,
+    pub kvm: Option<bool>,
 }
 
-pub fn get_instance_id(machine: &Machine) -> &str {
-    machine.hostname.as_ref()
+impl Instance {
+    pub fn paths(&self) -> InstancePaths<'_> {
+        InstancePaths::new(&self.dir)
+    }
+
+    pub async fn setup(
+        ctx: &mut Context,
+        options: InstanceSetupOptions<'_>,
+    ) -> Result<Self, InstanceError> {
+        Ok(setup_instance(ctx, options).await?)
+    }
+
+    pub async fn exists(ctx: &mut Context, instance_id: &str) -> Result<bool, InstanceError> {
+        let instance_dir = ctx.paths().instance_dir(instance_id);
+        let exists = fs::path_exists(instance_dir)
+            .await
+            .map_err(InstanceError::DirExists)?;
+        Ok(exists)
+    }
+
+    pub async fn load(ctx: &mut Context, instance_id: &str) -> Result<Self, InstanceError> {
+        let instance_dir = ctx.paths().instance_dir(instance_id);
+        let paths = InstancePaths::new(&instance_dir);
+        let state_path = paths.state();
+        let state_str = fs::read_file_to_string(state_path)
+            .await
+            .map_err(InstanceError::StateRead)?;
+        let instance = serde_json::from_str(&state_str).map_err(InstanceError::StateSerde)?;
+        Ok(instance)
+    }
+
+    pub async fn save(&self) -> Result<(), InstanceError> {
+        let state_path = self.paths().state();
+        let state = serde_json::to_string_pretty(self).map_err(InstanceError::StateSerde)?;
+        fs::write_file(state_path, state.as_bytes())
+            .await
+            .map_err(InstanceError::StateWrite)?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub async fn remove(self) -> Result<(), InstanceError> {
+        fs::remove_dir(self.dir)
+            .await
+            .map_err(InstanceError::RemoveDir)?;
+        Ok(())
+    }
+
+    pub async fn start(&self, ctx: &mut Context) -> Result<(), InstanceError> {
+        Ok(instance_start(ctx.executables(), self).await?)
+    }
+
+    pub async fn is_qemu_running(&self) -> Result<bool, InstanceError> {
+        let pid_exists = fs::path_exists(&self.paths().qemu_pid_path())
+            .await
+            .map_err(InstanceError::ReadPid)?;
+        Ok(pid_exists)
+    }
+
+    pub fn is_ssh_open(&self) -> bool {
+        is_tcp_port_open(self.ssh_port)
+    }
+
+    #[allow(dead_code)]
+    pub async fn stop(&self) -> Result<(), InstanceError> {
+        let pid_str = fs::read_file_to_string(&self.paths().qemu_pid_path())
+            .await
+            .map_err(InstanceError::ReadPid)?;
+        let pid_int: i32 = FromStr::from_str(&pid_str).map_err(InstanceError::ParsePid)?;
+        let pid = Pid::from_raw(pid_int);
+        kill(pid, Some(Signal::SIGKILL)).map_err(InstanceError::KillPid)?;
+        Ok(())
+    }
+
+    pub async fn ssh_keypair(&self) -> Result<SshKeypair, SshError> {
+        SshKeypair::load_or_create(&self.dir).await
+    }
+
+    pub async fn exec(&self, command: &str, timeout: Duration) -> Result<u32, InstanceError> {
+        Ok(instance_exec(self, command, timeout).await?)
+    }
 }
 
-pub async fn setup_instance(
-    ctx: &mut Context,
-    machine: &Machine,
-) -> Result<VmInstance, VmInstanceError> {
-    let source_image = get_image(ctx, machine).await?;
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VmPort {
+    pub host_ip: Option<Ipv4Addr>,
+    pub host_port: Option<u16>,
+    pub vm_port: u16,
+}
 
-    let VmImage {
-        arch,
-        linux,
-        image_path,
-        kernel_root,
-        user,
-    } = source_image;
+impl Display for VmPort {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut wrote_left = false;
 
-    let instance_id = get_instance_id(machine);
-    let instance_dir = ctx.paths().instance_dir(instance_id);
-    fs::setup_directory_access(&instance_dir).await?;
+        if let Some(ip) = self.host_ip {
+            write!(f, "{}", ip)?;
+            wrote_left = true;
+        }
 
-    let overlay_image_path = create_overlay_image(ctx.paths(), instance_id, &image_path).await?;
-    let ovmf_vars_path = convert_ovmf_uefi_variables(ctx.paths(), instance_id).await?;
-    let VmInstanceKernelDetails {
-        kernel_path,
-        initrd_path,
-    } = extract_kernel(ctx, instance_id, &image_path).await?;
+        if let Some(port) = self.host_port {
+            if wrote_left {
+                write!(f, ":")?;
+            }
+            write!(f, "{}", port)?;
+            wrote_left = true;
+        }
 
-    let ssh_keypair = ensure_keypair(&instance_dir).await?;
+        if wrote_left {
+            write!(f, "->")?;
+        }
 
-    let VmInstanceCloudInit { cloud_init_image } =
-        setup_cloud_init(ctx, instance_id, machine, &ssh_keypair).await?;
+        write!(f, "{}/tcp", self.vm_port)
+    }
+}
 
-    Ok(VmInstance {
-        id: instance_id.to_owned(),
-        dir: instance_dir,
-        arch,
-        linux,
-        kernel_root,
-        user,
-        overlay_image_path,
-        ovmf_vars_path,
-        kernel_path,
-        initrd_path,
-        ssh_keypair,
-        cloud_init_image,
-    })
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VmVolume {
+    pub source: PathBuf,
+    pub dest: PathBuf,
+    pub read_only: bool,
+}
+
+impl VmVolume {
+    pub fn tag(&self) -> String {
+        escape_path(&self.dest.to_string_lossy())
+    }
+
+    pub fn socket_name(&self) -> String {
+        format!("{}.sock", self.tag())
+    }
+}
+
+impl Display for VmVolume {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let source = self.source.to_string_lossy();
+        let dest = self.dest.to_string_lossy();
+        if self.read_only {
+            write!(f, "{source}:{dest}:ro")
+        } else {
+            write!(f, "{source}:{dest}")
+        }
+    }
 }

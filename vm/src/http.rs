@@ -45,6 +45,7 @@ impl HttpClient {
         Ok(HttpClient { client })
     }
 
+    #[allow(dead_code)]
     pub async fn get_file_size(&self, url: &str) -> Result<Option<u64>, HttpError> {
         let resp = self
             .client
@@ -110,6 +111,7 @@ impl HttpClient {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn download_content(&self, url: &str) -> Result<String, HttpError> {
         self.client
             .get(url)
