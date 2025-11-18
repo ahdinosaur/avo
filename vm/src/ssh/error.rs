@@ -13,6 +13,9 @@ pub enum SshError {
     #[error(transparent)]
     Russh(#[from] russh::Error),
 
+    #[error(transparent)]
+    RusshSftp(#[from] russh_sftp::client::error::Error),
+
     #[error("Timed out connecting to virtual machine via SSH")]
     Timeout,
 

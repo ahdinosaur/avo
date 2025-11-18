@@ -23,12 +23,9 @@ use std::{fmt::Display, net::Ipv4Addr, path::PathBuf, str::FromStr};
 use thiserror::Error;
 
 use crate::context::Context;
-use crate::fs;
-use crate::fs::FsError;
+use crate::fs::{self, FsError};
 use crate::instance::exec::InstanceExecError;
-use crate::ssh::error::SshError;
-use crate::ssh::keypair::SshKeypair;
-use crate::utils::escape_path;
+use crate::ssh::{SshError, SshKeypair};
 use crate::utils::is_tcp_port_open;
 
 #[derive(Error, Debug)]
@@ -205,16 +202,6 @@ pub struct VmVolume {
     pub source: PathBuf,
     pub dest: PathBuf,
     pub read_only: bool,
-}
-
-impl VmVolume {
-    pub fn tag(&self) -> String {
-        escape_path(&self.dest.to_string_lossy())
-    }
-
-    pub fn socket_name(&self) -> String {
-        format!("{}.sock", self.tag())
-    }
 }
 
 impl Display for VmVolume {

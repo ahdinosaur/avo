@@ -19,7 +19,7 @@ use crate::{
         },
         Instance, InstancePaths, VmPort, VmVolume,
     },
-    ssh::{error::SshError, keypair::SshKeypair},
+    ssh::{SshError, SshKeypair},
     utils::get_free_tcp_port,
 };
 

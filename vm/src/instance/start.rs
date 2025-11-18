@@ -21,7 +21,7 @@ pub(super) async fn instance_start(
 ) -> Result<(), InstanceStartError> {
     let Instance {
         id: _instance_id,
-        dir: instance_dir,
+        dir: _instance_dir,
         arch,
         linux: _,
         kernel_root,
@@ -30,7 +30,7 @@ pub(super) async fn instance_start(
         ssh_port,
         memory_size,
         cpu_count,
-        volumes,
+        volumes: _,
         ports,
         graphics,
         kvm,
@@ -79,13 +79,6 @@ pub(super) async fn instance_start(
     // Overlay and cloud-init drives
     qemu.virtio_drive("overlay-disk", "qcow2", &paths.overlay_image_path())
         .virtio_drive("cloud-init", "raw", &paths.cloud_init_image_path());
-
-    // virtiofsd-based directory shares and fstab injection
-    for vol in volumes {
-        qemu.volume(executables, instance_dir, vol).await?;
-    }
-    // Inject fstab via SMBIOS (must be run after virtiofsd)
-    qemu.inject_fstab_smbios();
 
     info!("run qemu cmd: {:?}", qemu);
 
