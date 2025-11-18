@@ -1,14 +1,3 @@
-use std::time::Duration;
-
-use avo_machine::Machine;
-use thiserror::Error;
-use tokio::time::sleep;
-
-use crate::{
-    context::{Context, ContextError},
-    instance::{Instance, InstanceError, InstanceSetupOptions, VmPort, VmVolume},
-};
-
 mod cmd;
 mod context;
 mod fs;
@@ -19,6 +8,18 @@ mod paths;
 mod qemu;
 mod ssh;
 mod utils;
+
+pub use crate::instance::{VmPort, VmVolume};
+
+use avo_machine::Machine;
+use std::time::Duration;
+use thiserror::Error;
+use tokio::time::sleep;
+
+use crate::{
+    context::{Context, ContextError},
+    instance::{Instance, InstanceError, InstanceSetupOptions},
+};
 
 #[derive(Error, Debug)]
 pub enum VmError {

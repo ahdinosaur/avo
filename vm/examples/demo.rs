@@ -1,8 +1,8 @@
-use std::time::Duration;
+use std::{env::current_dir, time::Duration};
 
 use avo_machine::Machine;
 use avo_system::{Arch, Linux, Os};
-use avo_vm::{run, RunOptions};
+use avo_vm::{run, RunOptions, VmVolume};
 
 #[tokio::main]
 async fn main() {
@@ -14,6 +14,7 @@ async fn main() {
     };
     let instance_id = machine.hostname.as_ref();
     let ports = vec![];
+    let cwd = current_dir().unwrap();
     let volumes = vec![];
     let command = "echo hello world";
     let timeout = Duration::from_secs(10);
