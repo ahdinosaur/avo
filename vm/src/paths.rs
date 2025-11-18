@@ -1,9 +1,5 @@
-use std::{
-    path::{Path, PathBuf},
-    sync::LazyLock,
-};
-
 use directories::ProjectDirs;
+use std::path::{Path, PathBuf};
 use thiserror::Error;
 use which::which_global;
 
@@ -36,6 +32,7 @@ impl Paths {
         &self.cache_dir
     }
 
+    #[allow(dead_code)]
     pub fn runtime_dir(&self) -> &Path {
         &self.runtime_dir
     }
@@ -63,7 +60,6 @@ pub struct ExecutablePathsError(#[from] which::Error);
 
 #[derive(Debug, Clone)]
 pub struct ExecutablePaths {
-    virt_copy_out: PathBuf,
     virt_get_kernel: PathBuf,
     virtiofsd: PathBuf,
     qemu_x86_64: PathBuf,
@@ -75,7 +71,6 @@ pub struct ExecutablePaths {
 
 impl ExecutablePaths {
     pub fn new() -> Result<ExecutablePaths, ExecutablePathsError> {
-        let virt_copy_out = which_global("virt-copy-out")?;
         let virt_get_kernel = which_global("virt-get-kernel")?;
         let virtiofsd = which_global("virtiofsd")?;
         let qemu_x86_64 = which_global("qemu-system-x86_64")?;
@@ -85,7 +80,6 @@ impl ExecutablePaths {
         let unshare = which_global("unshare")?;
 
         Ok(ExecutablePaths {
-            virt_copy_out,
             virt_get_kernel,
             virtiofsd,
             qemu_x86_64,
@@ -96,9 +90,6 @@ impl ExecutablePaths {
         })
     }
 
-    pub fn virt_copy_out(&self) -> &Path {
-        &self.virt_copy_out
-    }
     pub fn virt_get_kernel(&self) -> &Path {
         &self.virt_get_kernel
     }

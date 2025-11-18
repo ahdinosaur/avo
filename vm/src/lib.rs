@@ -35,6 +35,7 @@ pub struct RunOptions<'a> {
     pub ports: Vec<VmPort>,
     pub volumes: Vec<VmVolume>,
     pub command: &'a str,
+    pub timeout: Duration,
 }
 
 pub async fn run(options: RunOptions<'_>) -> Result<(), VmError> {
@@ -47,6 +48,7 @@ pub async fn run(options: RunOptions<'_>) -> Result<(), VmError> {
         ports,
         volumes,
         command,
+        timeout,
     } = options;
 
     let instance = if Instance::exists(&mut ctx, instance_id).await? {
@@ -66,7 +68,6 @@ pub async fn run(options: RunOptions<'_>) -> Result<(), VmError> {
     if !instance.is_qemu_running().await? {
         instance.start(&mut ctx).await?;
 
-        /*
         loop {
             if instance.is_ssh_open() {
                 break;
@@ -74,10 +75,9 @@ pub async fn run(options: RunOptions<'_>) -> Result<(), VmError> {
 
             sleep(Duration::from_millis(100)).await;
         }
-        */
     }
 
-    instance.exec(command).await?;
+    instance.exec(command, timeout).await?;
 
     Ok(())
 }

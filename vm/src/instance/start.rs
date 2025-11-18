@@ -15,14 +15,14 @@ pub enum InstanceStartError {
     Qemu(#[from] QemuError),
 }
 
-pub async fn instance_start(
+pub(super) async fn instance_start(
     executables: &ExecutablePaths,
     instance: &Instance,
 ) -> Result<(), InstanceStartError> {
     let Instance {
         id: _instance_id,
         dir: instance_dir,
-        arch: _,
+        arch,
         linux: _,
         kernel_root,
         user: _,
@@ -51,12 +51,16 @@ pub async fn instance_start(
     let graphics = graphics.unwrap_or(true);
     let kvm = kvm.unwrap_or(true);
 
-    let mut qemu = Qemu::new(executables.qemu_x86_64());
+    let qemu_executable = match arch {
+        avo_system::Arch::X86_64 => executables.qemu_x86_64(),
+        avo_system::Arch::Aarch64 => executables.qemu_aarch64(),
+    };
+    let mut qemu = Qemu::new(qemu_executable);
 
     qemu.easy()
         .cpu_count(cpu_count.to_string())
         .memory(memory_size_in_gb)
-        .plash_drives(&paths.ovmf_code_system_path(), &paths.ovmf_vars_path());
+        .plash_drives(paths.ovmf_code_system_path(), &paths.ovmf_vars_path());
 
     qemu.kernel(
         &paths.kernel_path(),
@@ -68,7 +72,7 @@ pub async fn instance_start(
 
     qemu.qmp_socket(&paths.qemu_qmp_socket_path())
         .kvm(kvm)
-        .pid_file(&paths.qemu_pid_path())
+        .pid_file(paths.qemu_pid_path())
         .graphics(graphics)
         .ports(&ports);
 
@@ -78,7 +82,7 @@ pub async fn instance_start(
 
     // virtiofsd-based directory shares and fstab injection
     for vol in volumes {
-        qemu.volume(executables, &instance_dir, vol).await?;
+        qemu.volume(executables, instance_dir, vol).await?;
     }
     // Inject fstab via SMBIOS (must be run after virtiofsd)
     qemu.inject_fstab_smbios();

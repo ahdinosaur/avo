@@ -26,19 +26,19 @@ pub enum CloudInitError {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CloudInitMetaData {
+struct CloudInitMetaData {
     instance_id: String,
     local_hostname: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CloudInitUserData {
+struct CloudInitUserData {
     hostname: String,
     ssh_authorized_keys: Vec<String>,
     packages: Vec<String>,
 }
 
-pub async fn setup_cloud_init(
+pub(super) async fn setup_cloud_init(
     executables: &ExecutablePaths,
     paths: &InstancePaths<'_>,
     instance_id: &str,

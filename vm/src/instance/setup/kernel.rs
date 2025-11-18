@@ -8,7 +8,7 @@ use crate::{
     paths::ExecutablePaths,
 };
 
-pub struct VmInstanceKernelDetails {
+pub(super) struct VmInstanceKernelDetails {
     pub has_initrd: bool,
 }
 
@@ -26,7 +26,7 @@ pub enum ExtractKernelError {
 /// It will extract it into the same dir of the `image_path`.
 ///
 /// Original source: https://gitlab.archlinux.org/archlinux/vmexec/-/blob/03b649bdbcdc64d30b2943f61b51165f390b920d/src/qemu.rs#L48-91
-pub async fn setup_kernel(
+pub(super) async fn setup_kernel(
     executables: &ExecutablePaths,
     paths: &InstancePaths<'_>,
     source_image_path: &Path,

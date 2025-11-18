@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use avo_machine::Machine;
 use avo_system::{Arch, Linux, Os};
 use avo_vm::{run, RunOptions};
@@ -14,12 +16,14 @@ async fn main() {
     let ports = vec![];
     let volumes = vec![];
     let command = "echo hello world";
+    let timeout = Duration::from_secs(10);
     let options = RunOptions {
         instance_id,
         machine: &machine,
         ports,
         volumes,
         command,
+        timeout,
     };
     run(options).await.unwrap();
 }

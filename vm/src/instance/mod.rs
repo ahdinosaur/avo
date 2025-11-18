@@ -1,5 +1,4 @@
 mod exec;
-mod handle;
 mod paths;
 mod setup;
 mod start;
@@ -19,6 +18,7 @@ use nix::{
 };
 use serde::{Deserialize, Serialize};
 use std::num::ParseIntError;
+use std::time::Duration;
 use std::{fmt::Display, net::Ipv4Addr, path::PathBuf, str::FromStr};
 use thiserror::Error;
 
@@ -86,7 +86,7 @@ pub struct Instance {
 }
 
 impl Instance {
-    pub fn paths(&self) -> InstancePaths {
+    pub fn paths(&self) -> InstancePaths<'_> {
         InstancePaths::new(&self.dir)
     }
 
@@ -125,6 +125,7 @@ impl Instance {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn remove(self) -> Result<(), InstanceError> {
         fs::remove_dir(self.dir)
             .await
@@ -147,6 +148,7 @@ impl Instance {
         is_tcp_port_open(self.ssh_port)
     }
 
+    #[allow(dead_code)]
     pub async fn stop(&self) -> Result<(), InstanceError> {
         let pid_str = fs::read_file_to_string(&self.paths().qemu_pid_path())
             .await
@@ -161,8 +163,8 @@ impl Instance {
         SshKeypair::load_or_create(&self.dir).await
     }
 
-    pub async fn exec(&self, command: &str) -> Result<u32, InstanceError> {
-        Ok(instance_exec(self, command).await?)
+    pub async fn exec(&self, command: &str, timeout: Duration) -> Result<u32, InstanceError> {
+        Ok(instance_exec(self, command, timeout).await?)
     }
 }
 

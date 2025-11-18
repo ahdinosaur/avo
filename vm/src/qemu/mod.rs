@@ -71,6 +71,7 @@ impl Qemu {
     }
 
     /// Set env var for QEMU process.
+    #[allow(dead_code)]
     pub fn env(&mut self, k: &str, v: &str) -> &mut Self {
         self.command.env(k, v);
         self

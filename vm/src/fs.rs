@@ -118,6 +118,7 @@ pub async fn create_dir<P: AsRef<Path>>(path: P) -> Result<(), FsError> {
         })
 }
 
+#[allow(dead_code)]
 pub async fn copy_dir<F: AsRef<Path>, T: AsRef<Path>>(from: F, to: T) -> Result<(), FsError> {
     let from_path = from.as_ref();
     let to_path = to.as_ref();
@@ -153,6 +154,7 @@ pub async fn copy_dir<F: AsRef<Path>, T: AsRef<Path>>(from: F, to: T) -> Result<
     }
 }
 
+#[allow(dead_code)]
 pub async fn read_dir<P: AsRef<Path>>(path: P) -> Result<Vec<PathBuf>, FsError> {
     let p = path.as_ref();
     let mut dir = fs::read_dir(p).await.map_err(|source| FsError::ReadDir {

@@ -26,7 +26,7 @@ pub enum ConvertOvmfVarsError {
 /// our writeable mounts which is what QEMU uses to emulate writeable UEFI vars.
 ///
 /// Original source: https://gitlab.archlinux.org/archlinux/vmexec/-/blob/03b649bdbcdc64d30b2943f61b51165f390b920d/src/qemu.rs#L93-124
-pub async fn setup_ovmf_uefi_variables(
+pub(super) async fn setup_ovmf_uefi_variables(
     executables: &ExecutablePaths,
     paths: &InstancePaths<'_>,
 ) -> Result<(), ConvertOvmfVarsError> {

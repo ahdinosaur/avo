@@ -16,7 +16,7 @@ pub enum CreateOverlayImageError {
     Command(#[from] CommandError),
 }
 /// Create an overlay image based on a source image
-pub async fn setup_overlay(
+pub(super) async fn setup_overlay(
     paths: &InstancePaths<'_>,
     source_image_path: &Path,
 ) -> Result<(), CreateOverlayImageError> {

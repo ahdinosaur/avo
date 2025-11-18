@@ -12,7 +12,11 @@ pub enum InstanceExecError {
     Ssh(#[from] SshError),
 }
 
-pub async fn instance_exec(instance: &Instance, command: &str) -> Result<u32, InstanceExecError> {
+pub(super) async fn instance_exec(
+    instance: &Instance,
+    command: &str,
+    timeout: Duration,
+) -> Result<u32, InstanceExecError> {
     let ssh_keypair = instance.ssh_keypair().await?;
     let ssh_port = instance.ssh_port;
     let username = instance.user.clone();
@@ -23,7 +27,7 @@ pub async fn instance_exec(instance: &Instance, command: &str) -> Result<u32, In
         username,
         config: Default::default(),
         command: command.to_owned(),
-        timeout: Duration::from_secs(120),
+        timeout,
     };
 
     let exit_code = ssh_command(ssh_launch_opts).await?;

@@ -49,11 +49,13 @@ impl Command {
         }
     }
 
+    #[allow(dead_code)]
     pub fn set_stdout(&mut self, stdout: bool) -> &mut Self {
         self.stdout = stdout;
         self
     }
 
+    #[allow(dead_code)]
     pub fn env(&mut self, key: &str, value: &str) -> &mut Self {
         self.cmd.env(key, value);
         self
@@ -86,6 +88,7 @@ impl Command {
         })
     }
 
+    #[allow(dead_code)]
     pub fn spawn(&mut self) -> Result<Child, CommandError> {
         self.cmd
             .stdin(Stdio::inherit())
