@@ -3,7 +3,7 @@ use thiserror::Error;
 
 use crate::{
     instance::Instance,
-    ssh::{error::SshError, ssh_command, SshLaunchOpts},
+    ssh::{error::SshError, ssh_command, SshCommandOptions},
 };
 
 #[derive(Error, Debug)]
@@ -17,7 +17,7 @@ pub async fn instance_exec(instance: &Instance, command: &str) -> Result<u32, In
     let ssh_port = instance.ssh_port;
     let username = instance.user.clone();
 
-    let ssh_launch_opts = SshLaunchOpts {
+    let ssh_launch_opts = SshCommandOptions {
         private_key: ssh_keypair.private_key,
         addrs: (Ipv4Addr::LOCALHOST, ssh_port),
         username,

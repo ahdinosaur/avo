@@ -66,6 +66,7 @@ pub async fn run(options: RunOptions<'_>) -> Result<(), VmError> {
     if !instance.is_qemu_running().await? {
         instance.start(&mut ctx).await?;
 
+        /*
         loop {
             if instance.is_ssh_open() {
                 break;
@@ -73,6 +74,7 @@ pub async fn run(options: RunOptions<'_>) -> Result<(), VmError> {
 
             sleep(Duration::from_millis(100)).await;
         }
+        */
     }
 
     instance.exec(command).await?;

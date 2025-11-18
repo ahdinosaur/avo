@@ -4,13 +4,13 @@ use crate::fs::FsError;
 
 #[derive(Error, Debug)]
 pub enum SshError {
-    #[error("I/O error: {0}")]
+    #[error(transparent)]
     Io(#[from] std::io::Error),
 
     #[error(transparent)]
     Fs(#[from] FsError),
 
-    #[error("SSH error: {0}")]
+    #[error(transparent)]
     Russh(#[from] russh::Error),
 
     #[error("Timed out connecting to virtual machine via SSH")]
