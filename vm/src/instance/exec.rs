@@ -1,9 +1,9 @@
-use std::{net::Ipv4Addr, time::Duration};
+use std::{net::Ipv4Addr, sync::Arc, time::Duration};
 use thiserror::Error;
 
 use crate::{
     instance::Instance,
-    ssh::{ssh_command, SshCommandOptions, SshError},
+    ssh::{ssh_command, ssh_sync, SshCommandOptions, SshConnectOptions, SshError, SshSyncOptions},
 };
 
 #[derive(Error, Debug)]
@@ -20,29 +20,30 @@ pub(super) async fn instance_exec(
     let ssh_keypair = instance.ssh_keypair().await?;
     let ssh_port = instance.ssh_port;
     let username = instance.user.clone();
-    let volumes = instance.volumes;
+    let volumes = instance.volumes.clone();
 
-    for volume in volumes {
-        let ssh_command_options = SshCommandOptions {
-            private_key: ssh_keypair.private_key,
-            addrs: (Ipv4Addr::LOCALHOST, ssh_port),
-            username,
-            config: Default::default(),
-            command: command.to_owned(),
-            timeout,
-        };
-    }
-
-    let ssh_command_options = SshCommandOptions {
+    let ssh_connect = SshConnectOptions {
         private_key: ssh_keypair.private_key,
         addrs: (Ipv4Addr::LOCALHOST, ssh_port),
         username,
-        config: Default::default(),
-        command: command.to_owned(),
+        config: Arc::new(Default::default()),
         timeout,
     };
 
-    let exit_code = ssh_command(ssh_launch_opts).await?;
+    for volume in volumes {
+        let ssh_sync_options = SshSyncOptions {
+            connect: ssh_connect.clone(),
+            volume,
+            follow_symlinks: true,
+        };
+        ssh_sync(ssh_sync_options).await?;
+    }
+
+    let ssh_command_options = SshCommandOptions {
+        connect: ssh_connect.clone(),
+        command: command.to_owned(),
+    };
+    let exit_code = ssh_command(ssh_command_options).await?;
 
     Ok(exit_code)
 }

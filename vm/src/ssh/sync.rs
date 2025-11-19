@@ -10,7 +10,7 @@ use tokio::{
     net::ToSocketAddrs,
 };
 
-use crate::ssh::SshConnectOptions;
+use crate::{ssh::SshConnectOptions, VmVolume};
 
 use super::{connect::connect_with_retry, SshError};
 
@@ -21,8 +21,7 @@ where
 {
     pub connect: SshConnectOptions<Addrs>,
 
-    pub src: PathBuf,
-    pub dst: String,
+    pub volume: VmVolume,
 
     pub follow_symlinks: bool,
 }
@@ -118,6 +117,21 @@ async fn sftp_upload_file(
     Ok(())
 }
 
+async fn sftp_upload_volume(
+    sftp: &mut SftpSession,
+    volume: &VmVolume,
+    follow_symlinks: bool,
+) -> Result<(), SshError> {
+    if volume.source.is_file() {
+        sftp_upload_file(sftp, &volume.source, &volume.dest).await
+    } else if volume.source.is_dir() {
+        sftp_upload_dir(sftp, &volume.source, &volume.dest, follow_symlinks).await
+    } else {
+        // TODO make into error type
+        panic!("Unexpected volume! {:?}", volume)
+    }
+}
+
 // Recursively traverse local directory and upload everything.
 // Skips symlinks unless follow_symlinks is true, in which case the regular
 // file contents of the symlink target are uploaded.
@@ -177,8 +191,7 @@ pub async fn ssh_sync<Addrs: ToSocketAddrs + Clone + Send + Sync + 'static>(
 ) -> Result<(), SshError> {
     let SshSyncOptions {
         connect,
-        src,
-        dst,
+        volume,
         follow_symlinks,
     } = options;
 
@@ -186,7 +199,7 @@ pub async fn ssh_sync<Addrs: ToSocketAddrs + Clone + Send + Sync + 'static>(
 
     // Open SFTP subsystem and perform upload
     let mut sftp = open_sftp(&handle).await?;
-    sftp_upload_dir(&mut sftp, &src, &dst, follow_symlinks).await?;
+    sftp_upload_volume(&mut sftp, &volume, follow_symlinks).await?;
 
     // Graceful close
     let _ = handle

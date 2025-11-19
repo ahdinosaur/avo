@@ -10,7 +10,7 @@ use tokio::{
 
 use crate::ssh::error::SshError;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SshConnectOptions<Addrs>
 where
     Addrs: ToSocketAddrs + Clone + Send,
@@ -18,7 +18,7 @@ where
     pub private_key: PrivateKey,
     pub addrs: Addrs,
     pub username: String,
-    pub config: Config,
+    pub config: Arc<Config>,
     pub timeout: Duration,
 }
 
@@ -50,7 +50,6 @@ where
         timeout,
     } = options;
 
-    let config = Arc::new(config);
     let handler = SshClient;
 
     let start = Instant::now();
@@ -58,9 +57,9 @@ where
     let mut handle = loop {
         let stream = match TcpStream::connect(addrs.clone()).await {
             Ok(stream) => Ok::<Option<TcpStream>, SshError>(Some(stream)),
-            Err(ref e)
+            Err(ref error)
                 if matches!(
-                    e.kind(),
+                    error.kind(),
                     std::io::ErrorKind::TimedOut
                         | std::io::ErrorKind::ConnectionRefused
                         | std::io::ErrorKind::ConnectionReset
@@ -72,7 +71,7 @@ where
                 }
                 Ok(None)
             }
-            Err(e) => return Err(SshError::Io(e)),
+            Err(error) => return Err(SshError::from(error)),
         }?;
 
         if let Some(stream) = stream {
