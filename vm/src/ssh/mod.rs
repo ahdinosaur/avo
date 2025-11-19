@@ -39,4 +39,11 @@ impl Ssh {
     pub async fn sync(&mut self, volume: VmVolume) -> Result<(), SshError> {
         ssh_sync(&mut self.handle, volume).await
     }
+
+    pub async fn disconnect(&mut self) -> Result<(), SshError> {
+        Ok(self
+            .handle
+            .disconnect(russh::Disconnect::ByApplication, "", "English")
+            .await?)
+    }
 }

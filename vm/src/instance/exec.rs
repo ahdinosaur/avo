@@ -1,5 +1,6 @@
 use std::{net::Ipv4Addr, sync::Arc, time::Duration};
 use thiserror::Error;
+use tracing::info;
 
 use crate::{
     instance::Instance,
@@ -32,10 +33,14 @@ pub(super) async fn instance_exec(
     .await?;
 
     for volume in volumes {
+        info!("ssh.sync: {:?}", volume);
         ssh.sync(volume).await?;
     }
 
+    info!("ssh.command: {}", command);
     let exit_code = ssh.command(command).await?;
+
+    ssh.disconnect().await?;
 
     Ok(exit_code)
 }
