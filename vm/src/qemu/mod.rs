@@ -1,37 +1,18 @@
-mod virtiofsd;
-
-use base64ct::{Base64, Encoding};
 use std::fmt::{Debug, Write};
 use std::{ffi::OsStr, net::Ipv4Addr, path::Path};
 use thiserror::Error;
 use tokio::process::{Child, Command};
-use tracing::debug;
 
-use self::virtiofsd::{launch_virtiofsd, LaunchVirtiofsdError};
-use crate::{
-    instance::{VmPort, VmVolume},
-    paths::ExecutablePaths,
-};
+use crate::instance::VmPort;
 
 #[derive(Error, Debug)]
 pub enum QemuError {
-    #[error("failed to launch virtiofsd for volume {volume}: {source}")]
-    Virtiofsd {
-        volume: VmVolume,
-        #[source]
-        source: LaunchVirtiofsdError,
-    },
-
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
 
 pub struct Qemu {
     command: Command,
-    // Keep virtiofsd processes alive as long as Qemu is alive.
-    virtiofsd_handles: Vec<Child>,
-    // Fstab entries to be injected via SMBIOS credentials.
-    fstab_entries: Vec<String>,
 }
 
 impl Debug for Qemu {
@@ -44,11 +25,7 @@ impl Qemu {
     /// Create a new emulator for a specific QEMU binary path.
     pub fn new<S: AsRef<OsStr>>(qemu_binary: S) -> Qemu {
         let command = Command::new(qemu_binary);
-        Qemu {
-            command,
-            virtiofsd_handles: Vec::new(),
-            fstab_entries: Vec::new(),
-        }
+        Qemu { command }
     }
 
     pub fn easy(&mut self) -> &mut Self {
@@ -177,66 +154,6 @@ impl Qemu {
         if !enabled {
             self.command.arg("-nographic");
         }
-        self
-    }
-
-    /// Add a virtiofsd-backed volume:
-    /// - launches virtiofsd and retains its Child handle
-    /// - adds the vhost-user-fs-pci device and chardev
-    /// - registers an fstab entry to later inject via SMBIOS
-    pub async fn volume(
-        &mut self,
-        executables: &ExecutablePaths,
-        instance_dir: &Path,
-        volume: &VmVolume,
-    ) -> Result<&mut Self, QemuError> {
-        debug!("Launching virtiofsd for volume: {}", volume);
-
-        let child = launch_virtiofsd(executables, instance_dir, volume)
-            .await
-            .map_err(|error| QemuError::Virtiofsd {
-                volume: volume.clone(),
-                source: error,
-            })?;
-
-        self.virtiofsd_handles.push(child);
-
-        let socket_path = instance_dir.join(volume.socket_name());
-        let socket_path_str = socket_path.to_string_lossy();
-        let tag = volume.tag();
-
-        // Make the mount read-only if requested.
-        let dest_path = volume.dest.to_string_lossy();
-        let read_only = if volume.read_only { ",ro" } else { "" };
-        let fstab_entry = format!("{tag} {dest_path} virtiofs defaults{read_only} 0 0");
-        self.fstab_entries.push(fstab_entry);
-
-        // Use a sequential chardev id.
-        let idx = self.virtiofsd_handles.len() - 1;
-        self.command
-            .args([
-                "-chardev",
-                &format!("socket,id=char{idx},path={socket_path_str}"),
-            ])
-            .args([
-                "-device",
-                &format!("vhost-user-fs-pci,chardev=char{idx},tag={tag}"),
-            ]);
-
-        Ok(self)
-    }
-
-    /// Inject fstab entries via SMBIOS type 11 credentials as a base64 blob.
-    pub fn inject_fstab_smbios(&mut self) -> &mut Self {
-        if !self.fstab_entries.is_empty() {
-            let fstab = self.fstab_entries.join("\n");
-            let fstab_base64 = Base64::encode_string(fstab.as_bytes());
-            self.command.args([
-                "-smbios",
-                &format!("type=11,value=io.systemd.credential.binary:fstab.extra={fstab_base64}"),
-            ]);
-        }
-
         self
     }
 

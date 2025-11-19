@@ -23,12 +23,9 @@ use std::{fmt::Display, net::Ipv4Addr, path::PathBuf, str::FromStr};
 use thiserror::Error;
 
 use crate::context::Context;
-use crate::fs;
-use crate::fs::FsError;
+use crate::fs::{self, FsError};
 use crate::instance::exec::InstanceExecError;
-use crate::ssh::error::SshError;
-use crate::ssh::keypair::SshKeypair;
-use crate::utils::escape_path;
+use crate::ssh::{SshKeypair, SshKeypairError};
 use crate::utils::is_tcp_port_open;
 
 #[derive(Error, Debug)]
@@ -159,7 +156,7 @@ impl Instance {
         Ok(())
     }
 
-    pub async fn ssh_keypair(&self) -> Result<SshKeypair, SshError> {
+    pub async fn ssh_keypair(&self) -> Result<SshKeypair, SshKeypairError> {
         SshKeypair::load_or_create(&self.dir).await
     }
 
@@ -203,28 +200,13 @@ impl Display for VmPort {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VmVolume {
     pub source: PathBuf,
-    pub dest: PathBuf,
-    pub read_only: bool,
-}
-
-impl VmVolume {
-    pub fn tag(&self) -> String {
-        escape_path(&self.dest.to_string_lossy())
-    }
-
-    pub fn socket_name(&self) -> String {
-        format!("{}.sock", self.tag())
-    }
+    pub dest: String,
 }
 
 impl Display for VmVolume {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let source = self.source.to_string_lossy();
-        let dest = self.dest.to_string_lossy();
-        if self.read_only {
-            write!(f, "{source}:{dest}:ro")
-        } else {
-            write!(f, "{source}:{dest}")
-        }
+        let dest = &self.dest;
+        write!(f, "{source}:{dest}")
     }
 }

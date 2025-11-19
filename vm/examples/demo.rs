@@ -15,7 +15,10 @@ async fn main() {
     let instance_id = machine.hostname.as_ref();
     let ports = vec![];
     let cwd = current_dir().unwrap();
-    let volumes = vec![];
+    let volumes = vec![VmVolume {
+        source: cwd.join("vm/examples"),
+        dest: "/home/debian/test".to_owned(),
+    }];
     let command = "echo hello world";
     let timeout = Duration::from_secs(10);
     let options = RunOptions {
