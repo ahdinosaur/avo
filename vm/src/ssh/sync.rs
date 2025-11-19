@@ -7,28 +7,13 @@ use std::path::{Path, PathBuf};
 use tokio::{
     fs,
     io::{AsyncReadExt, AsyncWriteExt},
-    net::ToSocketAddrs,
 };
 
-use crate::{ssh::SshConnectOptions, VmVolume};
+use crate::VmVolume;
 
-use super::{connect::connect_with_retry, SshError};
-
-#[derive(Debug)]
-pub struct SshSyncOptions<Addrs>
-where
-    Addrs: ToSocketAddrs + Clone + Send,
-{
-    pub connect: SshConnectOptions<Addrs>,
-
-    pub volume: VmVolume,
-
-    pub follow_symlinks: bool,
-}
+use super::{SshClientHandle, SshError};
 
 // Best-effort detection for "already exists" on mkdir.
-// If your russh_sftp version exposes a specific status code,
-// match on that instead of string matching.
 fn sftp_err_is_already_exists(err: &SftpError) -> bool {
     let s = err.to_string().to_ascii_lowercase();
     s.contains("already exists") || s.contains("exist")
@@ -88,7 +73,7 @@ async fn sftp_upload_file(
     }
 
     // Open local file
-    let mut lf = fs::File::open(local).await.map_err(SshError::Io)?;
+    let mut lf = fs::File::open(local).await?;
 
     let flags = OpenFlags::READ
         .union(OpenFlags::WRITE)
@@ -97,35 +82,25 @@ async fn sftp_upload_file(
     let mut rf = sftp.open_with_flags(remote, flags).await?;
 
     // Write contents in chunks
-    // Note: Depending on russh_sftp version, rf may implement futures::io
-    // AsyncWrite. If so, use futures::io::AsyncWriteExt's write_all instead of
-    // tokio::io::AsyncWriteExt. Below we call a method often available on the
-    // SFTP handle; if your version differs, adapt accordingly.
     let mut buf = vec![0u8; 128 * 1024];
     loop {
-        let n = lf.read(&mut buf).await.map_err(SshError::Io)?;
+        let n = lf.read(&mut buf).await?;
         if n == 0 {
             break;
         }
-        // If your SftpFile type doesn't have write_all, use write in a loop
-        // or bring `use futures::io::AsyncWriteExt as FuturesWriteExt;`
-        // and call `FuturesWriteExt::write_all(&mut rf, &buf[..n]).await`.
         rf.write_all(&buf[..n]).await?;
     }
 
-    // Some versions have explicit close/flush; if so, call them here.
+    rf.flush().await?;
+
     Ok(())
 }
 
-async fn sftp_upload_volume(
-    sftp: &mut SftpSession,
-    volume: &VmVolume,
-    follow_symlinks: bool,
-) -> Result<(), SshError> {
+async fn sftp_upload_volume(sftp: &mut SftpSession, volume: &VmVolume) -> Result<(), SshError> {
     if volume.source.is_file() {
         sftp_upload_file(sftp, &volume.source, &volume.dest).await
     } else if volume.source.is_dir() {
-        sftp_upload_dir(sftp, &volume.source, &volume.dest, follow_symlinks).await
+        sftp_upload_dir(sftp, &volume.source, &volume.dest).await
     } else {
         // TODO make into error type
         panic!("Unexpected volume! {:?}", volume)
@@ -133,13 +108,10 @@ async fn sftp_upload_volume(
 }
 
 // Recursively traverse local directory and upload everything.
-// Skips symlinks unless follow_symlinks is true, in which case the regular
-// file contents of the symlink target are uploaded.
 async fn sftp_upload_dir(
     sftp: &mut SftpSession,
     src_root: &Path,
     dst_root: &str,
-    follow_symlinks: bool,
 ) -> Result<(), SshError> {
     if !src_root.is_dir() {
         return Err(SshError::Io(std::io::Error::new(
@@ -159,16 +131,12 @@ async fn sftp_upload_dir(
         let remote_dir = remote_join(dst_root, rel);
         sftp_mkdirs(sftp, &remote_dir).await?;
 
-        let mut rd = fs::read_dir(&dir).await.map_err(SshError::Io)?;
-        while let Some(entry) = rd.next_entry().await.map_err(SshError::Io)? {
+        let mut rd = fs::read_dir(&dir).await?;
+        while let Some(entry) = rd.next_entry().await? {
             let path = entry.path();
 
-            // Decide how to treat symlinks
-            let ft = if follow_symlinks {
-                entry.metadata().await.map_err(SshError::Io)?.file_type()
-            } else {
-                entry.file_type().await.map_err(SshError::Io)?
-            };
+            // Follow symlinks
+            let ft = entry.metadata().await?.file_type();
 
             if ft.is_dir() {
                 stack.push(path);
@@ -186,20 +154,13 @@ async fn sftp_upload_dir(
     Ok(())
 }
 
-pub async fn ssh_sync<Addrs: ToSocketAddrs + Clone + Send + Sync + 'static>(
-    options: SshSyncOptions<Addrs>,
+pub(super) async fn ssh_sync(
+    handle: &mut SshClientHandle,
+    volume: VmVolume,
 ) -> Result<(), SshError> {
-    let SshSyncOptions {
-        connect,
-        volume,
-        follow_symlinks,
-    } = options;
-
-    let handle = connect_with_retry(connect).await?;
-
     // Open SFTP subsystem and perform upload
-    let mut sftp = open_sftp(&handle).await?;
-    sftp_upload_volume(&mut sftp, &volume, follow_symlinks).await?;
+    let mut sftp = open_sftp(handle).await?;
+    sftp_upload_volume(&mut sftp, &volume).await?;
 
     // Graceful close
     let _ = handle

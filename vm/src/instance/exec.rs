@@ -3,7 +3,7 @@ use thiserror::Error;
 
 use crate::{
     instance::Instance,
-    ssh::{ssh_command, ssh_sync, SshCommandOptions, SshConnectOptions, SshError, SshSyncOptions},
+    ssh::{Ssh, SshConnectOptions, SshError},
 };
 
 #[derive(Error, Debug)]
@@ -22,28 +22,20 @@ pub(super) async fn instance_exec(
     let username = instance.user.clone();
     let volumes = instance.volumes.clone();
 
-    let ssh_connect = SshConnectOptions {
+    let mut ssh = Ssh::connect(SshConnectOptions {
         private_key: ssh_keypair.private_key,
         addrs: (Ipv4Addr::LOCALHOST, ssh_port),
         username,
         config: Arc::new(Default::default()),
         timeout,
-    };
+    })
+    .await?;
 
     for volume in volumes {
-        let ssh_sync_options = SshSyncOptions {
-            connect: ssh_connect.clone(),
-            volume,
-            follow_symlinks: true,
-        };
-        ssh_sync(ssh_sync_options).await?;
+        ssh.sync(volume).await?;
     }
 
-    let ssh_command_options = SshCommandOptions {
-        connect: ssh_connect.clone(),
-        command: command.to_owned(),
-    };
-    let exit_code = ssh_command(ssh_command_options).await?;
+    let exit_code = ssh.command(command).await?;
 
     Ok(exit_code)
 }

@@ -1,30 +1,12 @@
 use russh::ChannelMsg;
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::ToSocketAddrs,
-};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::ssh::connect::SshConnectOptions;
+use super::{SshClientHandle, SshError};
 
-use super::{connect::connect_with_retry, SshError};
-
-#[derive(Debug)]
-pub struct SshCommandOptions<Addrs>
-where
-    Addrs: ToSocketAddrs + Clone + Send,
-{
-    pub connect: SshConnectOptions<Addrs>,
-    pub command: String,
-}
-
-pub async fn ssh_command<Addrs: ToSocketAddrs + Clone + Send + Sync + 'static>(
-    options: SshCommandOptions<Addrs>,
+pub(super) async fn ssh_command(
+    handle: &mut SshClientHandle,
+    command: &str,
 ) -> Result<u32, SshError> {
-    let SshCommandOptions { connect, command } = options;
-
-    // Create SSH connection
-    let handle = connect_with_retry(connect).await?;
-
     // Open session channel
     let mut channel = handle.channel_open_session().await?;
 
