@@ -1,5 +1,5 @@
 [package]
-name = "ludis"
+name = "ludis-apply"
 version = "0.1.0"
 edition = "2024"
 
@@ -9,8 +9,13 @@ ludis-plan = { path = "../plan", version = "0.1" }
 ludis-operation = { path = "../operation", version = "0.1" }
 ludis-store = { path = "../store", version = "0.1" }
 ludis-system = { path = "../system", version = "0.1" }
+clap.workspace = true
 directories.workspace = true
 rimu.workspace = true
 rimu-interop = { path = "../rimu-interop", version = "0.1" }
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber = { version = "0.3.20", features = ["env-filter", "json"] }
 serde.workspace = true
+serde_json.workspace = true
 tokio.workspace = true
