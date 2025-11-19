@@ -177,119 +177,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
-name = "avo"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "avo-operation",
- "avo-params",
- "avo-plan",
- "avo-store",
- "avo-system",
- "directories",
- "indexmap",
- "rimu",
- "rimu-interop",
- "serde",
- "tokio",
-]
-
-[[package]]
-name = "avo-machine"
-version = "0.1.0"
-dependencies = [
- "avo-system",
- "serde",
-]
-
-[[package]]
-name = "avo-operation"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "avo-params",
- "displaydoc",
- "indexmap",
- "rimu",
- "serde",
- "thiserror 2.0.17",
-]
-
-[[package]]
-name = "avo-params"
-version = "0.1.0"
-dependencies = [
- "displaydoc",
- "indexmap",
- "rimu",
- "rimu-interop",
- "serde",
- "thiserror 2.0.17",
-]
-
-[[package]]
-name = "avo-plan"
-version = "0.1.0"
-dependencies = [
- "avo-operation",
- "avo-params",
- "avo-store",
- "displaydoc",
- "rimu",
- "rimu-interop",
- "thiserror 2.0.17",
- "url",
-]
-
-[[package]]
-name = "avo-store"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "displaydoc",
- "thiserror 2.0.17",
- "tokio",
-]
-
-[[package]]
-name = "avo-system"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "avo-vm"
-version = "0.1.0"
-dependencies = [
- "avo-machine",
- "avo-system",
- "base64ct",
- "cuid2",
- "dir-lock",
- "directories",
- "nix 0.30.1",
- "reqwest",
- "russh",
- "russh-sftp",
- "serde",
- "serde-saphyr",
- "serde_json",
- "sha2",
- "shell-escape",
- "termion",
- "thiserror 2.0.17",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "toml",
- "tracing",
- "tracing-subscriber",
- "which",
-]
-
-[[package]]
 name = "aws-lc-rs"
 version = "1.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1872,6 +1759,119 @@ name = "log"
 version = "0.4.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34080505efa8e45a4b816c349525ebe327ceaa8559756f0356cba97ef3bf7432"
+
+[[package]]
+name = "ludis"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "directories",
+ "indexmap",
+ "ludis-operation",
+ "ludis-params",
+ "ludis-plan",
+ "ludis-store",
+ "ludis-system",
+ "rimu",
+ "rimu-interop",
+ "serde",
+ "tokio",
+]
+
+[[package]]
+name = "ludis-machine"
+version = "0.1.0"
+dependencies = [
+ "ludis-system",
+ "serde",
+]
+
+[[package]]
+name = "ludis-operation"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "displaydoc",
+ "indexmap",
+ "ludis-params",
+ "rimu",
+ "serde",
+ "thiserror 2.0.17",
+]
+
+[[package]]
+name = "ludis-params"
+version = "0.1.0"
+dependencies = [
+ "displaydoc",
+ "indexmap",
+ "rimu",
+ "rimu-interop",
+ "serde",
+ "thiserror 2.0.17",
+]
+
+[[package]]
+name = "ludis-plan"
+version = "0.1.0"
+dependencies = [
+ "displaydoc",
+ "ludis-operation",
+ "ludis-params",
+ "ludis-store",
+ "rimu",
+ "rimu-interop",
+ "thiserror 2.0.17",
+ "url",
+]
+
+[[package]]
+name = "ludis-store"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "displaydoc",
+ "thiserror 2.0.17",
+ "tokio",
+]
+
+[[package]]
+name = "ludis-system"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "ludis-vm"
+version = "0.1.0"
+dependencies = [
+ "base64ct",
+ "cuid2",
+ "dir-lock",
+ "directories",
+ "ludis-machine",
+ "ludis-system",
+ "nix 0.30.1",
+ "reqwest",
+ "russh",
+ "russh-sftp",
+ "serde",
+ "serde-saphyr",
+ "serde_json",
+ "sha2",
+ "shell-escape",
+ "termion",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "which",
+]
 
 [[package]]
 name = "md5"

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
-use avo_machine::Machine;
-use avo_system::{Arch, Linux, Os};
+use ludis_machine::Machine;
+use ludis_system::{Arch, Linux, Os};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::info;

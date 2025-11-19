@@ -8,10 +8,10 @@ pub use self::paths::*;
 pub use self::setup::*;
 pub use self::start::*;
 
-use avo_system::Arch;
-use avo_system::CpuCount;
-use avo_system::Linux;
-use avo_system::MemorySize;
+use ludis_system::Arch;
+use ludis_system::CpuCount;
+use ludis_system::Linux;
+use ludis_system::MemorySize;
 use nix::{
     sys::signal::{kill, Signal},
     unistd::Pid,

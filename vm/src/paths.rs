@@ -13,7 +13,7 @@ pub struct Paths {
 impl Paths {
     pub fn new() -> Self {
         let dirs =
-            ProjectDirs::from("dev", "Avo Org", "Avo").expect("Failed to get project directory");
+            ProjectDirs::from("dev", "Ludis Org", "Ludis").expect("Failed to get project directory");
         let data_dir = dirs.data_dir();
         let cache_dir = dirs.cache_dir();
         let runtime_dir = dirs.runtime_dir().unwrap_or(cache_dir);

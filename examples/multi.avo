@@ -5,6 +5,6 @@ setup: () =>
   - module: "@core/pkg"
     params:
       packages: ["less"]
-  - module: "./simple.avo"
+  - module: "./simple.ludis"
     params:
       whatever: true

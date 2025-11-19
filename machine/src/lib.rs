@@ -1,4 +1,4 @@
-use avo_system::{Arch, CpuCount, Hostname, MemorySize, Os};
+use ludis_system::{Arch, CpuCount, Hostname, MemorySize, Os};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

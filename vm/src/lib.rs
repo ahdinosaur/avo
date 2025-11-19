@@ -11,7 +11,7 @@ mod utils;
 
 pub use crate::instance::{VmPort, VmVolume};
 
-use avo_machine::Machine;
+use ludis_machine::Machine;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::time::sleep;

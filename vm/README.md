@@ -1,6 +1,6 @@
-# avo-vm
+# ludis-vm
 
-Develop your avo config on a virtual machine, before deploying to a physical machine.
+Develop your ludis config on a virtual machine, before deploying to a physical machine.
 
 - List images
 - Create new machine with id and config

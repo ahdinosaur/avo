@@ -3,7 +3,7 @@ mod kernel;
 mod overlay;
 mod ovmf;
 
-use avo_machine::{Machine, MachineVmOptions};
+use ludis_machine::{Machine, MachineVmOptions};
 use thiserror::Error;
 
 use crate::{
@@ -122,7 +122,7 @@ pub async fn setup_instance(
         volumes,
         ports,
         graphics,
-        // TODO set via global avo config
+        // TODO set via global ludis config
         kvm: None,
     })
 }

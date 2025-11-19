@@ -3,7 +3,7 @@
 //! - Then group operations of same kind and epoch into single operation.
 
 use async_trait::async_trait;
-use avo_params::{ParamField, ParamType, ParamTypes};
+use ludis_params::{ParamField, ParamType, ParamTypes};
 use displaydoc::Display;
 use indexmap::indexmap;
 use rimu::{SourceId, Span, Spanned};

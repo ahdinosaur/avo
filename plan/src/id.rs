@@ -1,4 +1,4 @@
-use avo_store::StoreItemId;
+use ludis_store::StoreItemId;
 use rimu::SourceId;
 use std::path::{Path, PathBuf};
 use url::Url;

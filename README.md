@@ -1,14 +1,14 @@
-# avo
+# ludis
 
-_STATUS: DREAMING_
+_STATUS: PROTOTYPING_
 
 > A modular config system for personal setups
 
-Avo is a dream for a tool to help provision a fresh computer with the exact setup you need to be productive.
+Ludis provisions a fresh computer with the exact setup you need to be productive.
 
-Like .dotfiles on steroids, but less opinionated than NixOS.
+Like .dotfiles on steroids, but less opinionated than NixOS. Friendly and functional.
 
-In the past, I've relied on Salt Stack to automate this, but I think a better way is possible.
+In the past, I've relied on Salt Stack to automate my machine setup, but I think a better way is possible.
 
 See also:
 
@@ -69,7 +69,7 @@ As for the execution:
 
 ## Immutable (pure) packages
 
-We could also have a 
+We could also have a
 
 ## Personal history
 

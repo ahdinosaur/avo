@@ -125,19 +125,19 @@ mod tests {
 
     #[test]
     fn test_get_command() {
-        assert_eq!(Command::new("avo").to_string(), "avo")
+        assert_eq!(Command::new("ludis").to_string(), "ludis")
     }
 
     #[test]
     fn test_get_command_with_one_arg() {
-        assert_eq!(Command::new("avo").arg("-a").to_string(), "avo -a")
+        assert_eq!(Command::new("ludis").arg("-a").to_string(), "ludis -a")
     }
 
     #[test]
     fn test_get_command_with_two_args() {
         assert_eq!(
-            Command::new("avo").arg("-a").arg("-b").to_string(),
-            "avo -a -b"
+            Command::new("ludis").arg("-a").arg("-b").to_string(),
+            "ludis -a -b"
         )
     }
 }

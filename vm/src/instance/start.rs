@@ -1,4 +1,4 @@
-use avo_system::{CpuCount, MemorySize};
+use ludis_system::{CpuCount, MemorySize};
 use std::net::Ipv4Addr;
 use thiserror::Error;
 use tracing::info;
@@ -52,8 +52,8 @@ pub(super) async fn instance_start(
     let kvm = kvm.unwrap_or(true);
 
     let qemu_executable = match arch {
-        avo_system::Arch::X86_64 => executables.qemu_x86_64(),
-        avo_system::Arch::Aarch64 => executables.qemu_aarch64(),
+        ludis_system::Arch::X86_64 => executables.qemu_x86_64(),
+        ludis_system::Arch::Aarch64 => executables.qemu_aarch64(),
     };
     let mut qemu = Qemu::new(qemu_executable);
 

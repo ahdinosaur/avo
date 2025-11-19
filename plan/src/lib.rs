@@ -1,8 +1,8 @@
 use std::{path::PathBuf, string::FromUtf8Error};
 
-use avo_operation::{OperationId, OperationTree};
-use avo_params::{validate, ParamValues, ParamsValidationError};
-use avo_store::{Store, StoreError, StoreItemId};
+use ludis_operation::{OperationId, OperationTree};
+use ludis_params::{validate, ParamValues, ParamsValidationError};
+use ludis_store::{Store, StoreError, StoreItemId};
 use displaydoc::Display;
 use rimu::SerdeValueError;
 use rimu::Spanned;

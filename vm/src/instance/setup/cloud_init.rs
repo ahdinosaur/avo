@@ -1,4 +1,4 @@
-use avo_system::Hostname;
+use ludis_system::Hostname;
 use russh::keys::PublicKey;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

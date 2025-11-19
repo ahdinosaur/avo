@@ -1,5 +1,5 @@
-use avo_operation::{Operation, OperationTrait, PackageOperation};
-use avo_params::{validate, ParamValues};
+use ludis_operation::{Operation, OperationTrait, PackageOperation};
+use ludis_params::{validate, ParamValues};
 use rimu::Spanned;
 
 use crate::PlanActionToOperationError;

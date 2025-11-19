@@ -1,9 +1,9 @@
-use avo::{
+use ludis::{
     create_store,
     operation::apply,
     plan::{plan, PlanId},
 };
-use avo_params::ParamValues;
+use ludis_params::ParamValues;
 use rimu::SourceId;
 use serde::Serialize;
 use std::env;
@@ -18,7 +18,7 @@ async fn main() {
     let mut store = create_store();
 
     let path = env::current_dir().expect("Failed to get env::current_dir()");
-    let plan_id = PlanId::Path(path.join("examples/simple.avo"));
+    let plan_id = PlanId::Path(path.join("examples/simple.ludis"));
 
     let params = ParamValues::from_type(ExampleParams { whatever: true }, SourceId::empty())
         .expect("Failed to create params");
