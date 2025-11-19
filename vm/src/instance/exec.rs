@@ -18,7 +18,7 @@ pub(super) async fn instance_exec(
     command: &str,
     timeout: Duration,
 ) -> Result<u32, InstanceExecError> {
-    let ssh_keypair = instance.ssh_keypair().await?;
+    let ssh_keypair = instance.ssh_keypair().await.map_err(SshError::Keypair)?;
     let ssh_port = instance.ssh_port;
     let username = instance.user.clone();
     let volumes = instance.volumes.clone();

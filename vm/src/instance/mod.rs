@@ -25,7 +25,7 @@ use thiserror::Error;
 use crate::context::Context;
 use crate::fs::{self, FsError};
 use crate::instance::exec::InstanceExecError;
-use crate::ssh::{SshError, SshKeypair};
+use crate::ssh::{SshKeypair, SshKeypairError};
 use crate::utils::is_tcp_port_open;
 
 #[derive(Error, Debug)]
@@ -156,7 +156,7 @@ impl Instance {
         Ok(())
     }
 
-    pub async fn ssh_keypair(&self) -> Result<SshKeypair, SshError> {
+    pub async fn ssh_keypair(&self) -> Result<SshKeypair, SshKeypairError> {
         SshKeypair::load_or_create(&self.dir).await
     }
 

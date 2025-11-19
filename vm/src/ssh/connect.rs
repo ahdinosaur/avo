@@ -3,12 +3,11 @@ use russh::{
     keys::{PrivateKey, PrivateKeyWithHashAlg},
 };
 use std::{sync::Arc, time::Duration};
+use thiserror::Error;
 use tokio::{
     net::{TcpStream, ToSocketAddrs},
     time::{sleep, Instant},
 };
-
-use crate::ssh::error::SshError;
 
 #[derive(Debug, Clone)]
 pub struct SshConnectOptions<Addrs>
@@ -36,9 +35,25 @@ impl Handler for SshClient {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum SshConnectError {
+    #[error("timed out connecting to SSH server")]
+    Timeout,
+
+    #[error("SSH authentication failed (public key)")]
+    AuthFailed,
+
+    #[error("TCP error while connecting: {0}")]
+    Tcp(#[from] std::io::Error),
+
+    #[error("SSH protocol error: {0}")]
+    Russh(#[from] russh::Error),
+}
+
+#[tracing::instrument(skip(options))]
 pub(super) async fn connect_with_retry<Addrs>(
     options: SshConnectOptions<Addrs>,
-) -> Result<Handle<SshClient>, SshError>
+) -> Result<Handle<SshClient>, SshConnectError>
 where
     Addrs: ToSocketAddrs + Clone + Send,
 {
@@ -51,12 +66,14 @@ where
     } = options;
 
     let handler = SshClient;
-
     let start = Instant::now();
 
+    tracing::info!("Connecting to SSH");
+
     let mut handle = loop {
+        // TCP connect
         let stream = match TcpStream::connect(addrs.clone()).await {
-            Ok(stream) => Ok::<Option<TcpStream>, SshError>(Some(stream)),
+            Ok(stream) => Ok::<Option<TcpStream>, SshConnectError>(Some(stream)),
             Err(ref error)
                 if matches!(
                     error.kind(),
@@ -67,16 +84,29 @@ where
                 ) =>
             {
                 if start.elapsed() > timeout {
-                    return Err(SshError::Timeout);
+                    tracing::warn!("Connect retry timeout exceeded");
+                    return Err(SshConnectError::Timeout);
                 }
+                tracing::debug!(
+                    err = %error,
+                    elapsed_ms = start.elapsed().as_millis(),
+                    "TCP connect not ready yet; will retry"
+                );
                 Ok(None)
             }
-            Err(error) => return Err(SshError::from(error)),
+            Err(error) => {
+                tracing::warn!(err = %error, "Non-retryable TCP error");
+                return Err(SshConnectError::from(error));
+            }
         }?;
 
+        // SSH handshake
         if let Some(stream) = stream {
             match connect_stream(config.clone(), stream, handler.clone()).await {
-                Ok(handle) => break handle,
+                Ok(handle) => {
+                    tracing::trace!("SSH transport established");
+                    break handle;
+                }
                 Err(russh::Error::IO(ref error))
                     if matches!(
                         error.kind(),
@@ -84,27 +114,38 @@ where
                     ) =>
                 {
                     if start.elapsed() > timeout {
-                        return Err(SshError::Timeout);
+                        tracing::warn!("Handshake retry timeout exceeded");
+                        return Err(SshConnectError::Timeout);
                     }
+                    tracing::debug!(
+                        err = %error,
+                        elapsed_ms = start.elapsed().as_millis(),
+                        "SSH handshake not ready; will retry"
+                    );
                 }
-                Err(error) => return Err(SshError::from(error)),
+                Err(error) => {
+                    tracing::warn!(err = %error, "Non-retryable SSH handshake error");
+                    return Err(SshConnectError::from(error));
+                }
             };
         }
 
         sleep(Duration::from_millis(100)).await;
     };
 
-    // Authenticate using the provided private key and username
+    // Public key authentication
+    tracing::debug!(username = %username, "Authenticating over SSH");
     let auth = handle
         .authenticate_publickey(
             &username,
             PrivateKeyWithHashAlg::new(Arc::new(private_key), None),
         )
         .await?;
-
     if !auth.success() {
-        return Err(SshError::AuthFailed);
+        tracing::warn!("SSH authentication failed");
+        return Err(SshConnectError::AuthFailed);
     }
 
+    tracing::info!("SSH authentication successful");
     Ok(handle)
 }

@@ -19,7 +19,7 @@ use crate::{
         },
         Instance, InstancePaths, VmPort, VmVolume,
     },
-    ssh::{SshError, SshKeypair},
+    ssh::{SshKeypair, SshKeypairError},
     utils::get_free_tcp_port,
 };
 
@@ -51,7 +51,7 @@ pub enum InstanceSetupError {
     Fs(#[from] FsError),
 
     #[error(transparent)]
-    Ssh(#[from] SshError),
+    SshKeypair(#[from] SshKeypairError),
 
     #[error("no open ports available")]
     NoOpenPortsAvailable,
