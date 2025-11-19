@@ -1,5 +1,5 @@
 use clap::Parser;
-use directories::ProjectDirs;
+use ludis_env::{Environment, EnvironmentError};
 use ludis_operation::{apply as apply_operations, ApplyError};
 use ludis_params::{ParamValues, ParamValuesFromTypeError};
 use ludis_plan::{self, plan, PlanError, PlanId};
@@ -29,6 +29,9 @@ struct Cli {
 #[derive(Error, Debug)]
 enum AppError {
     #[error("JSON parameters parse failed: {0}")]
+    Env(#[from] EnvironmentError),
+
+    #[error("JSON parameters parse failed: {0}")]
     Json(#[from] serde_json::Error),
 
     #[error("Failed to convert parameters for Ludis: {0}")]
@@ -56,7 +59,8 @@ async fn run(cli: Cli) -> Result<(), AppError> {
     info!("starting");
     debug!(cli = ?cli, "parsed cli");
 
-    let mut store = create_store();
+    let env = Environment::create()?;
+    let mut store = Store::new(env.cache_dir());
 
     // Resolve plan id
     let plan_path = cli.plan.canonicalize().unwrap_or(cli.plan.clone());
@@ -99,11 +103,4 @@ fn install_tracing(level: &str) {
         .with_level(true)
         .with_ansi(false)
         .init();
-}
-
-pub fn create_store() -> Store {
-    let project_dirs =
-        ProjectDirs::from("dev", "Ludis Org", "Ludis").expect("Failed to get project directory");
-    let cache_dir = project_dirs.cache_dir();
-    Store::new(cache_dir.to_path_buf())
 }

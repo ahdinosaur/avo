@@ -4,13 +4,13 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+ludis-env = { path = "../env", version = "0.1" }
 ludis-params = { path = "../params", version = "0.1" }
 ludis-plan = { path = "../plan", version = "0.1" }
 ludis-operation = { path = "../operation", version = "0.1" }
 ludis-store = { path = "../store", version = "0.1" }
 ludis-system = { path = "../system", version = "0.1" }
 clap.workspace = true
-directories.workspace = true
 rimu.workspace = true
 rimu-interop = { path = "../rimu-interop", version = "0.1" }
 thiserror.workspace = true

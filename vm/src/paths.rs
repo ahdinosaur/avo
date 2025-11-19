@@ -1,44 +1,20 @@
-use directories::ProjectDirs;
+use ludis_env::Environment;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use which::which_global;
 
 #[derive(Debug, Clone)]
 pub struct Paths {
-    data_dir: PathBuf,
-    cache_dir: PathBuf,
-    runtime_dir: PathBuf,
+    env: Environment,
 }
 
 impl Paths {
-    pub fn new() -> Self {
-        let dirs =
-            ProjectDirs::from("dev", "Ludis Org", "Ludis").expect("Failed to get project directory");
-        let data_dir = dirs.data_dir();
-        let cache_dir = dirs.cache_dir();
-        let runtime_dir = dirs.runtime_dir().unwrap_or(cache_dir);
-        Self {
-            data_dir: data_dir.into(),
-            cache_dir: cache_dir.into(),
-            runtime_dir: runtime_dir.into(),
-        }
-    }
-
-    pub fn data_dir(&self) -> &Path {
-        &self.data_dir
-    }
-
-    pub fn cache_dir(&self) -> &Path {
-        &self.cache_dir
-    }
-
-    #[allow(dead_code)]
-    pub fn runtime_dir(&self) -> &Path {
-        &self.runtime_dir
+    pub fn new(env: Environment) -> Self {
+        Self { env }
     }
 
     pub fn images_dir(&self) -> PathBuf {
-        self.cache_dir().join("vm/images")
+        self.env.cache_dir().join("vm/images")
     }
 
     pub fn image_file(&self, image_file_name: &str) -> PathBuf {
@@ -46,7 +22,7 @@ impl Paths {
     }
 
     pub fn instances_dir(&self) -> PathBuf {
-        self.data_dir().join("vm/instances")
+        self.env.data_dir().join("vm/instances")
     }
 
     pub fn instance_dir(&self, instance_id: &str) -> PathBuf {

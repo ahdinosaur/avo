@@ -40,7 +40,6 @@ pub struct RunOptions<'a> {
 }
 
 pub async fn run(options: RunOptions<'_>) -> Result<(), VmError> {
-    install_tracing();
     let mut ctx = Context::new()?;
 
     let RunOptions {
@@ -81,15 +80,4 @@ pub async fn run(options: RunOptions<'_>) -> Result<(), VmError> {
     instance.exec(command, timeout).await?;
 
     Ok(())
-}
-
-fn install_tracing() {
-    let subscriber = tracing_subscriber::FmtSubscriber::builder()
-        // all spans/events with a level higher than TRACE (e.g, debug, info, warn, etc.)
-        // will be written to stdout.
-        .with_max_level(tracing::Level::TRACE)
-        // builds the subscriber.
-        .finish();
-
-    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 }
