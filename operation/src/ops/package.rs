@@ -90,12 +90,13 @@ impl OperationSpec for PackageSpec {
     }
 
     type Delta = PackageOperationDelta;
+    type DeltaError = ();
 
-    async fn delta(atom: Self::Atom) -> Option<Self::Delta> {
+    async fn delta(atom: Self::Atom) -> Result<Option<Self::Delta>, Self::DeltaError> {
         // TODO, check if the package is already installed.
-        Some(PackageOperationDelta::Install {
+        Ok(Some(PackageOperationDelta::Install {
             package: atom.package,
-        })
+        }))
     }
 
     type ApplyError = ();

@@ -1909,6 +1909,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "displaydoc",
+ "futures-util",
  "indexmap",
  "ludis-params",
  "rimu",

@@ -1,4 +1,4 @@
-use ludis_operation::{ops::package::PackageOperation, traits::OperationTrait, Operation};
+use ludis_operation::{ops::package::PackageSpec, Operation, OperationSpec};
 use ludis_params::{validate, ParamValues};
 use rimu::Spanned;
 
@@ -10,7 +10,7 @@ pub fn core_module(
 ) -> Result<Operation, PlanActionToOperationError> {
     let param_values = param_values.ok_or(PlanActionToOperationError::MissingParams)?;
     let operation = match core_module_id {
-        "pkg" => core_module_for_operation::<PackageOperation>(param_values)?,
+        "pkg" => core_module_for_operation::<PackageSpec>(param_values)?,
         other => {
             return Err(PlanActionToOperationError::UnsupportedCoreModuleId {
                 id: other.to_string(),
@@ -24,7 +24,7 @@ pub fn is_core_module(module: &Spanned<String>) -> Option<&str> {
     module.inner().strip_prefix("@core/")
 }
 
-fn core_module_for_operation<Op: OperationTrait>(
+fn core_module_for_operation<Op: OperationSpec>(
     param_values: Spanned<ParamValues>,
 ) -> Result<Operation, PlanActionToOperationError> {
     let param_types = Op::param_types();
@@ -34,6 +34,6 @@ fn core_module_for_operation<Op: OperationTrait>(
         .into_inner()
         .into_type()
         .map_err(PlanActionToOperationError::from)?;
-    let operation = Op::new(package_params).into();
+    let operation = Op::operation(package_params).into();
     Ok(operation)
 }

@@ -39,12 +39,14 @@ pub trait OperationSpec {
     /// Represents a concrete change to be applied.
     type Delta;
 
+    type DeltaError;
+
     /// Get the delta for a given atom, to change from the current state to the desired state.
     ///
     /// Returns:
     /// - `Some(delta)` if a change is needed
     /// - `None` if the state is already correct
-    async fn delta(atom: Self::Atom) -> Option<Self::Delta>;
+    async fn delta(atom: Self::Atom) -> Result<Option<Self::Delta>, Self::DeltaError>;
 
     /// Error type returned when applying deltas fails.
     type ApplyError;

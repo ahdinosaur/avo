@@ -18,20 +18,24 @@ mod epoch;
 pub mod ops;
 mod spec;
 
+pub use self::spec::OperationSpec;
+
 use displaydoc::Display;
 use thiserror::Error;
 
 use crate::{
-    epoch::{EpochError, OperationDeltaApplyError},
-    ops::package::PackageOperation,
+    epoch::{tree_to_epochs, EpochError},
+    ops::package::{PackageOperation, PackageOperationAtom, PackageOperationDelta, PackageSpec},
 };
 
 #[derive(Debug, Error, Display)]
 pub enum ApplyError {
     /// Failed to compute epochs
     Epoch(#[from] EpochError),
+    /// Failed querying operation deltas
+    Delta(#[from] OperationDeltaError),
     /// Failed applying operation deltas
-    DeltaApply(#[from] OperationDeltaApplyError),
+    Apply(#[from] OperationApplyError),
 }
 
 /// Apply a fully planned operation tree using the atoms → deltas pipeline.
@@ -44,13 +48,15 @@ pub enum ApplyError {
 #[tracing::instrument(skip_all)]
 pub async fn apply(operation: OperationTree) -> Result<(), ApplyError> {
     tracing::info!("Applying operation tree (atoms → deltas)");
-    let epochs = operation.into_epochs()?;
+    let operations_by_epoch = tree_to_epochs(operation)?;
+    let atoms_by_epoch = operations_by_epoch.map(|epoch_operations| epoch_operations.atoms());
+    let deltas_by_epoch = atoms_by_epoch
+        .try_map_async(|epoch_atoms| async move { epoch_atoms.deltas().await })
+        .await?;
 
-    for epoch_ops in epochs.0 {
-        let atoms = epoch_ops.atoms();
-        let deltas = atoms.deltas().await;
-        deltas.apply().await?;
-    }
+    deltas_by_epoch
+        .try_each_async(|epoch_deltas| async move { epoch_deltas.apply().await })
+        .await?;
 
     Ok(())
 }
@@ -87,4 +93,72 @@ pub enum OperationTree {
         before: Vec<OperationId>,
         after: Vec<OperationId>,
     },
+}
+
+/// Per-epoch operations split by operation type.
+#[derive(Debug, Clone)]
+pub struct EpochOperations {
+    pub package_ops: Vec<PackageOperation>,
+}
+
+/// Per-epoch atoms by operation type.
+#[derive(Debug, Clone)]
+pub struct EpochOperationAtoms {
+    pub package_atoms: Vec<PackageOperationAtom>,
+}
+
+impl EpochOperations {
+    pub fn atoms(self) -> EpochOperationAtoms {
+        let package_atoms = if self.package_ops.is_empty() {
+            Vec::new()
+        } else {
+            PackageSpec::atoms(self.package_ops)
+        };
+        EpochOperationAtoms { package_atoms }
+    }
+}
+
+/// Per-epoch deltas by operation type.
+#[derive(Debug, Clone)]
+pub struct EpochOperationDeltas {
+    pub package_deltas: Vec<PackageOperationDelta>,
+}
+
+#[derive(Error, Debug, Display)]
+pub enum OperationDeltaError {
+    /// Package delta query failed
+    Package(<PackageSpec as OperationSpec>::DeltaError),
+}
+
+impl EpochOperationAtoms {
+    pub async fn deltas(self) -> Result<EpochOperationDeltas, OperationDeltaError> {
+        let mut package_deltas: Vec<PackageOperationDelta> = Vec::new();
+
+        for atom in self.package_atoms {
+            if let Some(d) = PackageSpec::delta(atom)
+                .await
+                .map_err(OperationDeltaError::Package)?
+            {
+                package_deltas.push(d);
+            }
+        }
+
+        Ok(EpochOperationDeltas { package_deltas })
+    }
+}
+
+#[derive(Error, Debug, Display)]
+pub enum OperationApplyError {
+    /// Package delta apply failed
+    Package(<PackageSpec as OperationSpec>::ApplyError),
+}
+
+impl EpochOperationDeltas {
+    /// Apply all deltas for this epoch, per operation type.
+    pub async fn apply(self) -> Result<(), OperationApplyError> {
+        PackageSpec::apply(self.package_deltas)
+            .await
+            .map_err(OperationApplyError::Package)?;
+        Ok(())
+    }
 }
