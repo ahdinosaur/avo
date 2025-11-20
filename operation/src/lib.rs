@@ -3,11 +3,11 @@
 //! - Then group operations of same kind and epoch into single operation.
 
 use async_trait::async_trait;
-use ludis_params::{ParamField, ParamType, ParamTypes};
 use displaydoc::Display;
 use indexmap::indexmap;
+use ludis_params::{ParamField, ParamType, ParamTypes};
 use rimu::{SourceId, Span, Spanned};
-use serde::{Deserialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Deserialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use thiserror::Error;
 
@@ -20,12 +20,13 @@ pub enum ApplyError {
 }
 
 /// Apply a fully planned operation tree.
+#[tracing::instrument(skip_all)]
 pub async fn apply(operation: OperationTree) -> Result<OperationEpochsGrouped, ApplyError> {
-    println!("Apply ---");
+    tracing::info!("Applying operation tree");
     let epochs = operation.into_epochs()?;
-    println!("Epochs: {:?}", epochs);
+    tracing::trace!("Computed epochs: {:?}", epochs);
     let epochs_grouped = epochs.group();
-    println!("Epoch grouped: {:?}", epochs_grouped);
+    tracing::trace!("Computed epoch groups: {:?}", epochs_grouped);
     epochs_grouped.apply_all().await?;
     Ok(epochs_grouped)
 }
@@ -172,9 +173,9 @@ impl OperationGroupTrait for PackageOperationGroup {
     async fn apply(&self) -> Result<(), Self::Error> {
         // MVP: just print what we would do.
         if self.packages.is_empty() {
-            println!("[pkg] nothing to do");
+            tracing::info!("[pkg] nothing to do");
         } else {
-            println!("[pkg] install: {}", self.packages.join(", "));
+            tracing::info!("[pkg] install: {}", self.packages.join(", "));
         }
         Ok(())
     }

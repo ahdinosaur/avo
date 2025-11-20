@@ -11,3 +11,4 @@ indexmap.workspace = true
 rimu.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+tracing.workspace = true

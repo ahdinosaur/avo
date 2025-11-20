@@ -14,3 +14,5 @@ rimu.workspace = true
 rimu-interop = { path = "../rimu-interop", version = "0.1" }
 serde.workspace = true
 tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber = { version = "0.3.20" }

@@ -1,7 +1,6 @@
 use ludis_system::{CpuCount, MemorySize};
 use std::net::Ipv4Addr;
 use thiserror::Error;
-use tracing::info;
 
 use crate::{
     instance::{Instance, VmPort},
@@ -80,9 +79,19 @@ pub(super) async fn instance_start(
     qemu.virtio_drive("overlay-disk", "qcow2", &paths.overlay_image_path())
         .virtio_drive("cloud-init", "raw", &paths.cloud_init_image_path());
 
-    info!("run qemu cmd: {:?}", qemu);
+    tracing::debug!(cmd = ?qemu, "spawning QEMU");
 
     let _child = qemu.spawn().await?;
+
+    tracing::info!(
+        arch=?arch,
+        memory_gb=memory_size_in_gb,
+        cpus=%cpu_count,
+        ssh_port=%ssh_port,
+        graphics=graphics,
+        kvm=kvm,
+        "VM process started"
+    );
 
     Ok(())
 }

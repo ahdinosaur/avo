@@ -1861,6 +1861,8 @@ dependencies = [
  "rimu-interop",
  "serde",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -1889,6 +1891,7 @@ name = "ludis-env"
 version = "0.1.0"
 dependencies = [
  "thiserror 2.0.17",
+ "tracing",
 ]
 
 [[package]]
@@ -1897,6 +1900,7 @@ version = "0.1.0"
 dependencies = [
  "ludis-system",
  "serde",
+ "tracing",
 ]
 
 [[package]]
@@ -1910,6 +1914,7 @@ dependencies = [
  "rimu",
  "serde",
  "thiserror 2.0.17",
+ "tracing",
 ]
 
 [[package]]
@@ -1922,6 +1927,7 @@ dependencies = [
  "rimu-interop",
  "serde",
  "thiserror 2.0.17",
+ "tracing",
 ]
 
 [[package]]
@@ -1935,6 +1941,7 @@ dependencies = [
  "rimu",
  "rimu-interop",
  "thiserror 2.0.17",
+ "tracing",
  "url",
 ]
 
@@ -1946,6 +1953,7 @@ dependencies = [
  "displaydoc",
  "thiserror 2.0.17",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
