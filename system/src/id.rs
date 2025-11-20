@@ -1,6 +1,8 @@
 use std::{
     convert::Infallible,
+    ffi::OsString,
     fmt::{self, Display},
+    io,
     str::FromStr,
 };
 
@@ -15,9 +17,21 @@ impl Display for Hostname {
     }
 }
 
+impl Hostname {
+    pub fn get() -> io::Result<Self> {
+        hostname::get().map(Into::into)
+    }
+}
+
 impl From<String> for Hostname {
     fn from(value: String) -> Self {
         Self(value)
+    }
+}
+
+impl From<OsString> for Hostname {
+    fn from(value: OsString) -> Self {
+        Self(value.to_string_lossy().into_owned())
     }
 }
 

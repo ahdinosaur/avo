@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 serde.workspace = true
+hostname = "0.4.1"
 
 [dev-dependencies]
 serde_json = "1"
