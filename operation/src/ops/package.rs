@@ -4,15 +4,24 @@ use ludis_params::{ParamField, ParamType, ParamTypes};
 use rimu::{SourceId, Span, Spanned};
 use serde::Deserialize;
 
-use crate::{
-    traits::{OperationAtomTrait, OperationDeltaTrait, OperationTrait},
-    Operation, OperationKind,
-};
+use crate::{spec::OperationSpec, Operation};
 
-/// Install packages.
+/// A package operation.
 #[derive(Debug, Clone)]
 pub struct PackageOperation {
     packages: Vec<String>,
+}
+
+/// A single-package atom.
+#[derive(Debug, Clone)]
+pub struct PackageOperationAtom {
+    package: String,
+}
+
+/// A concrete package change.
+#[derive(Debug, Clone)]
+pub enum PackageOperationDelta {
+    Install { package: String },
 }
 
 impl From<PackageOperation> for Operation {
@@ -28,10 +37,11 @@ pub enum PackageParams {
     Packages { packages: Vec<String> },
 }
 
-impl OperationTrait for PackageOperation {
-    fn kind() -> OperationKind {
-        OperationKind::Package
-    }
+pub struct PackageSpec;
+
+#[async_trait]
+impl OperationSpec for PackageSpec {
+    const ID: &str = "package";
 
     fn param_types() -> Option<Spanned<ParamTypes>> {
         let span = Span::new(SourceId::empty(), 0, 0);
@@ -56,19 +66,20 @@ impl OperationTrait for PackageOperation {
     }
 
     type Params = PackageParams;
+    type Operation = PackageOperation;
 
-    fn new(params: Self::Params) -> Self {
+    fn operation(params: Self::Params) -> Self::Operation {
         match params {
-            PackageParams::Package { package } => Self {
+            PackageParams::Package { package } => Self::Operation {
                 packages: vec![package],
             },
-            PackageParams::Packages { packages } => Self { packages },
+            PackageParams::Packages { packages } => Self::Operation { packages },
         }
     }
 
     type Atom = PackageOperationAtom;
 
-    fn atoms(ops: impl IntoIterator<Item = Self>) -> Vec<Self::Atom> {
+    fn atoms(ops: impl IntoIterator<Item = Self::Operation>) -> Vec<Self::Atom> {
         let mut atoms = Vec::new();
         for op in ops {
             for pkg in op.packages {
@@ -77,51 +88,39 @@ impl OperationTrait for PackageOperation {
         }
         atoms
     }
-}
 
-/// Single-package atom.
-#[derive(Debug, Clone)]
-pub struct PackageOperationAtom {
-    package: String,
-}
-
-impl OperationAtomTrait for PackageOperationAtom {
     type Delta = PackageOperationDelta;
 
-    fn delta(&self) -> Option<Self::Delta> {
-        // TODO: Inspect real system state (e.g., dpkg/rpm) to decide if the package
-        //       is already installed. For now, always produce a delta.
-        Some(PackageOperationDelta {
-            packages: vec![self.package.clone()],
+    async fn delta(atom: Self::Atom) -> Option<Self::Delta> {
+        // TODO, check if the package is already installed.
+        Some(PackageOperationDelta::Install {
+            package: atom.package,
         })
     }
-}
 
-/// Per-package delta (will be batched across the epoch).
-#[derive(Debug, Clone)]
-pub struct PackageOperationDelta {
-    packages: Vec<String>,
-}
+    type ApplyError = ();
 
-#[async_trait]
-impl OperationDeltaTrait for PackageOperationDelta {
-    type Error = ();
-
-    async fn apply(deltas: Vec<Self>) -> Result<(), Self::Error> {
-        // Merge all package lists into one batched install.
-        let mut packages: Vec<String> = Vec::new();
-        for d in deltas {
-            packages.extend(d.packages);
+    async fn apply(deltas: Vec<Self::Delta>) -> Result<(), Self::ApplyError> {
+        // Merge all packages into one batched install.
+        let mut install: Vec<String> = Vec::new();
+        for delta in deltas {
+            match delta {
+                PackageOperationDelta::Install { package } => {
+                    install.push(package);
+                }
+            }
         }
-        packages.sort();
-        packages.dedup();
 
-        if packages.is_empty() {
+        install.sort();
+        install.dedup();
+
+        // TODO, actually install packages
+        if install.is_empty() {
             tracing::info!("[pkg] nothing to do");
         } else {
-            tracing::info!("[pkg] install: {}", packages.join(", "));
+            tracing::info!("[pkg] install: {}", install.join(", "));
         }
+
         Ok(())
-        // Real impl would invoke the package manager once here.
     }
 }

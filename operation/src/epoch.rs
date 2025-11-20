@@ -4,8 +4,8 @@ use displaydoc::Display;
 use thiserror::Error;
 
 use crate::{
-    ops::package::{PackageOperationAtom, PackageOperationDelta},
-    traits::{OperationAtomTrait, OperationDeltaTrait, OperationTrait},
+    ops::package::{PackageOperationAtom, PackageOperationDelta, PackageSpec},
+    spec::OperationSpec,
     Operation, OperationId, OperationTree, PackageOperation,
 };
 
@@ -239,7 +239,7 @@ impl EpochOperations {
         let package_atoms = if self.package_ops.is_empty() {
             Vec::new()
         } else {
-            PackageOperation::atoms(self.package_ops)
+            PackageSpec::atoms(self.package_ops)
         };
         EpochOperationAtoms { package_atoms }
     }
@@ -252,11 +252,11 @@ pub struct EpochOperationDeltas {
 }
 
 impl EpochOperationAtoms {
-    pub fn deltas(self) -> EpochOperationDeltas {
+    pub async fn deltas(self) -> EpochOperationDeltas {
         let mut package_delta: Vec<PackageOperationDelta> = Vec::new();
 
         for atom in self.package_atoms {
-            if let Some(d) = atom.delta() {
+            if let Some(d) = PackageSpec::delta(atom).await {
                 package_delta.push(d);
             }
         }
@@ -268,13 +268,13 @@ impl EpochOperationAtoms {
 #[derive(Error, Debug, Display)]
 pub enum OperationDeltaApplyError {
     /// Package delta apply failed
-    Package(<PackageOperationDelta as OperationDeltaTrait>::Error),
+    Package(<PackageSpec as OperationSpec>::ApplyError),
 }
 
 impl EpochOperationDeltas {
     /// Apply all deltas for this epoch, per operation type.
     pub async fn apply(self) -> Result<(), OperationDeltaApplyError> {
-        PackageOperationDelta::apply(self.package_delta)
+        PackageSpec::apply(self.package_delta)
             .await
             .map_err(OperationDeltaApplyError::Package)?;
         Ok(())

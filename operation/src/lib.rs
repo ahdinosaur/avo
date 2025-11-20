@@ -16,7 +16,7 @@
 
 mod epoch;
 pub mod ops;
-pub mod traits;
+mod spec;
 
 use displaydoc::Display;
 use thiserror::Error;
@@ -48,31 +48,17 @@ pub async fn apply(operation: OperationTree) -> Result<(), ApplyError> {
 
     for epoch_ops in epochs.0 {
         let atoms = epoch_ops.atoms();
-        let deltas = atoms.deltas();
+        let deltas = atoms.deltas().await;
         deltas.apply().await?;
     }
 
     Ok(())
 }
 
-/// The kind/class of an operation. Useful for future extensibility.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum OperationKind {
-    Package,
-}
-
-/// Concrete, ungrouped operation enum.
+/// Enum of all operation types.
 #[derive(Debug, Clone)]
 pub enum Operation {
     Package(PackageOperation),
-}
-
-impl Operation {
-    fn kind(&self) -> OperationKind {
-        match self {
-            Operation::Package(_) => OperationKind::Package,
-        }
-    }
 }
 
 /// Identifier for an operation event.
