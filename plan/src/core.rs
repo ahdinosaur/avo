@@ -1,4 +1,4 @@
-use ludis_operation::{Operation, OperationTrait, PackageOperation};
+use ludis_operation::{ops::package::PackageOperation, traits::OperationTrait, Operation};
 use ludis_params::{validate, ParamValues};
 use rimu::Spanned;
 
