@@ -1,9 +1,9 @@
 use std::{path::PathBuf, string::FromUtf8Error};
 
+use displaydoc::Display;
 use ludis_operation::{OperationId, OperationTree};
 use ludis_params::{validate, ParamValues, ParamsValidationError};
 use ludis_store::{Store, StoreError, StoreItemId};
-use displaydoc::Display;
 use rimu::SerdeValueError;
 use rimu::Spanned;
 use thiserror::Error;
@@ -44,12 +44,13 @@ pub enum PlanError {
 }
 
 /// Top-level planning routine: load a plan, validate parameters, and evaluate to `OperationTree`.
+#[tracing::instrument(skip_all)]
 pub async fn plan(
     plan_id: PlanId,
     param_values: Option<Spanned<ParamValues>>,
     store: &mut Store,
 ) -> Result<OperationTree, PlanError> {
-    println!("Plan ---");
+    tracing::debug!("Plan {plan_id:?} with params {param_values:?}");
 
     let operations = plan_recursive(plan_id, param_values.as_ref(), store).await?;
     let operation = OperationTree::Branch {
@@ -59,7 +60,8 @@ pub async fn plan(
         children: operations,
     };
 
-    println!("Operation: {:?}", operation);
+    tracing::trace!("Planned operation tree: {:?}", operation);
+
     Ok(operation)
 }
 

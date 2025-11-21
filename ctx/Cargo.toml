@@ -1,11 +1,9 @@
 [package]
-name = "ludis-store"
+name = "ludis-ctx"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-async-trait.workspace = true
-displaydoc.workspace = true
+ludis-http = { path = "../http", version = "0.1" }
 thiserror.workspace = true
 tracing.workspace = true
-tokio.workspace = true

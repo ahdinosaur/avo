@@ -1,6 +1,10 @@
 use async_trait::async_trait;
 use displaydoc::Display;
-use std::{fmt::Debug, io, path::PathBuf};
+use std::{
+    fmt::Debug,
+    io,
+    path::{Path, PathBuf},
+};
 use thiserror::Error;
 
 #[async_trait]
@@ -30,7 +34,7 @@ pub enum StoreError {
 }
 
 impl Store {
-    pub fn new(cache_dir: PathBuf) -> Self {
+    pub fn new(cache_dir: &Path) -> Self {
         Self {
             local_file_store: LocalFileStore::new(cache_dir.join("files")),
         }

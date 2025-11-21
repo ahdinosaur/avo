@@ -1,5 +1,6 @@
 use std::{env::current_dir, time::Duration};
 
+use ludis_ctx::Context;
 use ludis_machine::Machine;
 use ludis_system::{Arch, Linux, Os};
 use ludis_vm::{run, RunOptions, VmVolume};
@@ -29,5 +30,6 @@ async fn main() {
         command,
         timeout,
     };
-    run(options).await.unwrap();
+    let mut ctx = Context::create().unwrap();
+    run(&mut ctx, options).await.unwrap();
 }

@@ -1,16 +1,14 @@
 mod cmd;
 mod context;
-mod fs;
-mod http;
 mod image;
 mod instance;
 mod paths;
 mod qemu;
-mod ssh;
 mod utils;
 
 pub use crate::instance::{VmPort, VmVolume};
 
+use ludis_ctx::Context as BaseContext;
 use ludis_machine::Machine;
 use std::time::Duration;
 use thiserror::Error;
@@ -39,9 +37,8 @@ pub struct RunOptions<'a> {
     pub timeout: Duration,
 }
 
-pub async fn run(options: RunOptions<'_>) -> Result<(), VmError> {
-    install_tracing();
-    let mut ctx = Context::new()?;
+pub async fn run(ctx: &mut BaseContext, options: RunOptions<'_>) -> Result<(), VmError> {
+    let mut ctx = Context::create(ctx)?;
 
     let RunOptions {
         instance_id,
@@ -81,15 +78,4 @@ pub async fn run(options: RunOptions<'_>) -> Result<(), VmError> {
     instance.exec(command, timeout).await?;
 
     Ok(())
-}
-
-fn install_tracing() {
-    let subscriber = tracing_subscriber::FmtSubscriber::builder()
-        // all spans/events with a level higher than TRACE (e.g, debug, info, warn, etc.)
-        // will be written to stdout.
-        .with_max_level(tracing::Level::TRACE)
-        // builds the subscriber.
-        .finish();
-
-    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 }

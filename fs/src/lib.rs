@@ -1,6 +1,7 @@
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+
 use thiserror::Error;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
@@ -118,7 +119,6 @@ pub async fn create_dir<P: AsRef<Path>>(path: P) -> Result<(), FsError> {
         })
 }
 
-#[allow(dead_code)]
 pub async fn copy_dir<F: AsRef<Path>, T: AsRef<Path>>(from: F, to: T) -> Result<(), FsError> {
     let from_path = from.as_ref();
     let to_path = to.as_ref();
@@ -154,14 +154,12 @@ pub async fn copy_dir<F: AsRef<Path>, T: AsRef<Path>>(from: F, to: T) -> Result<
     }
 }
 
-#[allow(dead_code)]
 pub async fn read_dir<P: AsRef<Path>>(path: P) -> Result<Vec<PathBuf>, FsError> {
     let p = path.as_ref();
     let mut dir = fs::read_dir(p).await.map_err(|source| FsError::ReadDir {
         path: p.to_path_buf(),
         source,
     })?;
-
     let mut entries = Vec::new();
     while let Some(entry) = dir
         .next_entry()
@@ -189,7 +187,6 @@ pub async fn remove_dir<P: AsRef<Path>>(path: P) -> Result<(), FsError> {
 pub async fn setup_directory_access<P: AsRef<Path>>(path: P) -> Result<(), FsError> {
     let p = path.as_ref();
     create_dir(p).await?;
-
     let permission = fs::metadata(p)
         .await
         .map_err(|source| FsError::Metadata {
@@ -197,19 +194,16 @@ pub async fn setup_directory_access<P: AsRef<Path>>(path: P) -> Result<(), FsErr
             source,
         })?
         .permissions();
-
     if permission.readonly() {
         return Err(FsError::ReadOnlyDir {
             path: p.to_path_buf(),
         });
     }
-
     Ok(())
 }
 
 pub async fn set_file_mode<P: AsRef<Path>>(path: P, mode: u32) -> Result<(), FsError> {
     let p = path.as_ref();
-
     let mut permissions = fs::metadata(p)
         .await
         .map_err(|source| FsError::Metadata {
@@ -217,16 +211,13 @@ pub async fn set_file_mode<P: AsRef<Path>>(path: P, mode: u32) -> Result<(), FsE
             source,
         })?
         .permissions();
-
     permissions.set_mode(mode);
-
     fs::set_permissions(p, permissions)
         .await
         .map_err(|source| FsError::SetPermissions {
             path: p.to_path_buf(),
             source,
         })?;
-
     Ok(())
 }
 

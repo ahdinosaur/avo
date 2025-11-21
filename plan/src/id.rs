@@ -1,6 +1,9 @@
 use ludis_store::StoreItemId;
 use rimu::SourceId;
-use std::path::{Path, PathBuf};
+use std::{
+    fmt::Display,
+    path::{Path, PathBuf},
+};
 use url::Url;
 
 #[derive(Debug, Clone)]
@@ -25,6 +28,15 @@ fn relative<P: AsRef<Path>>(current_path: &Path, next_path: P) -> PathBuf {
         .parent()
         .unwrap_or(&PathBuf::default())
         .join(next_path)
+}
+
+impl Display for PlanId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PlanId::Path(path) => write!(f, "path({})", path.display()),
+            PlanId::Git(url, path) => write!(f, "git({}, {})", url, path.display()),
+        }
+    }
 }
 
 impl From<PlanId> for StoreItemId {

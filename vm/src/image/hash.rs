@@ -1,11 +1,9 @@
+use ludis_fs::{self as fs, FsError};
 use std::path::Path;
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
 
-use crate::{
-    fs::{self, FsError},
-    image::index::{VmImageHashRef, VmImageIndex},
-};
+use crate::image::index::{VmImageHashRef, VmImageIndex};
 
 #[derive(Error, Debug)]
 pub enum VmImageHashError {

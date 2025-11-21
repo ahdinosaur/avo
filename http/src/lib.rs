@@ -1,6 +1,8 @@
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
+
 use ludis_fs::{self as fs, FsError};
 use reqwest::Client;
-use std::path::{Path, PathBuf};
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
 use tokio_stream::StreamExt;
@@ -66,14 +68,11 @@ impl HttpClient {
         file_path: P,
     ) -> Result<(), HttpError> {
         let file_path = file_path.as_ref();
-
         if fs::path_exists(file_path).await? {
             return Ok(());
         }
 
-        let mut temp_file = PathBuf::from(file_path);
-        temp_file.add_extension("tmp");
-
+        let temp_file = with_added_extension(file_path, "tmp");
         if fs::path_exists(&temp_file).await? {
             fs::remove_file(&temp_file).await?;
         }
@@ -86,7 +85,6 @@ impl HttpClient {
             .map_err(HttpError::Request)?;
 
         let mut file = fs::create_file(&temp_file).await?;
-
         let mut stream = resp.bytes_stream();
 
         while let Some(chunk) = stream.next().await {
@@ -99,14 +97,12 @@ impl HttpClient {
                 })?;
         }
 
-        // Ensure all data is flushed before renaming
         file.flush().await.map_err(|source| HttpError::Write {
             path: temp_file.clone(),
             source,
         })?;
 
         fs::rename_file(&temp_file, file_path).await?;
-
         Ok(())
     }
 
@@ -121,4 +117,15 @@ impl HttpClient {
             .await
             .map_err(HttpError::Request)
     }
+}
+
+// Produce "<orig_ext>.<added>" if an extension exists, otherwise "added".
+fn with_added_extension(path: &Path, added: &str) -> PathBuf {
+    let mut new_ext = OsString::new();
+    if let Some(ext) = path.extension() {
+        new_ext.push(ext);
+        new_ext.push(".");
+    }
+    new_ext.push(added);
+    path.with_extension(new_ext)
 }
