@@ -1,8 +1,9 @@
 [package]
-name = "ludis-env"
+name = "ludis-ctx"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+ludis-http = { path = "../http", version = "0.1" }
 thiserror.workspace = true
 tracing.workspace = true

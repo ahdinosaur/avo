@@ -8,6 +8,7 @@ mod utils;
 
 pub use crate::instance::{VmPort, VmVolume};
 
+use ludis_ctx::Context as BaseContext;
 use ludis_machine::Machine;
 use std::time::Duration;
 use thiserror::Error;
@@ -36,8 +37,8 @@ pub struct RunOptions<'a> {
     pub timeout: Duration,
 }
 
-pub async fn run(options: RunOptions<'_>) -> Result<(), VmError> {
-    let mut ctx = Context::new()?;
+pub async fn run(ctx: &mut BaseContext, options: RunOptions<'_>) -> Result<(), VmError> {
+    let mut ctx = Context::create(ctx)?;
 
     let RunOptions {
         instance_id,

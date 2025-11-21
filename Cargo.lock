@@ -1862,7 +1862,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "comfy-table",
- "ludis-env",
+ "ludis-ctx",
  "ludis-machine",
  "ludis-operation",
  "ludis-params",
@@ -1884,7 +1884,7 @@ name = "ludis-apply"
 version = "0.1.0"
 dependencies = [
  "clap",
- "ludis-env",
+ "ludis-ctx",
  "ludis-operation",
  "ludis-params",
  "ludis-plan",
@@ -1901,9 +1901,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "ludis-env"
+name = "ludis-ctx"
 version = "0.1.0"
 dependencies = [
+ "ludis-http",
  "thiserror 2.0.17",
  "tracing",
 ]
@@ -2017,7 +2018,7 @@ dependencies = [
 name = "ludis-vm"
 version = "0.1.0"
 dependencies = [
- "ludis-env",
+ "ludis-ctx",
  "ludis-fs",
  "ludis-http",
  "ludis-machine",

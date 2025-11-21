@@ -1,20 +1,20 @@
-use ludis_env::Environment;
+use ludis_ctx::Paths as BasePaths;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use which::which_global;
 
 #[derive(Debug, Clone)]
 pub struct Paths {
-    env: Environment,
+    base: BasePaths,
 }
 
 impl Paths {
-    pub fn new(env: Environment) -> Self {
-        Self { env }
+    pub fn new(base: BasePaths) -> Self {
+        Self { base }
     }
 
     pub fn images_dir(&self) -> PathBuf {
-        self.env.cache_dir().join("vm/images")
+        self.base.cache_dir().join("vm/images")
     }
 
     pub fn image_file(&self, image_file_name: &str) -> PathBuf {
@@ -22,7 +22,7 @@ impl Paths {
     }
 
     pub fn instances_dir(&self) -> PathBuf {
-        self.env.data_dir().join("vm/instances")
+        self.base.data_dir().join("vm/instances")
     }
 
     pub fn instance_dir(&self, instance_id: &str) -> PathBuf {

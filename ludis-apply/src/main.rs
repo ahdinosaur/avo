@@ -1,5 +1,5 @@
 use clap::Parser;
-use ludis_env::{Environment, EnvironmentError};
+use ludis_ctx::{Context, ContextError};
 use ludis_operation::{apply as apply_operations, ApplyError};
 use ludis_params::{ParamValues, ParamValuesFromTypeError};
 use ludis_plan::{self, plan, PlanError, PlanId};
@@ -28,8 +28,8 @@ struct Cli {
 
 #[derive(Error, Debug)]
 enum AppError {
-    #[error("JSON parameters parse failed: {0}")]
-    Env(#[from] EnvironmentError),
+    #[error(transparent)]
+    Context(#[from] ContextError),
 
     #[error("JSON parameters parse failed: {0}")]
     Json(#[from] serde_json::Error),
@@ -59,8 +59,8 @@ async fn main() {
 async fn run(cli: Cli) -> Result<(), AppError> {
     info!("starting");
 
-    let env = Environment::create()?;
-    let mut store = Store::new(env.cache_dir());
+    let env = Context::create()?;
+    let mut store = Store::new(env.paths().cache_dir());
 
     // Resolve plan id
     let plan_path = cli.plan.canonicalize().unwrap_or(cli.plan.clone());

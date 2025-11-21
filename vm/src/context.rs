@@ -1,4 +1,4 @@
-use ludis_env::EnvironmentError;
+use ludis_ctx::{Context as BaseContext, ContextError as BaseContextError};
 use thiserror::Error;
 
 use crate::paths::{ExecutablePaths, ExecutablePathsError, Paths};
@@ -10,7 +10,7 @@ pub enum ContextError {
     Http(#[from] HttpError),
 
     #[error(transparent)]
-    Env(#[from] EnvironmentError),
+    Context(#[from] BaseContextError),
 
     #[error(transparent)]
     ExecutablePaths(#[from] ExecutablePathsError),
@@ -24,10 +24,9 @@ pub struct Context {
 }
 
 impl Context {
-    pub fn new() -> Result<Self, ContextError> {
-        let http_client = HttpClient::new()?;
-        let env = ludis_env::Environment::create()?;
-        let paths = Paths::new(env);
+    pub fn create(base: &mut BaseContext) -> Result<Self, ContextError> {
+        let http_client = base.http_client().clone();
+        let paths = Paths::new(base.paths().clone());
         let executables = ExecutablePaths::new()?;
         Ok(Self {
             http_client,

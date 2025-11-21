@@ -4,25 +4,24 @@ use std::{
     env::{self, VarError},
     path::{Path, PathBuf},
 };
-
 use thiserror::Error;
 
 const PROJECT_NAME: &str = "ludis";
 
 #[derive(Debug, Clone)]
-pub struct Environment {
+pub struct Paths {
     data_dir: PathBuf,
     cache_dir: PathBuf,
     runtime_dir: PathBuf,
 }
 
 #[derive(Error, Debug, Clone)]
-pub enum EnvironmentError {
+pub enum PathsError {
     #[error(transparent)]
     Var(#[from] VarError),
 }
 
-impl Environment {
+impl Paths {
     pub fn new(data_dir: PathBuf, cache_dir: PathBuf, runtime_dir: PathBuf) -> Self {
         Self {
             data_dir,
@@ -32,20 +31,18 @@ impl Environment {
     }
 
     #[cfg(target_os = "linux")]
-    pub fn create() -> Result<Environment, EnvironmentError> {
+    pub fn create() -> Result<Paths, PathsError> {
         let data_dirs: PathBuf = Self::var("XDG_DATA_HOME")
             .or_else(|_| Self::var("HOME").map(|home| format!("{home}/.local/share")))
             .map(From::from)?;
-
         let cache_dirs: PathBuf = Self::var("XDG_CACHE_HOME")
             .or_else(|_| Self::var("HOME").map(|home| format!("{home}/.cache")))
             .map(From::from)?;
-
         let runtime_dirs: PathBuf = Self::var("XDG_RUNTIME_DIR")
             .or_else(|_| Self::var("UID").map(|uid| format!("/run/user/{uid}")))
             .map(From::from)?;
 
-        Ok(Environment::new(
+        Ok(Paths::new(
             data_dirs.join(PROJECT_NAME),
             cache_dirs.join(PROJECT_NAME),
             runtime_dirs.join(PROJECT_NAME),
@@ -53,21 +50,20 @@ impl Environment {
     }
 
     #[cfg(target_os = "macos")]
-    pub fn create() -> Result<Environment, EnvironmentError> {
+    pub fn create() -> Result<Paths, PathsError> {
         let home_dir: PathBuf = Self::var("HOME").map(From::from)?;
-
-        Ok(Environment::new(
+        Ok(Paths::new(
             home_dir.join("Library").join(PROJECT_NAME),
             home_dir.join("Library").join("Caches").join(PROJECT_NAME),
             home_dir.join("Library").join("Caches").join(PROJECT_NAME),
         ))
     }
+
     #[cfg(target_os = "windows")]
-    pub fn create() -> Result<Environment, EnvironmentError> {
+    pub fn create() -> Result<Paths, PathsError> {
         let local_app_data_dir: PathBuf = Self::var("LOCALAPPDATA").map(From::from)?;
         let temp_dir: PathBuf = Self::var("TEMP").map(From::from)?;
-
-        Ok(Environment::new(
+        Ok(Paths::new(
             local_app_data_dir.join(PROJECT_NAME),
             temp_dir.join(PROJECT_NAME),
             temp_dir.join(PROJECT_NAME),
@@ -77,16 +73,14 @@ impl Environment {
     pub fn data_dir(&self) -> &Path {
         &self.data_dir
     }
-
     pub fn cache_dir(&self) -> &Path {
         &self.cache_dir
     }
-
     pub fn runtime_dir(&self) -> &Path {
         &self.runtime_dir
     }
 
-    fn var(var: &str) -> Result<String, EnvironmentError> {
+    fn var(var: &str) -> Result<String, PathsError> {
         env::var(var).map_err(From::from)
     }
 }
