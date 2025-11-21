@@ -48,6 +48,7 @@ enum AppError {
 async fn main() {
     let cli = Cli::parse();
     install_tracing(&cli.log);
+    debug!(cli = ?cli, "parsed cli");
 
     if let Err(err) = run(cli).await {
         error!("{err}");
@@ -57,7 +58,6 @@ async fn main() {
 
 async fn run(cli: Cli) -> Result<(), AppError> {
     info!("starting");
-    debug!(cli = ?cli, "parsed cli");
 
     let env = Environment::create()?;
     let mut store = Store::new(env.cache_dir());
