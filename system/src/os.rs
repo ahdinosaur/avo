@@ -6,6 +6,7 @@ use serde::{de, Deserialize, Serialize};
 #[serde(tag = "type")]
 #[non_exhaustive]
 pub enum Os {
+    #[serde(rename = "linux")]
     Linux(Linux),
 }
 
@@ -13,15 +14,18 @@ pub enum Os {
 #[serde(tag = "linux")]
 #[non_exhaustive]
 pub enum Linux {
+    #[serde(rename = "ubuntu")]
     Ubuntu {
         #[serde(deserialize_with = "validate_ubuntu_version")]
         #[serde(rename = "ubuntu")]
         version: String,
     },
+    #[serde(rename = "debian")]
     Debian {
         #[serde(rename = "debian")]
         version: u8,
     },
+    #[serde(rename = "arch")]
     Arch, // no version
 }
 

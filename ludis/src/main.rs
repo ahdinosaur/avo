@@ -1,5 +1,6 @@
 use clap::Parser;
-use ludis::{install_tracing, run, Cli};
+use ludis::{run, Cli};
+use tracing_subscriber::{fmt, EnvFilter};
 
 #[tokio::main]
 async fn main() {
@@ -10,4 +11,14 @@ async fn main() {
         tracing::error!("{err}");
         std::process::exit(1);
     }
+}
+
+pub fn install_tracing(level: &str) {
+    let filter = EnvFilter::try_new(level).unwrap_or_else(|_| EnvFilter::new("info"));
+    fmt()
+        .with_env_filter(filter)
+        .with_target(true)
+        .with_level(true)
+        .with_ansi(false)
+        .init();
 }

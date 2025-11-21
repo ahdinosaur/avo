@@ -9,7 +9,7 @@ use thiserror::Error;
 use tokio::fs::read_to_string;
 
 #[derive(Error, Debug)]
-pub enum MachinesError {
+pub enum ConfigError {
     #[error("machines file not found at: {0}")]
     NotFound(PathBuf),
 
@@ -35,12 +35,13 @@ pub enum MachinesError {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct MachinesConfigToml {
+struct ConfigToml {
+    #[serde(default)]
     pub machines: BTreeMap<String, MachineConfigToml>,
 }
 
 #[derive(Debug, Clone)]
-pub struct MachinesConfig {
+pub struct Config {
     pub path: PathBuf,
     pub machines: BTreeMap<String, MachineConfig>,
 }
@@ -58,11 +59,10 @@ pub struct MachineConfig {
     pub plan: PlanId,
 }
 
-impl MachinesConfig {
-    pub async fn load() -> Result<Self, MachinesError> {
-        let path = Self::discover_path()?;
+impl Config {
+    pub async fn load(path: &Path) -> Result<Self, ConfigError> {
         let config = Self::load_config(&path).await?;
-        let MachinesConfigToml { machines } = config;
+        let ConfigToml { machines } = config;
         let machines = machines
             .into_iter()
             .map(|(name, config)| {
@@ -76,28 +76,28 @@ impl MachinesConfig {
                 ))
             })
             .collect::<Result<_, _>>()?;
-        Ok(MachinesConfig {
+        Ok(Config {
             path: path.to_owned(),
             machines,
         })
     }
 
-    pub fn get(&self, id: &str) -> Option<&MachineConfig> {
+    pub fn get_machine(&self, id: &str) -> Option<&MachineConfig> {
         self.machines.get(id)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&String, &MachineConfig)> {
-        self.machines.iter()
+    pub fn machines(&self) -> &BTreeMap<String, MachineConfig> {
+        &self.machines
     }
 
-    pub fn local(&self) -> Option<&MachineConfig> {
+    pub fn local_machine(&self) -> Option<&MachineConfig> {
         let local_hostname = Hostname::get().ok()?;
         self.machines
             .values()
             .find(|cfg| cfg.machine.hostname == local_hostname)
     }
 
-    pub fn print(&self) {
+    pub fn print_machines(&self) {
         let mut table = Table::new();
         table
             .load_preset(comfy_table::presets::UTF8_FULL)
@@ -105,7 +105,7 @@ impl MachinesConfig {
             .set_content_arrangement(comfy_table::ContentArrangement::Dynamic)
             .set_header(vec!["id", "plan", "hostname", "arch", "os"]);
 
-        for (machine_id, config) in self.iter() {
+        for (machine_id, config) in self.machines.iter() {
             let MachineConfig { machine, plan } = config;
             let Machine {
                 hostname,
@@ -125,43 +125,33 @@ impl MachinesConfig {
         println!("{table}")
     }
 
-    async fn load_config(path: &Path) -> Result<MachinesConfigToml, MachinesError> {
-        let string = read_to_string(path)
+    async fn load_config(path: &Path) -> Result<ConfigToml, ConfigError> {
+        let path = if path.is_dir() {
+            path.join("ludis.toml")
+        } else {
+            path.to_owned()
+        };
+        let string = read_to_string(&path)
             .await
-            .map_err(|source| MachinesError::Read {
+            .map_err(|source| ConfigError::Read {
                 path: path.to_owned(),
                 source,
             })?;
-        let config = toml::from_str(&string).map_err(|source| MachinesError::Parse {
+        let config = toml::from_str(&string).map_err(|source| ConfigError::Parse {
             path: path.to_owned(),
             source,
         })?;
         Ok(config)
     }
 
-    fn discover_path() -> Result<PathBuf, MachinesError> {
-        if let Ok(explicit) = std::env::var("LUDIS_MACHINES_PATH") {
-            let path = PathBuf::from(explicit);
-            if path.exists() {
-                return Ok(path);
-            }
-        }
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let path = cwd.join("machines.toml");
-        if path.exists() {
-            return Ok(path);
-        }
-        Err(MachinesError::NotFound(path))
-    }
-
-    fn resolve_plan_id(base_path: &Path, plan_path: &Path) -> Result<PlanId, MachinesError> {
+    fn resolve_plan_id(base_path: &Path, plan_path: &Path) -> Result<PlanId, ConfigError> {
         let plan_path = if plan_path.is_absolute() {
             plan_path.to_path_buf()
         } else {
             base_path
                 .parent()
                 .map(|parent| parent.join(plan_path))
-                .ok_or_else(|| MachinesError::ResolvingPlanPath {
+                .ok_or_else(|| ConfigError::ResolvingPlanPath {
                     base_path: base_path.to_owned(),
                     plan_path: plan_path.to_owned(),
                 })?

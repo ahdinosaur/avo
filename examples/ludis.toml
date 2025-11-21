@@ -1,0 +1,6 @@
+[machines.a]
+id = "a"
+plan = "./simple.ludis"
+hostname = "amber-aura"
+os = { type = "linux", linux = "debian", debian = 13 }
+arch = "x86-64"
