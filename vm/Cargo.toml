@@ -6,11 +6,10 @@ edition = "2024"
 [dependencies]
 ludis-env = { path = "../env", version = "0.1" }
 ludis-fs = { path = "../fs", version = "0.1" }
+ludis-http = { path = "../http", version = "0.1" }
 ludis-machine = { path = "../machine", version = "0.1" }
 ludis-ssh = { path = "../ssh", version = "0.1" }
 ludis-system = { path = "../system", version = "0.1" }
-cuid2 = "0.1.4"
-reqwest = { version = "0.12.24", features = ["brotli", "gzip", "stream"] }
 russh.workspace = true
 serde.workspace = true
 serde-saphyr = "0.0.8-alpha-pre"
@@ -18,7 +17,6 @@ serde_json = "1"
 sha2 = "0.10.9"
 thiserror.workspace = true
 tokio.workspace = true
-tokio-stream = "0.1.17"
 toml = "0.9.8"
 which = "8.0.0"
 tracing.workspace = true

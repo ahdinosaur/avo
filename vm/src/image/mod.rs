@@ -1,4 +1,5 @@
 use ludis_fs::{self as fs, FsError};
+use ludis_http::HttpError;
 use ludis_machine::Machine;
 use ludis_system::{Arch, Linux, Os};
 use serde::{Deserialize, Serialize};
@@ -11,7 +12,6 @@ mod index;
 
 use crate::{
     context::Context,
-    http::HttpError,
     image::{
         hash::{VmImageHash, VmImageHashError},
         index::{VmImageIndex, VmImagesList},

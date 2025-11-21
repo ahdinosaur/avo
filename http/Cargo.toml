@@ -1,0 +1,12 @@
+[package]
+name = "ludis-http"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ludis-fs = { path = "../fs", version = "0.1" }
+reqwest = { version = "0.12.24", features = ["brotli", "gzip", "stream"] }
+thiserror.workspace = true
+tokio.workspace = true
+tokio-stream = "0.1.17"
+tracing.workspace = true

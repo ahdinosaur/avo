@@ -1,6 +1,5 @@
 mod cmd;
 mod context;
-mod http;
 mod image;
 mod instance;
 mod paths;

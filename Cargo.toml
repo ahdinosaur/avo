@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["env", "fs",
+members = ["env", "fs", "http",
   "ludis", "ludis-apply", "machine", "operation", "params", "plan", "rimu-interop", "ssh", "store", "system", "vm",
 ]
 
