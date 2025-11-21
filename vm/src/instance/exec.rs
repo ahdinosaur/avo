@@ -1,11 +1,9 @@
+use ludis_ssh::{Ssh, SshConnectOptions, SshError, SshVolume};
 use std::{net::Ipv4Addr, sync::Arc, time::Duration};
 use thiserror::Error;
 use tracing::info;
 
-use crate::{
-    instance::Instance,
-    ssh::{Ssh, SshConnectOptions, SshError},
-};
+use crate::instance::Instance;
 
 #[derive(Error, Debug)]
 pub enum InstanceExecError {
@@ -33,14 +31,16 @@ pub(super) async fn instance_exec(
     .await?;
 
     for volume in volumes {
-        info!("ssh.sync: {:?}", volume);
-        ssh.sync(volume).await?;
+        let v = SshVolume {
+            source: volume.source.clone(),
+            dest: volume.dest.clone(),
+        };
+        info!("ssh.sync: {:?}", v);
+        ssh.sync(v).await?;
     }
 
     info!("ssh.command: {}", command);
     let exit_code = ssh.command(command).await?;
-
     ssh.disconnect().await?;
-
     Ok(exit_code)
 }

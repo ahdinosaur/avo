@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["env",
-  "ludis", "ludis-apply", "machine", "operation", "params", "plan", "rimu-interop", "store", "system", "vm",
+  "ludis", "ludis-apply", "machine", "operation", "params", "plan", "rimu-interop", "ssh", "store", "system", "vm",
 ]
 
 [workspace.dependencies]
@@ -10,6 +10,7 @@ clap = { version = "4.5.52", features = ["derive"] }
 displaydoc = "0.2.5"
 indexmap = "2.12.0"
 rimu = { version = "0.2.0", git = "https://github.com/ahdinosaur/rimu" }
+russh = "0.54.6"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = { version = "1.0.145", features = ["indexmap"] }
 thiserror = "2.0.17"

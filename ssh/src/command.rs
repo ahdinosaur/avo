@@ -101,11 +101,6 @@ pub(super) async fn ssh_command(
     let _ = channel.eof().await;
     let _ = channel.close().await;
 
-    // Close the transport after command completion.
-    let _ = handle
-        .disconnect(russh::Disconnect::ByApplication, "", "English")
-        .await;
-
     let code = exit_code.unwrap_or(255);
 
     info!(exit_code = code, "Remote command completed");

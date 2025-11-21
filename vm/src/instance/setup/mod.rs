@@ -4,8 +4,10 @@ mod overlay;
 mod ovmf;
 
 use ludis_machine::{Machine, MachineVmOptions};
+use ludis_ssh::{SshKeypair, SshKeypairError};
 use thiserror::Error;
 
+use crate::utils::get_free_tcp_port;
 use crate::{
     context::Context,
     fs::{self, FsError},
@@ -19,8 +21,6 @@ use crate::{
         },
         Instance, InstancePaths, VmPort, VmVolume,
     },
-    ssh::{SshKeypair, SshKeypairError},
-    utils::get_free_tcp_port,
 };
 
 pub struct InstanceSetupOptions<'a> {
@@ -69,7 +69,6 @@ pub async fn setup_instance(
     } = options;
 
     let source_image = get_image(ctx, machine).await?;
-
     let MachineVmOptions {
         memory_size,
         cpu_count,
@@ -122,7 +121,6 @@ pub async fn setup_instance(
         volumes,
         ports,
         graphics,
-        // TODO set via global ludis config
         kvm: None,
     })
 }

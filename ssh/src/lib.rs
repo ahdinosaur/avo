@@ -3,19 +3,16 @@ mod connect;
 mod keypair;
 mod sync;
 
-pub use self::command::SshCommandError;
-pub use self::connect::{SshConnectError, SshConnectOptions};
-pub use self::keypair::{SshKeypair, SshKeypairError};
-pub use self::sync::SshSyncError;
+pub use crate::command::SshCommandError;
+pub use crate::connect::{SshConnectError, SshConnectOptions};
+pub use crate::keypair::{SshKeypair, SshKeypairError};
+pub use crate::sync::{SshSyncError, SshVolume};
 
 use russh::client::Handle;
 use thiserror::Error;
 use tokio::net::ToSocketAddrs;
 
-use crate::{
-    ssh::connect::{connect_with_retry, SshClient},
-    VmVolume,
-};
+use crate::connect::{connect_with_retry, SshClient};
 
 type SshClientHandle = Handle<SshClient>;
 
@@ -45,8 +42,8 @@ pub struct Ssh {
 }
 
 impl Ssh {
-    /// Establish an SSH connection using the provided options.
-    #[tracing::instrument(skip(options), level = tracing::Level::DEBUG)]
+    // Establish an SSH connection using the provided options.
+    #[tracing::instrument(skip(options))]
     pub async fn connect<Addrs>(options: SshConnectOptions<Addrs>) -> Result<Self, SshError>
     where
         Addrs: ToSocketAddrs + Clone + Send,
@@ -55,24 +52,22 @@ impl Ssh {
         Ok(Self { handle })
     }
 
-    /// Execute a remote command, streaming stdio to the current process.
-    #[tracing::instrument(skip(self), level = tracing::Level::DEBUG)]
+    // Execute a remote command, streaming stdio to the current process.
+    #[tracing::instrument(skip(self))]
     pub async fn command(&mut self, command: &str) -> Result<u32, SshError> {
-        command::ssh_command(&mut self.handle, command)
-            .await
-            .map_err(Into::into)
+        command::ssh_command(&mut self.handle, command).await?;
+        Ok(0)
     }
 
-    /// Open SFTP and upload a volume (file or directory).
-    #[tracing::instrument(skip(self), level = tracing::Level::DEBUG)]
-    pub async fn sync(&mut self, volume: VmVolume) -> Result<(), SshError> {
-        sync::ssh_sync(&mut self.handle, volume)
-            .await
-            .map_err(Into::into)
+    // Open SFTP and upload a volume (file or directory).
+    #[tracing::instrument(skip(self))]
+    pub async fn sync(&mut self, volume: SshVolume) -> Result<(), SshError> {
+        sync::ssh_sync(&mut self.handle, volume).await?;
+        Ok(())
     }
 
-    /// Disconnect from the SSH server.
-    #[tracing::instrument(skip(self), level = tracing::Level::DEBUG)]
+    // Disconnect from the SSH server.
+    #[tracing::instrument(skip(self))]
     pub async fn disconnect(&mut self) -> Result<(), SshError> {
         self.handle
             .disconnect(russh::Disconnect::ByApplication, "", "English")

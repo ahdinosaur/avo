@@ -8,10 +8,8 @@ pub use self::paths::*;
 pub use self::setup::*;
 pub use self::start::*;
 
-use ludis_system::Arch;
-use ludis_system::CpuCount;
-use ludis_system::Linux;
-use ludis_system::MemorySize;
+use ludis_ssh::{SshKeypair, SshKeypairError};
+use ludis_system::{Arch, CpuCount, Linux, MemorySize};
 use nix::{
     sys::signal::{kill, Signal},
     unistd::Pid,
@@ -25,7 +23,6 @@ use thiserror::Error;
 use crate::context::Context;
 use crate::fs::{self, FsError};
 use crate::instance::exec::InstanceExecError;
-use crate::ssh::{SshKeypair, SshKeypairError};
 use crate::utils::is_tcp_port_open;
 
 #[derive(Error, Debug)]
@@ -175,12 +172,10 @@ pub struct VmPort {
 impl Display for VmPort {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut wrote_left = false;
-
         if let Some(ip) = self.host_ip {
             write!(f, "{}", ip)?;
             wrote_left = true;
         }
-
         if let Some(port) = self.host_port {
             if wrote_left {
                 write!(f, ":")?;
@@ -188,11 +183,9 @@ impl Display for VmPort {
             write!(f, "{}", port)?;
             wrote_left = true;
         }
-
         if wrote_left {
             write!(f, "->")?;
         }
-
         write!(f, "{}/tcp", self.vm_port)
     }
 }

@@ -6,7 +6,6 @@ mod image;
 mod instance;
 mod paths;
 mod qemu;
-mod ssh;
 mod utils;
 
 pub use crate::instance::{VmPort, VmVolume};
