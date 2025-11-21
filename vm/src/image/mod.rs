@@ -1,8 +1,8 @@
-use std::path::PathBuf;
-
+use ludis_fs::{self as fs, FsError};
 use ludis_machine::Machine;
 use ludis_system::{Arch, Linux, Os};
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use thiserror::Error;
 use tracing::info;
 
@@ -11,7 +11,6 @@ mod index;
 
 use crate::{
     context::Context,
-    fs::{self, FsError},
     http::HttpError,
     image::{
         hash::{VmImageHash, VmImageHashError},

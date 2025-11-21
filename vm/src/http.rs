@@ -1,7 +1,6 @@
-use std::path::{Path, PathBuf};
-
-use crate::fs::{self as fs, FsError};
+use ludis_fs::{self as fs, FsError};
 use reqwest::Client;
+use std::path::{Path, PathBuf};
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
 use tokio_stream::StreamExt;

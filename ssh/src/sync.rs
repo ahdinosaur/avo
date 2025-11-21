@@ -6,12 +6,13 @@ use russh_sftp::{
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use tokio::{
-    fs,
+    fs as tfs,
     io::{AsyncReadExt, AsyncWriteExt},
 };
-use tracing::{debug, instrument, trace, warn};
+use tracing::{debug, info, instrument, trace, warn};
 
 use super::SshClientHandle;
+use ludis_fs::{self as fs, FsError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SshVolume {
@@ -21,6 +22,9 @@ pub struct SshVolume {
 
 #[derive(Error, Debug)]
 pub enum SshSyncError {
+    #[error("filesystem error: {0}")]
+    Fs(#[from] FsError),
+
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
@@ -46,10 +50,10 @@ pub(super) async fn ssh_sync(
     handle: &mut SshClientHandle,
     volume: SshVolume,
 ) -> Result<(), SshSyncError> {
-    tracing::info!("Starting SSH volume sync");
+    info!("Starting SSH volume sync");
     let mut sftp = open_sftp(handle).await?;
     sftp_upload_volume(&mut sftp, &volume).await?;
-    tracing::info!("Volume sync completed");
+    info!("Volume sync completed");
     Ok(())
 }
 
@@ -70,7 +74,7 @@ async fn sftp_upload_volume(
     sftp: &mut SftpSession,
     volume: &SshVolume,
 ) -> Result<(), SshSyncError> {
-    let md = fs::symlink_metadata(&volume.source).await?;
+    let md = tfs::symlink_metadata(&volume.source).await?;
     let ft = md.file_type();
 
     if ft.is_file() {
@@ -109,11 +113,9 @@ async fn sftp_upload_dir(
         trace!(local = %dir.display(), remote = %remote_dir, "Ensuring remote directory exists");
         sftp_mkdirs(sftp, &remote_dir).await?;
 
-        let mut rd = fs::read_dir(&dir).await?;
-        while let Some(entry) = rd.next_entry().await? {
-            let path = entry.path();
-            let md = fs::symlink_metadata(&path).await?;
-
+        let entries = fs::read_dir(&dir).await?;
+        for path in entries {
+            let md = tfs::symlink_metadata(&path).await?;
             if md.file_type().is_symlink() {
                 warn!(path = %path.display(), "Skipping symlink");
                 continue;
@@ -150,7 +152,7 @@ async fn sftp_upload_file(
         }
     }
 
-    let mut lf = fs::File::open(local).await?;
+    let mut lf = fs::open_file(local).await?;
     let size = match lf.metadata().await {
         Ok(m) => m.len(),
         Err(_) => 0,
@@ -199,8 +201,6 @@ async fn sftp_mkdirs(sftp: &mut SftpSession, remote_dir: &str) -> Result<(), Ssh
             accum.push_str(seg);
         }
 
-        // The russh-sftp client provides try_exists(). If it's unavailable in your version,
-        // replace with a metadata() check and handle NotFound appropriately.
         if sftp.try_exists(&accum).await? {
             let metadata = sftp.metadata(&accum).await?;
             if metadata.is_dir() {

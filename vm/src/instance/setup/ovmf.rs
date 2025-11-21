@@ -1,8 +1,8 @@
+use ludis_fs::{self as fs, FsError};
 use thiserror::Error;
 
 use crate::{
     cmd::{Command, CommandError},
-    fs::{self, FsError},
     instance::InstancePaths,
     paths::ExecutablePaths,
 };

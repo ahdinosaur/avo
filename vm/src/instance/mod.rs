@@ -8,6 +8,7 @@ pub use self::paths::*;
 pub use self::setup::*;
 pub use self::start::*;
 
+use ludis_fs::{self as fs, FsError};
 use ludis_ssh::{SshKeypair, SshKeypairError};
 use ludis_system::{Arch, CpuCount, Linux, MemorySize};
 use nix::{
@@ -20,10 +21,7 @@ use std::time::Duration;
 use std::{fmt::Display, net::Ipv4Addr, path::PathBuf, str::FromStr};
 use thiserror::Error;
 
-use crate::context::Context;
-use crate::fs::{self, FsError};
-use crate::instance::exec::InstanceExecError;
-use crate::utils::is_tcp_port_open;
+use crate::{context::Context, instance::exec::InstanceExecError, utils::is_tcp_port_open};
 
 #[derive(Error, Debug)]
 pub enum InstanceError {

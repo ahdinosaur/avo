@@ -1938,6 +1938,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ludis-fs"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.17",
+ "tokio",
+]
+
+[[package]]
 name = "ludis-machine"
 version = "0.1.0"
 dependencies = [
@@ -1994,6 +2002,7 @@ name = "ludis-ssh"
 version = "0.1.0"
 dependencies = [
  "base64ct",
+ "ludis-fs",
  "russh",
  "russh-sftp",
  "thiserror 2.0.17",
@@ -2027,6 +2036,7 @@ version = "0.1.0"
 dependencies = [
  "cuid2",
  "ludis-env",
+ "ludis-fs",
  "ludis-machine",
  "ludis-ssh",
  "ludis-system",

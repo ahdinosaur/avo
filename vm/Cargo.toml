@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 ludis-env = { path = "../env", version = "0.1" }
+ludis-fs = { path = "../fs", version = "0.1" }
 ludis-machine = { path = "../machine", version = "0.1" }
 ludis-ssh = { path = "../ssh", version = "0.1" }
 ludis-system = { path = "../system", version = "0.1" }

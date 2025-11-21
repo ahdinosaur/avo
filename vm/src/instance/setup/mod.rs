@@ -3,6 +3,7 @@ mod kernel;
 mod overlay;
 mod ovmf;
 
+use ludis_fs::{self as fs, FsError};
 use ludis_machine::{Machine, MachineVmOptions};
 use ludis_ssh::{SshKeypair, SshKeypairError};
 use thiserror::Error;
@@ -10,7 +11,6 @@ use thiserror::Error;
 use crate::utils::get_free_tcp_port;
 use crate::{
     context::Context,
-    fs::{self, FsError},
     image::{get_image, VmImage, VmImageError},
     instance::{
         setup::{
@@ -121,6 +121,7 @@ pub async fn setup_instance(
         volumes,
         ports,
         graphics,
+        // TODO set via global ludis config
         kvm: None,
     })
 }
