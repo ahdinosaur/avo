@@ -4,12 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-ludis-params = { path = "../params", version = "0.1" }
 async-trait.workspace = true
-displaydoc.workspace = true
-futures-util = "0.3.31"
-indexmap.workspace = true
-rimu.workspace = true
-serde.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

@@ -6,11 +6,11 @@ params:
     type: "boolean"
 
 setup: (params) =>
-  - module: "@core/pkg"
+  - module: "@core/apt"
     id: "install-nvim"
     params:
       packages: ["nvim"]
-  - module: "@core/pkg"
+  - module: "@core/apt"
     id: "install-curl"
     before:
       - "install-nvim"
