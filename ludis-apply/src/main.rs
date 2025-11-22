@@ -1,8 +1,12 @@
 use clap::Parser;
 use ludis_ctx::{Context, ContextError};
-use ludis_operation::{apply as apply_operations, ApplyError};
+use ludis_operation::{apply_operations, merge_operations};
 use ludis_params::{ParamValues, ParamValuesFromTypeError};
 use ludis_plan::{self, plan, PlanError, PlanId};
+use ludis_resource::{
+    changes_to_operations, compute_epochs, query_states, resources_to_changes, specs_to_resources,
+    EpochError, ResourceStateError,
+};
 use ludis_store::Store;
 use rimu::SourceId;
 use std::path::PathBuf;
@@ -41,7 +45,13 @@ enum AppError {
     Plan(#[from] PlanError),
 
     #[error(transparent)]
-    Apply(#[from] ApplyError),
+    Epoch(#[from] EpochError),
+
+    #[error(transparent)]
+    ResourceState(#[from] ResourceStateError),
+
+    #[error(transparent)]
+    OperationApply(#[from] ludis_operation::OperationApplyError),
 }
 
 #[tokio::main]
@@ -62,12 +72,10 @@ async fn run(cli: Cli) -> Result<(), AppError> {
     let env = Context::create()?;
     let mut store = Store::new(env.paths().cache_dir());
 
-    // Resolve plan id
     let plan_path = cli.plan.canonicalize().unwrap_or(cli.plan.clone());
     let plan_id = PlanId::Path(plan_path.clone());
     info!(plan = %plan_path.display(), "using plan");
 
-    // JSON parameters
     let param_values = match cli.params {
         None => {
             info!("no parameters provided");
@@ -81,20 +89,38 @@ async fn run(cli: Cli) -> Result<(), AppError> {
         }
     };
 
-    // Plan -> operations tree
-    let operations = plan(plan_id, param_values, &mut store).await?;
-    info!("plan constructed; applying");
+    // Step A: Parse/evaluate to ResourceTree
+    let resource_tree = plan(plan_id, param_values, &mut store).await?;
+    info!("resource tree constructed");
 
-    // Apply
-    apply_operations(operations).await?;
+    // Step B: Compute dependency epochs (layers of ResourceSpec)
+    let spec_layers = compute_epochs(resource_tree)?;
+    info!(epochs = spec_layers.len(), "computed epochs");
+
+    // Steps C to G per epoch:
+    // C: specs -> resources
+    // D: resources -> states
+    // E: (resource, state) -> changes
+    // F: changes -> operations
+    // G: merge + apply operations
+    for (epoch_index, specs) in spec_layers.into_iter().enumerate() {
+        info!(epoch = epoch_index, count = specs.len(), "processing epoch");
+
+        let resources = specs_to_resources(&specs);
+        let states = query_states(&resources).await?;
+        let changes = resources_to_changes(&resources, &states);
+        let operations = changes_to_operations(&changes);
+
+        let merged = merge_operations(&operations);
+        apply_operations(&merged).await?;
+    }
+
     info!("apply completed");
     Ok(())
 }
 
 fn install_tracing(level: &str) {
-    // Accept either a simple level ("debug") or a filter directive.
     let filter = EnvFilter::try_new(level).unwrap_or_else(|_| EnvFilter::new("info"));
-
     fmt()
         .with_env_filter(filter)
         .json()

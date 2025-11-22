@@ -1888,6 +1888,7 @@ dependencies = [
  "ludis-operation",
  "ludis-params",
  "ludis-plan",
+ "ludis-resource",
  "ludis-store",
  "ludis-system",
  "rimu",
@@ -1943,12 +1944,6 @@ name = "ludis-operation"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "displaydoc",
- "futures-util",
- "indexmap",
- "ludis-params",
- "rimu",
- "serde",
  "thiserror 2.0.17",
  "tracing",
 ]
@@ -1973,12 +1968,28 @@ dependencies = [
  "displaydoc",
  "ludis-operation",
  "ludis-params",
+ "ludis-resource",
  "ludis-store",
  "rimu",
  "rimu-interop",
  "thiserror 2.0.17",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "ludis-resource"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "futures-util",
+ "indexmap",
+ "ludis-operation",
+ "ludis-params",
+ "rimu",
+ "serde",
+ "thiserror 2.0.17",
+ "tracing",
 ]
 
 [[package]]

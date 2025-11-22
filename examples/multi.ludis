@@ -2,7 +2,7 @@ name: "multi"
 version: "0.1.0"
 
 setup: () =>
-  - module: "@core/pkg"
+  - module: "@core/apt"
     params:
       packages: ["less"]
   - module: "./simple.ludis"

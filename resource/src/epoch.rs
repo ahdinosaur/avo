@@ -1,87 +1,49 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use displaydoc::Display;
-use futures_util::future::try_join_all;
 use thiserror::Error;
 
-use crate::{EpochOperations, Operation, OperationId, OperationTree, PackageOperation};
+use crate::tree::{ResourceId, ResourceSpec, ResourceTree};
 
-#[derive(Debug, Clone, Error, Display)]
+#[derive(Debug, Error)]
 pub enum EpochError {
-    /// Duplicate id: {0}
+    #[error("Duplicate id: {0}")]
     DuplicateId(String),
-    /// Unknown id referenced in 'before': {0}
+
+    #[error("Unknown id referenced in 'before': {0}")]
     UnknownBeforeRef(String),
-    /// Unknown id referenced in 'after': {0}
+
+    #[error("Unknown id referenced in 'after': {0}")]
     UnknownAfterRef(String),
-    /// Cycle detected in dependency graph (remaining nodes: {remaining})
+
+    #[error("Cycle detected in dependency graph (remaining nodes: {remaining})")]
     CycleDetected { remaining: usize },
 }
 
-/// A sequence of epochs in execution order.
-#[derive(Debug, Clone)]
-pub struct Epochs<Item>(pub Vec<Item>);
-
-impl<Item> Epochs<Item> {
-    pub fn map<NextItem, F>(self, f: F) -> Epochs<NextItem>
-    where
-        F: Fn(Item) -> NextItem,
-    {
-        let items = self.0;
-        let next_items = items.into_iter().map(f).collect();
-        Epochs(next_items)
-    }
-
-    pub async fn try_map_async<NextItem, E, F, Fut>(self, f: F) -> Result<Epochs<NextItem>, E>
-    where
-        F: Fn(Item) -> Fut,
-        Fut: Future<Output = Result<NextItem, E>>,
-    {
-        let futures = self.0.into_iter().map(f);
-        let results = try_join_all(futures).await?;
-        Ok(Epochs(results))
-    }
-
-    pub async fn try_each_async<E, F, Fut>(self, mut f: F) -> Result<(), E>
-    where
-        F: FnMut(Item) -> Fut,
-        Fut: Future<Output = Result<(), E>>,
-    {
-        for item in self.0 {
-            f(item).await?;
-        }
-        Ok(())
-    }
-}
-
-/// Build temporal epochs from dependency constraints represented in the tree.
-///
-/// Uses Kahn's algorithm to layer nodes (events) by in-degree.
-/// - "before": X.before contains Y => Y must run before X (edge: Y -> X)
-/// - "after":  X.after contains Y => X must run before Y (edge: X -> Y)
-pub fn tree_to_epochs(tree: OperationTree) -> Result<Epochs<EpochOperations>, EpochError> {
+/// Compute dependency layers of resource specs (Kahn's algorithm).
+/// Returns a list of epochs (layers), each epoch is a Vec<ResourceSpec>.
+pub fn compute_epochs(tree: ResourceTree) -> Result<Vec<Vec<ResourceSpec>>, EpochError> {
     #[derive(Debug)]
     struct CollectedLeaf {
-        operation: Operation,
-        before: Vec<OperationId>,
-        after: Vec<OperationId>,
+        spec: ResourceSpec,
+        before: Vec<ResourceId>,
+        after: Vec<ResourceId>,
     }
 
     let mut leaves: Vec<CollectedLeaf> = Vec::new();
-    let mut id_to_leaves: HashMap<OperationId, Vec<usize>> = HashMap::new();
-    let mut seen_ids: HashSet<OperationId> = HashSet::new();
+    let mut id_to_leaves: HashMap<ResourceId, Vec<usize>> = HashMap::new();
+    let mut seen_ids: HashSet<ResourceId> = HashSet::new();
 
     fn collect_recursive(
-        node: OperationTree,
-        ancestor_before: &mut Vec<OperationId>,
-        ancestor_after: &mut Vec<OperationId>,
-        active_branch_ids: &mut Vec<OperationId>,
-        seen_ids: &mut HashSet<OperationId>,
-        id_to_leaves: &mut HashMap<OperationId, Vec<usize>>,
+        node: ResourceTree,
+        ancestor_before: &mut Vec<ResourceId>,
+        ancestor_after: &mut Vec<ResourceId>,
+        active_branch_ids: &mut Vec<ResourceId>,
+        seen_ids: &mut HashSet<ResourceId>,
+        id_to_leaves: &mut HashMap<ResourceId, Vec<usize>>,
         leaves: &mut Vec<CollectedLeaf>,
     ) -> Result<(), EpochError> {
         match node {
-            OperationTree::Branch {
+            ResourceTree::Branch {
                 id,
                 before,
                 after,
@@ -89,6 +51,7 @@ pub fn tree_to_epochs(tree: OperationTree) -> Result<Epochs<EpochOperations>, Ep
             } => {
                 let before_len = ancestor_before.len();
                 ancestor_before.extend(before);
+
                 let after_len = ancestor_after.len();
                 ancestor_after.extend(after);
 
@@ -120,53 +83,49 @@ pub fn tree_to_epochs(tree: OperationTree) -> Result<Epochs<EpochOperations>, Ep
                 if pushed_branch_id {
                     active_branch_ids.pop();
                 }
-
                 Ok(())
             }
-            OperationTree::Leaf {
+            ResourceTree::Leaf {
                 id,
-                operation,
+                resource,
                 before,
                 after,
             } => {
-                let mut effective_before: Vec<OperationId> = Vec::new();
+                let mut effective_before: Vec<ResourceId> = Vec::new();
                 effective_before.extend(ancestor_before.iter().cloned());
                 effective_before.extend(before);
 
-                let mut effective_after: Vec<OperationId> = Vec::new();
+                let mut effective_after: Vec<ResourceId> = Vec::new();
                 effective_after.extend(ancestor_after.iter().cloned());
                 effective_after.extend(after);
 
                 let index = leaves.len();
                 leaves.push(CollectedLeaf {
-                    operation,
+                    spec: resource,
                     before: effective_before,
                     after: effective_after,
                 });
 
-                // Map branch ids to descendant leaf indices
                 for branch_id in active_branch_ids.iter() {
                     if let Some(v) = id_to_leaves.get_mut(branch_id) {
                         v.push(index);
                     }
                 }
 
-                // Map leaf ids to this leaf index
                 if let Some(leaf_id) = id {
                     if !seen_ids.insert(leaf_id.clone()) {
                         return Err(EpochError::DuplicateId(leaf_id.0));
                     }
                     id_to_leaves.insert(leaf_id, vec![index]);
                 }
-
                 Ok(())
             }
         }
     }
 
-    let mut ancestor_before: Vec<OperationId> = Vec::new();
-    let mut ancestor_after: Vec<OperationId> = Vec::new();
-    let mut active_branch_ids: Vec<OperationId> = Vec::new();
+    let mut ancestor_before: Vec<ResourceId> = Vec::new();
+    let mut ancestor_after: Vec<ResourceId> = Vec::new();
+    let mut active_branch_ids: Vec<ResourceId> = Vec::new();
 
     collect_recursive(
         tree,
@@ -178,12 +137,12 @@ pub fn tree_to_epochs(tree: OperationTree) -> Result<Epochs<EpochOperations>, Ep
         &mut leaves,
     )?;
 
+    // Build adjacency and indegrees (Kahn's algorithm)
     let n = leaves.len();
     let mut outgoing: Vec<Vec<usize>> = vec![Vec::new(); n];
     let mut indegree: Vec<usize> = vec![0; n];
 
     for (i, leaf) in leaves.iter().enumerate() {
-        // "before" creates edges: before_id -> this leaf
         for id in &leaf.before {
             let Some(targets) = id_to_leaves.get(id) else {
                 return Err(EpochError::UnknownBeforeRef(id.0.clone()));
@@ -193,7 +152,6 @@ pub fn tree_to_epochs(tree: OperationTree) -> Result<Epochs<EpochOperations>, Ep
                 indegree[i] += 1;
             }
         }
-        // "after" creates edges: this leaf -> after_id
         for id in &leaf.after {
             let Some(targets) = id_to_leaves.get(id) else {
                 return Err(EpochError::UnknownAfterRef(id.0.clone()));
@@ -212,22 +170,18 @@ pub fn tree_to_epochs(tree: OperationTree) -> Result<Epochs<EpochOperations>, Ep
         .collect();
 
     let mut seen = 0usize;
-    let mut epochs: Vec<EpochOperations> = Vec::new();
+    let mut epochs: Vec<Vec<ResourceSpec>> = Vec::new();
     let mut indegree_mut = indegree;
 
     while !queue.is_empty() {
         let current_wave: Vec<usize> = queue.drain(..).collect();
         seen += current_wave.len();
 
-        let mut package_ops: Vec<PackageOperation> = Vec::new();
-
+        let mut specs: Vec<ResourceSpec> = Vec::new();
         for i in current_wave.iter().copied() {
-            match &leaves[i].operation {
-                Operation::Package(p) => package_ops.push(p.clone()),
-            }
+            specs.push(leaves[i].spec.clone());
         }
-
-        epochs.push(EpochOperations { package_ops });
+        epochs.push(specs);
 
         let mut next_wave: Vec<usize> = Vec::new();
         for i in current_wave {
@@ -246,5 +200,5 @@ pub fn tree_to_epochs(tree: OperationTree) -> Result<Epochs<EpochOperations>, Ep
         return Err(EpochError::CycleDetected { remaining });
     }
 
-    Ok(Epochs(epochs))
+    Ok(epochs)
 }

@@ -8,6 +8,7 @@ ludis-ctx = { path = "../ctx", version = "0.1" }
 ludis-params = { path = "../params", version = "0.1" }
 ludis-plan = { path = "../plan", version = "0.1" }
 ludis-operation = { path = "../operation", version = "0.1" }
+ludis-resource = { path = "../resource", version = "0.1" }
 ludis-store = { path = "../store", version = "0.1" }
 ludis-system = { path = "../system", version = "0.1" }
 clap.workspace = true
