@@ -8,9 +8,9 @@ pub use self::paths::*;
 pub use self::setup::*;
 pub use self::start::*;
 
-use ludis_fs::{self as fs, FsError};
-use ludis_ssh::{SshKeypair, SshKeypairError};
-use ludis_system::{Arch, CpuCount, Linux, MemorySize};
+use lusid_fs::{self as fs, FsError};
+use lusid_ssh::{SshKeypair, SshKeypairError};
+use lusid_system::{Arch, CpuCount, Linux, MemorySize};
 use nix::{
     sys::signal::{kill, Signal},
     unistd::Pid,

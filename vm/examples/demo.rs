@@ -1,9 +1,9 @@
 use std::{env::current_dir, time::Duration};
 
-use ludis_ctx::Context;
-use ludis_machine::Machine;
-use ludis_system::{Arch, Linux, Os};
-use ludis_vm::{run, RunOptions, VmVolume};
+use lusid_ctx::Context;
+use lusid_machine::Machine;
+use lusid_system::{Arch, Linux, Os};
+use lusid_vm::{run, RunOptions, VmVolume};
 
 #[tokio::main]
 async fn main() {

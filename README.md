@@ -1,10 +1,10 @@
-# ludis
+# lusid
 
 _STATUS: PROTOTYPING_
 
 > A modular config system for personal setups
 
-Ludis provisions a fresh computer with the exact setup you need to be productive.
+Lusid provisions a fresh computer with the exact setup you need to be productive.
 
 Like .dotfiles on steroids, but less opinionated than NixOS. Friendly and functional.
 

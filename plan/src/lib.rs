@@ -1,8 +1,8 @@
 use displaydoc::Display;
-use ludis_causality::{NodeId, Tree};
-use ludis_params::{validate, ParamValues, ParamsValidationError};
-use ludis_resource::ResourceParams;
-use ludis_store::{Store, StoreError, StoreItemId};
+use lusid_causality::{NodeId, Tree};
+use lusid_params::{validate, ParamValues, ParamsValidationError};
+use lusid_resource::ResourceParams;
+use lusid_store::{Store, StoreError, StoreItemId};
 use rimu::Spanned;
 use std::{path::PathBuf, string::FromUtf8Error};
 use thiserror::Error;

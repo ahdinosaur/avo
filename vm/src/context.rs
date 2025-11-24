@@ -1,8 +1,8 @@
-use ludis_ctx::{Context as BaseContext, ContextError as BaseContextError};
+use lusid_ctx::{Context as BaseContext, ContextError as BaseContextError};
 use thiserror::Error;
 
 use crate::paths::{ExecutablePaths, ExecutablePathsError, Paths};
-use ludis_http::{HttpClient, HttpError};
+use lusid_http::{HttpClient, HttpError};
 
 #[derive(Error, Debug)]
 pub enum ContextError {

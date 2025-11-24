@@ -5,6 +5,6 @@ setup: () =>
   - module: "@core/apt"
     params:
       packages: ["less"]
-  - module: "./simple.ludis"
+  - module: "./simple.lusid"
     params:
       whatever: true

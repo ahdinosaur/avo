@@ -1,4 +1,4 @@
-use ludis_ssh::{Ssh, SshConnectOptions, SshError, SshVolume};
+use lusid_ssh::{Ssh, SshConnectOptions, SshError, SshVolume};
 use std::{net::Ipv4Addr, sync::Arc, time::Duration};
 use thiserror::Error;
 use tracing::info;

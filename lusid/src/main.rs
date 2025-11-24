@@ -1,5 +1,5 @@
 use clap::Parser;
-use ludis::{run, Cli};
+use lusid::{run, Cli};
 use tracing_subscriber::{fmt, EnvFilter};
 
 #[tokio::main]

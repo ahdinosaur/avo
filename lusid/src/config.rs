@@ -1,7 +1,7 @@
 use comfy_table::Table;
-use ludis_machine::Machine;
-use ludis_plan::PlanId;
-use ludis_system::Hostname;
+use lusid_machine::Machine;
+use lusid_plan::PlanId;
+use lusid_system::Hostname;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -127,7 +127,7 @@ impl Config {
 
     async fn load_config(path: &Path) -> Result<ConfigToml, ConfigError> {
         let path = if path.is_dir() {
-            path.join("ludis.toml")
+            path.join("lusid.toml")
         } else {
             path.to_owned()
         };

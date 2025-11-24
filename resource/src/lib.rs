@@ -1,9 +1,9 @@
 pub use crate::resources::*;
 
 use async_trait::async_trait;
-use ludis_causality::Tree;
-use ludis_operation::Operation;
-use ludis_params::ParamTypes;
+use lusid_causality::Tree;
+use lusid_operation::Operation;
+use lusid_params::ParamTypes;
 use rimu::Spanned;
 use serde::de::DeserializeOwned;
 use thiserror::Error;

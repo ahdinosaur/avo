@@ -1,7 +1,7 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use ludis_fs::{self as fs, FsError};
+use lusid_fs::{self as fs, FsError};
 use reqwest::Client;
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;

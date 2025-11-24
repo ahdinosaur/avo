@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use ludis_params::{ParamTypes, ParamTypesFromRimuError, ParamValues, ParamValuesFromRimuError};
+use lusid_params::{ParamTypes, ParamTypesFromRimuError, ParamValues, ParamValuesFromRimuError};
 use displaydoc::Display;
 use rimu::{Function, Span, Spanned, Value};
 use rimu_interop::FromRimu;

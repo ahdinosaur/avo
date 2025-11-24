@@ -1,11 +1,11 @@
 use clap::Parser;
-use ludis_causality::{compute_epochs, EpochError};
-use ludis_ctx::{Context, ContextError};
-use ludis_operation::{apply_operations, merge_operations, OperationApplyError};
-use ludis_params::{ParamValues, ParamValuesFromTypeError};
-use ludis_plan::{self, plan, PlanError, PlanId};
-use ludis_resource::{Resource, ResourceState, ResourceStateError};
-use ludis_store::Store;
+use lusid_causality::{compute_epochs, EpochError};
+use lusid_ctx::{Context, ContextError};
+use lusid_operation::{apply_operations, merge_operations, OperationApplyError};
+use lusid_params::{ParamValues, ParamValuesFromTypeError};
+use lusid_plan::{self, plan, PlanError, PlanId};
+use lusid_resource::{Resource, ResourceState, ResourceStateError};
+use lusid_store::Store;
 use rimu::SourceId;
 use std::path::PathBuf;
 use thiserror::Error;
@@ -13,9 +13,9 @@ use tracing::{debug, error, info};
 use tracing_subscriber::{fmt, EnvFilter};
 
 #[derive(Parser, Debug)]
-#[command(name = "ludis-apply", about = "Apply a Ludis plan.", version)]
+#[command(name = "lusid-apply", about = "Apply a Lusid plan.", version)]
 struct Cli {
-    /// Absolute or relative path to the .ludis plan file.
+    /// Absolute or relative path to the .lusid plan file.
     #[arg(long = "plan", value_name = "PATH")]
     plan: PathBuf,
 
@@ -36,7 +36,7 @@ enum AppError {
     #[error("JSON parameters parse failed: {0}")]
     Json(#[from] serde_json::Error),
 
-    #[error("Failed to convert parameters for Ludis: {0}")]
+    #[error("Failed to convert parameters for Lusid: {0}")]
     ParamValuesFromType(#[from] ParamValuesFromTypeError),
 
     #[error(transparent)]

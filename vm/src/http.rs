@@ -1,4 +1,4 @@
-use ludis_fs::{self as fs, FsError};
+use lusid_fs::{self as fs, FsError};
 use reqwest::Client;
 use std::path::{Path, PathBuf};
 use thiserror::Error;

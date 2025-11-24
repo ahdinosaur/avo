@@ -12,7 +12,7 @@ use tokio::{
 use tracing::{debug, info, instrument, trace, warn};
 
 use super::SshClientHandle;
-use ludis_fs::{self as fs, FsError};
+use lusid_fs::{self as fs, FsError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SshVolume {

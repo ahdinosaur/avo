@@ -9,7 +9,7 @@ use tracing::error;
 use crate::config::{Config, ConfigError};
 
 #[derive(Parser, Debug)]
-#[command(name = "ludis", version, about = "Ludis CLI")]
+#[command(name = "lusid", version, about = "Lusid CLI")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
@@ -28,7 +28,7 @@ pub enum Command {
         #[command(subcommand)]
         command: MachinesCommand,
     },
-    /// Apply Ludis config (local or remote via --machine)
+    /// Apply Lusid config (local or remote via --machine)
     Apply {
         #[arg(long = "machine", value_name = "ID")]
         machine: Option<String>,

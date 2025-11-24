@@ -125,19 +125,19 @@ mod tests {
 
     #[test]
     fn test_get_command() {
-        assert_eq!(Command::new("ludis").to_string(), "ludis")
+        assert_eq!(Command::new("lusid").to_string(), "lusid")
     }
 
     #[test]
     fn test_get_command_with_one_arg() {
-        assert_eq!(Command::new("ludis").arg("-a").to_string(), "ludis -a")
+        assert_eq!(Command::new("lusid").arg("-a").to_string(), "lusid -a")
     }
 
     #[test]
     fn test_get_command_with_two_args() {
         assert_eq!(
-            Command::new("ludis").arg("-a").arg("-b").to_string(),
-            "ludis -a -b"
+            Command::new("lusid").arg("-a").arg("-b").to_string(),
+            "lusid -a -b"
         )
     }
 }

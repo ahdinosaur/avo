@@ -8,8 +8,8 @@ mod utils;
 
 pub use crate::instance::{VmPort, VmVolume};
 
-use ludis_ctx::Context as BaseContext;
-use ludis_machine::Machine;
+use lusid_ctx::Context as BaseContext;
+use lusid_machine::Machine;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::time::sleep;

@@ -1,15 +1,15 @@
 [package]
-name = "ludis-vm"
+name = "lusid-vm"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-ludis-ctx = { path = "../ctx", version = "0.1" }
-ludis-fs = { path = "../fs", version = "0.1" }
-ludis-http = { path = "../http", version = "0.1" }
-ludis-machine = { path = "../machine", version = "0.1" }
-ludis-ssh = { path = "../ssh", version = "0.1" }
-ludis-system = { path = "../system", version = "0.1" }
+lusid-ctx = { path = "../ctx", version = "0.1" }
+lusid-fs = { path = "../fs", version = "0.1" }
+lusid-http = { path = "../http", version = "0.1" }
+lusid-machine = { path = "../machine", version = "0.1" }
+lusid-ssh = { path = "../ssh", version = "0.1" }
+lusid-system = { path = "../system", version = "0.1" }
 russh.workspace = true
 serde.workspace = true
 serde-saphyr = "0.0.8-alpha-pre"

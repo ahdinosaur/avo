@@ -1,6 +1,6 @@
 mod paths;
 
-use ludis_http::{HttpClient, HttpError};
+use lusid_http::{HttpClient, HttpError};
 use thiserror::Error;
 
 pub use crate::paths::{Paths, PathsError};

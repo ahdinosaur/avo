@@ -1,7 +1,7 @@
-use ludis_fs::{self as fs, FsError};
-use ludis_http::HttpError;
-use ludis_machine::Machine;
-use ludis_system::{Arch, Linux, Os};
+use lusid_fs::{self as fs, FsError};
+use lusid_http::HttpError;
+use lusid_machine::Machine;
+use lusid_system::{Arch, Linux, Os};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use thiserror::Error;

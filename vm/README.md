@@ -1,6 +1,6 @@
-# ludis-vm
+# lusid-vm
 
-Develop your ludis config on a virtual machine, before deploying to a physical machine.
+Develop your lusid config on a virtual machine, before deploying to a physical machine.
 
 - List images
 - Create new machine with id and config

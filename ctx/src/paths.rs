@@ -6,7 +6,7 @@ use std::{
 };
 use thiserror::Error;
 
-const PROJECT_NAME: &str = "ludis";
+const PROJECT_NAME: &str = "lusid";
 
 #[derive(Debug, Clone)]
 pub struct Paths {

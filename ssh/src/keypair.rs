@@ -1,5 +1,5 @@
 use base64ct::LineEnding;
-use ludis_fs::{self as fs, FsError};
+use lusid_fs::{self as fs, FsError};
 use russh::keys::ssh_key::{private::Ed25519Keypair, rand_core::OsRng};
 use russh::keys::{PrivateKey, PublicKey};
 use std::path::Path;

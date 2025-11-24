@@ -1,4 +1,4 @@
-use ludis_ctx::Paths as BasePaths;
+use lusid_ctx::Paths as BasePaths;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use which::which_global;

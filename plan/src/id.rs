@@ -1,4 +1,4 @@
-use ludis_store::StoreItemId;
+use lusid_store::StoreItemId;
 use rimu::SourceId;
 use std::{
     fmt::Display,

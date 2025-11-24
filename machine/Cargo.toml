@@ -1,9 +1,9 @@
 [package]
-name = "ludis-machine"
+name = "lusid-machine"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-ludis-system = { path = "../system", version = "0.1" }
+lusid-system = { path = "../system", version = "0.1" }
 serde.workspace = true
 tracing.workspace = true

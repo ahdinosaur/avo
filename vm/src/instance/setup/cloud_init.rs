@@ -1,5 +1,5 @@
-use ludis_fs::{self as fs, FsError};
-use ludis_system::Hostname;
+use lusid_fs::{self as fs, FsError};
+use lusid_system::Hostname;
 use russh::keys::PublicKey;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

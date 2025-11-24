@@ -1,4 +1,4 @@
-use ludis_params::ParamValues;
+use lusid_params::ParamValues;
 use displaydoc::Display;
 use rimu::{call, Spanned, Value};
 use rimu_interop::FromRimu;

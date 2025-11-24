@@ -1,4 +1,4 @@
-use ludis_system::{Arch, Os};
+use lusid_system::{Arch, Os};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

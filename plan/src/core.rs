@@ -1,5 +1,5 @@
-use ludis_params::{validate, ParamValues};
-use ludis_resource::{apt::Apt, ResourceParams, ResourceType};
+use lusid_params::{validate, ParamValues};
+use lusid_resource::{apt::Apt, ResourceParams, ResourceType};
 use rimu::Spanned;
 
 use crate::PlanActionToResourceError;

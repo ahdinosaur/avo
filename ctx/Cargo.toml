@@ -1,9 +1,9 @@
 [package]
-name = "ludis-ctx"
+name = "lusid-ctx"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-ludis-http = { path = "../http", version = "0.1" }
+lusid-http = { path = "../http", version = "0.1" }
 thiserror.workspace = true
 tracing.workspace = true
