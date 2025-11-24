@@ -1,8 +1,10 @@
 use clap::Parser;
+use ludis_causality::{compute_epochs, EpochError};
 use ludis_ctx::{Context, ContextError};
-use ludis_operation::{apply as apply_operations, ApplyError};
+use ludis_operation::{apply_operations, merge_operations, OperationApplyError};
 use ludis_params::{ParamValues, ParamValuesFromTypeError};
 use ludis_plan::{self, plan, PlanError, PlanId};
+use ludis_resource::{Resource, ResourceState, ResourceStateError};
 use ludis_store::Store;
 use rimu::SourceId;
 use std::path::PathBuf;
@@ -41,7 +43,13 @@ enum AppError {
     Plan(#[from] PlanError),
 
     #[error(transparent)]
-    Apply(#[from] ApplyError),
+    Epoch(#[from] EpochError),
+
+    #[error(transparent)]
+    ResourceState(#[from] ResourceStateError),
+
+    #[error(transparent)]
+    OperationApply(#[from] OperationApplyError),
 }
 
 #[tokio::main]
@@ -62,12 +70,10 @@ async fn run(cli: Cli) -> Result<(), AppError> {
     let env = Context::create()?;
     let mut store = Store::new(env.paths().cache_dir());
 
-    // Resolve plan id
     let plan_path = cli.plan.canonicalize().unwrap_or(cli.plan.clone());
     let plan_id = PlanId::Path(plan_path.clone());
     info!(plan = %plan_path.display(), "using plan");
 
-    // JSON parameters
     let param_values = match cli.params {
         None => {
             info!("no parameters provided");
@@ -81,20 +87,55 @@ async fn run(cli: Cli) -> Result<(), AppError> {
         }
     };
 
-    // Plan -> operations tree
-    let operations = plan(plan_id, param_values, &mut store).await?;
-    info!("plan constructed; applying");
+    // Parse/evaluate to Tree<ResourceParams>
+    let resource_params = plan(plan_id, param_values, &mut store).await?;
+    debug!("Resource params: {resource_params:?}");
 
-    // Apply
-    apply_operations(operations).await?;
-    info!("apply completed");
+    // Map to Tree<Resource>
+    let resources = resource_params.map_tree(|params| params.resources());
+    debug!("Resources: {resources:?}");
+
+    // Get Tree<(Resource, ResourceState)>
+    let resource_states = resources
+        .map_result_async(|resource| async move {
+            let state = resource.state().await?;
+            Ok::<(Resource, ResourceState), ResourceStateError>((resource, state))
+        })
+        .await?;
+    debug!("Resource states: {resource_states:?}");
+
+    // Get Tree<ResourceChange>
+    let changes = resource_states
+        .map_option(|(resource, state)| resource.change(&state))
+        .unwrap();
+    debug!("Changes: {changes:?}");
+
+    // Get Tree<Operations>
+    let operations = changes.map_tree(|change| change.operations());
+
+    debug!("Operations tree: {operations:?}");
+
+    let operation_epochs = compute_epochs(operations)?;
+    let epochs_count = operation_epochs.len();
+    debug!("Operation epochs: {operation_epochs:?}");
+
+    for (epoch_index, operations) in operation_epochs.into_iter().enumerate() {
+        info!(
+            epoch = epoch_index,
+            count = epochs_count,
+            "processing epoch"
+        );
+
+        let merged = merge_operations(&operations);
+        apply_operations(&merged).await?;
+    }
+
+    info!("Apply completed");
     Ok(())
 }
 
 fn install_tracing(level: &str) {
-    // Accept either a simple level ("debug") or a filter directive.
     let filter = EnvFilter::try_new(level).unwrap_or_else(|_| EnvFilter::new("info"));
-
     fmt()
         .with_env_filter(filter)
         .json()

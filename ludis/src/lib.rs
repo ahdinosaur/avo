@@ -3,8 +3,6 @@ mod config;
 use std::{env, path::PathBuf};
 
 use clap::{Parser, Subcommand};
-use ludis_operation::ApplyError;
-use ludis_plan::PlanError;
 use thiserror::Error;
 use tracing::error;
 

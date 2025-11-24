@@ -1,39 +1,34 @@
-use ludis_operation::{ops::package::PackageSpec, Operation, OperationSpec};
 use ludis_params::{validate, ParamValues};
+use ludis_resource::{apt::Apt, ResourceParams, ResourceType};
 use rimu::Spanned;
 
-use crate::PlanActionToOperationError;
-
-pub fn core_module(
-    core_module_id: &str,
-    param_values: Option<Spanned<ParamValues>>,
-) -> Result<Operation, PlanActionToOperationError> {
-    let param_values = param_values.ok_or(PlanActionToOperationError::MissingParams)?;
-    let operation = match core_module_id {
-        "pkg" => core_module_for_operation::<PackageSpec>(param_values)?,
-        other => {
-            return Err(PlanActionToOperationError::UnsupportedCoreModuleId {
-                id: other.to_string(),
-            });
-        }
-    };
-    Ok(operation)
-}
+use crate::PlanActionToResourceError;
 
 pub fn is_core_module(module: &Spanned<String>) -> Option<&str> {
     module.inner().strip_prefix("@core/")
 }
 
-fn core_module_for_operation<Op: OperationSpec>(
-    param_values: Spanned<ParamValues>,
-) -> Result<Operation, PlanActionToOperationError> {
-    let param_types = Op::param_types();
-    validate(param_types.as_ref(), Some(&param_values))
-        .map_err(PlanActionToOperationError::from)?;
-    let package_params: Op::Params = param_values
+pub fn core_module(
+    core_module_id: &str,
+    param_values: Option<Spanned<ParamValues>>,
+) -> Result<ResourceParams, PlanActionToResourceError> {
+    match core_module_id {
+        Apt::ID => core_module_for_resource::<Apt>(param_values).map(ResourceParams::Apt),
+        other => Err(PlanActionToResourceError::UnsupportedCoreModuleId {
+            id: other.to_string(),
+        }),
+    }
+}
+
+fn core_module_for_resource<R: ResourceType>(
+    param_values: Option<Spanned<ParamValues>>,
+) -> Result<R::Params, PlanActionToResourceError> {
+    let param_values = param_values.ok_or(PlanActionToResourceError::MissingParams)?;
+    let param_types = R::param_types();
+    validate(param_types.as_ref(), Some(&param_values)).map_err(PlanActionToResourceError::from)?;
+    let params: R::Params = param_values
         .into_inner()
         .into_type()
-        .map_err(PlanActionToOperationError::from)?;
-    let operation = Op::operation(package_params).into();
-    Ok(operation)
+        .map_err(PlanActionToResourceError::from)?;
+    Ok(params)
 }

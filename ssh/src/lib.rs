@@ -55,8 +55,8 @@ impl Ssh {
     // Execute a remote command, streaming stdio to the current process.
     #[tracing::instrument(skip(self))]
     pub async fn command(&mut self, command: &str) -> Result<u32, SshError> {
-        command::ssh_command(&mut self.handle, command).await?;
-        Ok(0)
+        let exit_code = command::ssh_command(&mut self.handle, command).await?;
+        Ok(exit_code)
     }
 
     // Open SFTP and upload a volume (file or directory).
