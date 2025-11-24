@@ -1,8 +1,10 @@
 mod config;
 
-use std::{env, path::PathBuf};
+use std::{env, io, path::PathBuf};
 
 use clap::{Parser, Subcommand};
+use lusid_apply::{apply, ApplyError, ApplyOptions};
+use lusid_system::Hostname;
 use thiserror::Error;
 use tracing::error;
 
@@ -23,20 +25,25 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    /// Manage and inspect machines
+    /// Manage machine definitions
     Machines {
         #[command(subcommand)]
         command: MachinesCommand,
     },
-    /// Apply Lusid config (local or remote via --machine)
-    Apply {
-        #[arg(long = "machine", value_name = "ID")]
-        machine: Option<String>,
+    /// Manage local machine
+    Local {
+        #[command(subcommand)]
+        command: LocalCommand,
     },
-    /// SSH into a remote machine
-    Ssh {
-        #[arg(long = "machine", value_name = "ID")]
-        machine: String,
+    /// Manage remote machines
+    Remote {
+        #[command(subcommand)]
+        command: RemoteCommand,
+    },
+    /// Develop using virtual machines
+    Dev {
+        #[command(subcommand)]
+        command: DevCommand,
     },
 }
 
@@ -46,6 +53,56 @@ pub enum MachinesCommand {
     List,
 }
 
+#[derive(Subcommand, Debug)]
+pub enum LocalCommand {
+    // Apply config to local machine.
+    Apply {
+        /// Parameters as a JSON string.
+        #[arg(long = "params")]
+        params_json: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum RemoteCommand {
+    // Apply config to remote machine.
+    Apply {
+        /// Machine identifier
+        #[arg(long = "machine")]
+        machine_id: String,
+
+        /// Parameters as a JSON string.
+        #[arg(long = "params")]
+        params_json: Option<String>,
+    },
+
+    // Ssh into remote machine.
+    Ssh {
+        #[arg(long = "machine")]
+        machine_id: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum DevCommand {
+    // Spin up virtual machine and apply config.
+    Apply {
+        /// Machine identifier
+        #[arg(long = "machine")]
+        machine_id: String,
+
+        /// Parameters as a JSON string.
+        #[arg(long = "params")]
+        params_json: Option<String>,
+    },
+
+    // Ssh into virtual machine.
+    Ssh {
+        #[arg(long = "machine")]
+        machine_id: String,
+    },
+}
+
 #[derive(Error, Debug)]
 pub enum AppError {
     #[error(transparent)]
@@ -53,6 +110,15 @@ pub enum AppError {
 
     #[error(transparent)]
     EnvVar(#[from] env::VarError),
+
+    #[error("failed to get hostname: {0}")]
+    GetHostname(#[source] io::Error),
+
+    #[error("local machine not found: {hostname}")]
+    LocalMachineNotFound { hostname: Hostname },
+
+    #[error(transparent)]
+    ApplyError(#[from] ApplyError),
 }
 
 pub async fn get_config(cli: &Cli) -> Result<Config, AppError> {
@@ -72,12 +138,71 @@ pub async fn run(cli: Cli) -> Result<(), AppError> {
         Command::Machines { command } => match command {
             MachinesCommand::List => cmd_machines_list(config).await,
         },
-        Command::Apply { machine } => todo!(),
-        Command::Ssh { machine } => todo!(),
+        Command::Local { command } => match command {
+            LocalCommand::Apply { params_json } => cmd_local_apply(config, params_json).await,
+        },
+        Command::Remote { command } => match command {
+            RemoteCommand::Apply {
+                machine_id,
+                params_json,
+            } => cmd_remote_apply(config, machine_id, params_json).await,
+            RemoteCommand::Ssh { machine_id } => cmd_remote_ssh(config, machine_id).await,
+        },
+        Command::Dev { command } => match command {
+            DevCommand::Apply {
+                machine_id,
+                params_json,
+            } => cmd_dev_apply(config, machine_id, params_json).await,
+            DevCommand::Ssh { machine_id } => cmd_dev_ssh(config, machine_id).await,
+        },
     }
 }
 
 async fn cmd_machines_list(config: Config) -> Result<(), AppError> {
     config.print_machines();
     Ok(())
+}
+
+async fn cmd_local_apply(config: Config, params_json: Option<String>) -> Result<(), AppError> {
+    let hostname = Hostname::get().map_err(AppError::GetHostname)?;
+    let machine = config
+        .machines
+        .into_values()
+        .find(|config| config.machine.hostname == hostname);
+    let Some(machine) = machine else {
+        return Err(AppError::LocalMachineNotFound { hostname });
+    };
+
+    let plan_id = machine.plan;
+    let options = ApplyOptions {
+        plan_id,
+        params_json,
+    };
+    apply(options).await?;
+
+    Ok(())
+}
+
+async fn cmd_remote_apply(
+    config: Config,
+    machine_id: String,
+    params_json: Option<String>,
+) -> Result<(), AppError> {
+    todo!()
+}
+
+async fn cmd_remote_ssh(config: Config, machine_id: String) -> Result<(), AppError> {
+    todo!()
+}
+
+async fn cmd_dev_apply(
+    config: Config,
+    machine_id: String,
+    params_json: Option<String>,
+) -> Result<(), AppError> {
+    todo!()
+}
+
+async fn cmd_dev_ssh(config: Config, machine_id: String) -> Result<(), AppError> {
+    todo!()
 }

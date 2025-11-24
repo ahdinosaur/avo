@@ -1,6 +1,7 @@
 use clap::Parser;
-use lusid::{run, Cli};
 use tracing_subscriber::{fmt, EnvFilter};
+
+use lusid::{run, Cli};
 
 #[tokio::main]
 async fn main() {

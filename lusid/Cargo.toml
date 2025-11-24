@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+lusid-apply = { path = "../lusid-apply", version = "0.1" }
 lusid-ctx = { path = "../ctx", version = "0.1" }
 lusid-machine = { path = "../machine", version = "0.1" }
 lusid-operation = { path = "../operation", version = "0.1" }
