@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+  "causality",
   "ctx",
   "fs",
   "http",

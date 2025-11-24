@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use indexmap::indexmap;
+use ludis_causality::Tree;
 use ludis_operation::ops::apt::AptOperation;
 use ludis_operation::Operation;
 use ludis_params::{ParamField, ParamType, ParamTypes};
@@ -64,13 +65,15 @@ impl ResourceType for Apt {
     type Params = AptParams;
     type Resource = AptResource;
 
-    fn resources(params: Self::Params) -> Vec<Self::Resource> {
+    fn resources(params: Self::Params) -> Vec<Tree<Self::Resource>> {
         match params {
-            AptParams::Package { package } => vec![AptResource { package }],
-            AptParams::Packages { packages } => packages
-                .into_iter()
-                .map(|package| AptResource { package })
-                .collect(),
+            AptParams::Package { package } => vec![Tree::leaf(AptResource { package })],
+            AptParams::Packages { packages } => vec![Tree::branch(
+                packages
+                    .into_iter()
+                    .map(|package| Tree::leaf(AptResource { package }))
+                    .collect(),
+            )],
         }
     }
 
@@ -92,12 +95,12 @@ impl ResourceType for Apt {
         }
     }
 
-    fn operations(change: Self::Change) -> Vec<Operation> {
+    fn operations(change: Self::Change) -> Vec<Tree<Operation>> {
         match change {
             AptChange::Install { package } => {
-                vec![Operation::Apt(AptOperation::Install {
+                vec![Tree::leaf(Operation::Apt(AptOperation::Install {
                     packages: vec![package],
-                })]
+                }))]
             }
         }
     }

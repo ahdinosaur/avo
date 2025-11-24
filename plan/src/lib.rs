@@ -1,9 +1,10 @@
-use std::{path::PathBuf, string::FromUtf8Error};
-
 use displaydoc::Display;
+use ludis_causality::{NodeId, Tree};
 use ludis_params::{validate, ParamValues, ParamsValidationError};
+use ludis_resource::ResourceParams;
 use ludis_store::{Store, StoreError, StoreItemId};
 use rimu::Spanned;
+use std::{path::PathBuf, string::FromUtf8Error};
 use thiserror::Error;
 
 mod core;
@@ -22,8 +23,6 @@ use crate::{
     load::{load, LoadError},
 };
 
-use ludis_resource::{ResourceId, ResourceParams, ResourceTree};
-
 #[derive(Debug, Error, Display)]
 pub enum PlanError {
     /// Failed to read plan source from store for id {id:?}
@@ -32,20 +31,25 @@ pub enum PlanError {
         #[source]
         source: StoreError,
     },
+
     /// Failed to decode plan source as UTF-8
     InvalidUtf8(#[from] FromUtf8Error),
+
     /// Failed to load plan source
     Load(#[from] LoadError),
+
     /// Parameter validation failed
     Validate(#[from] ParamsValidationError),
+
     /// Failed to evaluate plan setup
     Eval(#[from] EvalError),
+
     /// Failed to convert plan item to resource
     PlanActionToResource(#[from] PlanActionToResourceError),
 }
 
 /// Top-level planning routine: load plan, validate parameters, and evaluate to
-/// a ResourceTree.
+/// a Tree<Resource>.
 #[tracing::instrument(skip_all)]
 pub async fn plan(
     plan_id: PlanId,
@@ -54,7 +58,7 @@ pub async fn plan(
 ) -> Result<Tree<ResourceParams>, PlanError> {
     tracing::debug!("Plan {plan_id:?} with params {param_values:?}");
     let children = plan_recursive(plan_id, param_values.as_ref(), store).await?;
-    let tree = ResourceTree::Branch {
+    let tree = Tree::Branch {
         id: None,
         before: vec![],
         after: vec![],
@@ -68,7 +72,7 @@ async fn plan_recursive(
     plan_id: PlanId,
     param_values: Option<&Spanned<ParamValues>>,
     store: &mut Store,
-) -> Result<Vec<ResourceTree>, PlanError> {
+) -> Result<Vec<Tree<ResourceParams>>, PlanError> {
     let store_item_id: StoreItemId = plan_id.clone().into();
     let bytes = store
         .read(&store_item_id)
@@ -122,7 +126,7 @@ async fn plan_action_to_resource(
     plan_action: Spanned<crate::model::PlanAction>,
     current_plan_id: &PlanId,
     store: &mut Store,
-) -> Result<ResourceTree, PlanActionToResourceError> {
+) -> Result<Tree<ResourceParams>, PlanActionToResourceError> {
     let (plan_action, _span) = plan_action.take();
     let crate::model::PlanAction {
         id,
@@ -132,23 +136,23 @@ async fn plan_action_to_resource(
         after,
     } = plan_action;
 
-    let id = id.map(|id| ResourceId::new(id.into_inner()));
+    let id = id.map(|id| NodeId::new(id.into_inner()));
     let before = before
         .into_iter()
         .map(|v| v.into_inner())
-        .map(ResourceId::new)
+        .map(NodeId::new)
         .collect();
     let after = after
         .into_iter()
         .map(|v| v.into_inner())
-        .map(ResourceId::new)
+        .map(NodeId::new)
         .collect();
 
     if let Some(core_module_id) = is_core_module(module) {
-        let spec = core_module(core_module_id, param_values)?;
-        Ok(ResourceTree::Leaf {
+        let params = core_module(core_module_id, param_values)?;
+        Ok(Tree::Leaf {
             id,
-            resource: spec,
+            node: params,
             before,
             after,
         })
@@ -158,7 +162,7 @@ async fn plan_action_to_resource(
         let children = plan_recursive(plan_id, param_values.as_ref(), store)
             .await
             .map_err(Box::new)?;
-        Ok(ResourceTree::Branch {
+        Ok(Tree::Branch {
             id,
             children,
             before,

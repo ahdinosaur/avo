@@ -1884,6 +1884,7 @@ name = "ludis-apply"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "ludis-causality",
  "ludis-ctx",
  "ludis-operation",
  "ludis-params",
@@ -1899,6 +1900,13 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "ludis-causality"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -1966,6 +1974,7 @@ name = "ludis-plan"
 version = "0.1.0"
 dependencies = [
  "displaydoc",
+ "ludis-causality",
  "ludis-operation",
  "ludis-params",
  "ludis-resource",
@@ -1984,6 +1993,7 @@ dependencies = [
  "async-trait",
  "futures-util",
  "indexmap",
+ "ludis-causality",
  "ludis-operation",
  "ludis-params",
  "rimu",

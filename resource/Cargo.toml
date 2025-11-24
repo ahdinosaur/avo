@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+ludis-causality = { path = "../causality", version = "0.1" }
 ludis-params = { path = "../params", version = "0.1" }
 ludis-operation = { path = "../operation", version = "0.1" }
 async-trait.workspace = true

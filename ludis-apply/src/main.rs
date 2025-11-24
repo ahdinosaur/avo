@@ -1,12 +1,10 @@
 use clap::Parser;
+use ludis_causality::{compute_epochs, EpochError};
 use ludis_ctx::{Context, ContextError};
-use ludis_operation::{apply_operations, merge_operations};
+use ludis_operation::{apply_operations, merge_operations, OperationApplyError};
 use ludis_params::{ParamValues, ParamValuesFromTypeError};
 use ludis_plan::{self, plan, PlanError, PlanId};
-use ludis_resource::{
-    changes_to_operations, compute_epochs, query_states, resources_to_changes, specs_to_resources,
-    EpochError, ResourceStateError,
-};
+use ludis_resource::{Resource, ResourceState, ResourceStateError};
 use ludis_store::Store;
 use rimu::SourceId;
 use std::path::PathBuf;
@@ -51,7 +49,7 @@ enum AppError {
     ResourceState(#[from] ResourceStateError),
 
     #[error(transparent)]
-    OperationApply(#[from] ludis_operation::OperationApplyError),
+    OperationApply(#[from] OperationApplyError),
 }
 
 #[tokio::main]
@@ -89,27 +87,38 @@ async fn run(cli: Cli) -> Result<(), AppError> {
         }
     };
 
-    // Step A: Parse/evaluate to ResourceTree
-    let resource_tree = plan(plan_id, param_values, &mut store).await?;
-    info!("resource tree constructed");
+    // Parse/evaluate to Tree<ResourceParams>
+    let resource_params = plan(plan_id, param_values, &mut store).await?;
+    info!("resource params constructed");
 
-    // Step B: Compute dependency epochs (layers of ResourceSpec)
-    let spec_layers = compute_epochs(resource_tree)?;
-    info!(epochs = spec_layers.len(), "computed epochs");
+    // Map to Tree<Resource>
+    let resources = resource_params.map_tree(|params| params.resources());
 
-    // Steps C to G per epoch:
-    // C: specs -> resources
-    // D: resources -> states
-    // E: (resource, state) -> changes
-    // F: changes -> operations
-    // G: merge + apply operations
-    for (epoch_index, specs) in spec_layers.into_iter().enumerate() {
-        info!(epoch = epoch_index, count = specs.len(), "processing epoch");
+    // Get Tree<(Resource, ResourceState)>
+    let resource_states = resources
+        .map_result_async(|resource| async move {
+            let state = resource.state().await?;
+            Ok::<(Resource, ResourceState), ResourceStateError>((resource, state))
+        })
+        .await?;
 
-        let resources = specs_to_resources(&specs);
-        let states = query_states(&resources).await?;
-        let changes = resources_to_changes(&resources, &states);
-        let operations = changes_to_operations(&changes);
+    // Get Tree<ResourceChange>
+    let changes = resource_states
+        .map_option(|(resource, state)| resource.change(&state))
+        .unwrap();
+
+    // Get Tree<Operations>
+    let operations = changes.map_tree(|change| change.operations());
+
+    let operation_epochs = compute_epochs(operations)?;
+    let epochs_count = operation_epochs.len();
+
+    for (epoch_index, operations) in operation_epochs.into_iter().enumerate() {
+        info!(
+            epoch = epoch_index,
+            count = epochs_count,
+            "processing epoch"
+        );
 
         let merged = merge_operations(&operations);
         apply_operations(&merged).await?;

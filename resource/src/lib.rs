@@ -1,17 +1,44 @@
-mod epoch;
-mod resources;
-mod tree;
-mod r#type;
-
-pub use crate::epoch::{compute_epochs, EpochError};
-pub use crate::r#type::ResourceType;
 pub use crate::resources::*;
 
+use async_trait::async_trait;
+use ludis_causality::Tree;
 use ludis_operation::Operation;
+use ludis_params::ParamTypes;
+use rimu::Spanned;
+use serde::de::DeserializeOwned;
 use thiserror::Error;
+
+mod resources;
 
 use crate::resources::apt::AptParams;
 use crate::resources::apt::{Apt, AptChange, AptResource, AptState};
+
+/// ResourceType:
+/// - ParamTypes for Rimu schema
+/// - Resource (atom)
+/// - State (current)
+/// - Change (delta needed)
+/// - Conversion from Change -> Operation(s)
+#[async_trait]
+pub trait ResourceType {
+    const ID: &'static str;
+
+    fn param_types() -> Option<Spanned<ParamTypes>>;
+
+    type Params: DeserializeOwned;
+    type Resource: Clone;
+
+    fn resources(params: Self::Params) -> Vec<Tree<Self::Resource>>;
+
+    type State;
+    type StateError;
+    async fn state(resource: &Self::Resource) -> Result<Self::State, Self::StateError>;
+
+    type Change;
+    fn change(resource: &Self::Resource, state: &Self::State) -> Option<Self::Change>;
+
+    fn operations(change: Self::Change) -> Vec<Tree<Operation>>;
+}
 
 #[derive(Debug, Clone)]
 pub enum ResourceParams {
@@ -40,12 +67,15 @@ pub enum ResourceChange {
 }
 
 impl ResourceParams {
-    pub fn resources(self) -> Vec<Resource> {
+    pub fn resources(self) -> Vec<Tree<Resource>> {
         fn typed<R: ResourceType>(
             params: R::Params,
-            map: impl Fn(R::Resource) -> Resource,
-        ) -> Vec<Resource> {
-            R::resources(params).into_iter().map(map).collect()
+            map: impl Fn(R::Resource) -> Resource + Copy,
+        ) -> Vec<Tree<Resource>> {
+            R::resources(params)
+                .into_iter()
+                .map(|tree| tree.map(map))
+                .collect()
         }
 
         match self {
@@ -93,7 +123,7 @@ impl Resource {
 }
 
 impl ResourceChange {
-    pub fn operations(self) -> Vec<Operation> {
+    pub fn operations(self) -> Vec<Tree<Operation>> {
         match self {
             ResourceChange::Apt(change) => Apt::operations(change),
         }
