@@ -89,10 +89,11 @@ async fn run(cli: Cli) -> Result<(), AppError> {
 
     // Parse/evaluate to Tree<ResourceParams>
     let resource_params = plan(plan_id, param_values, &mut store).await?;
-    info!("resource params constructed");
+    debug!("Resource params: {resource_params:?}");
 
     // Map to Tree<Resource>
     let resources = resource_params.map_tree(|params| params.resources());
+    debug!("Resources: {resources:?}");
 
     // Get Tree<(Resource, ResourceState)>
     let resource_states = resources
@@ -101,17 +102,22 @@ async fn run(cli: Cli) -> Result<(), AppError> {
             Ok::<(Resource, ResourceState), ResourceStateError>((resource, state))
         })
         .await?;
+    debug!("Resource states: {resource_states:?}");
 
     // Get Tree<ResourceChange>
     let changes = resource_states
         .map_option(|(resource, state)| resource.change(&state))
         .unwrap();
+    debug!("Changes: {changes:?}");
 
     // Get Tree<Operations>
     let operations = changes.map_tree(|change| change.operations());
 
+    debug!("Operations tree: {operations:?}");
+
     let operation_epochs = compute_epochs(operations)?;
     let epochs_count = operation_epochs.len();
+    debug!("Operation epochs: {operation_epochs:?}");
 
     for (epoch_index, operations) in operation_epochs.into_iter().enumerate() {
         info!(
@@ -124,7 +130,7 @@ async fn run(cli: Cli) -> Result<(), AppError> {
         apply_operations(&merged).await?;
     }
 
-    info!("apply completed");
+    info!("Apply completed");
     Ok(())
 }
 
