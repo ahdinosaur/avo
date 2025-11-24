@@ -28,7 +28,7 @@ pub enum VmError {
     Instance(#[from] InstanceError),
 }
 
-pub struct RunOptions<'a> {
+pub struct VmOptions<'a> {
     pub instance_id: &'a str,
     pub machine: &'a Machine,
     pub ports: Vec<VmPort>,
@@ -37,10 +37,10 @@ pub struct RunOptions<'a> {
     pub timeout: Duration,
 }
 
-pub async fn run(ctx: &mut BaseContext, options: RunOptions<'_>) -> Result<(), VmError> {
+pub async fn vm(ctx: &mut BaseContext, options: VmOptions<'_>) -> Result<(), VmError> {
     let mut ctx = Context::create(ctx)?;
 
-    let RunOptions {
+    let VmOptions {
         instance_id,
         machine,
         ports,

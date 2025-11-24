@@ -1,3 +1,7 @@
+build-lusid-apply:
+  cargo build -p lusid-apply --target x86_64-unknown-linux-gnu --release
+  # cargo build -p lusid-apply --target aarch64-unknown-linux-gnu --release
+
 lusid-local-apply:
   cargo run -p lusid -- local apply --config ./examples/lusid.toml --params '{ "whatever": true }' --log trace
 

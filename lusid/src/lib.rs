@@ -1,14 +1,18 @@
 mod config;
 
-use std::{env, io, path::PathBuf};
+use std::{env, io, path::PathBuf, time::Duration};
 
 use clap::{Parser, Subcommand};
 use lusid_apply::{apply, ApplyError, ApplyOptions};
 use lusid_system::Hostname;
+use lusid_vm::{VmOptions, VmVolume};
 use thiserror::Error;
 use tracing::error;
 
 use crate::config::{Config, ConfigError};
+
+const LUDIS_APPLY_X86_64: &[u8] =
+    include_bytes!("../../target/x86_64-unknown-linux-gnu/release/lusid-apply");
 
 #[derive(Parser, Debug)]
 #[command(name = "lusid", version, about = "Lusid CLI")]
@@ -117,6 +121,9 @@ pub enum AppError {
     #[error("local machine not found: {hostname}")]
     LocalMachineNotFound { hostname: Hostname },
 
+    #[error("machine id not found: {machine_id}")]
+    MachineIdNotFound { machine_id: String },
+
     #[error(transparent)]
     ApplyError(#[from] ApplyError),
 }
@@ -200,6 +207,30 @@ async fn cmd_dev_apply(
     machine_id: String,
     params_json: Option<String>,
 ) -> Result<(), AppError> {
+    let config = config
+        .machines
+        .get(&machine_id)
+        .ok_or_else(|| AppError::MachineIdNotFound { machine_id })?;
+    let instance_id = &machine_id;
+    let ports = vec![];
+
+    VmVolume {
+        source: cwd.join("vm/examples"),
+        dest: "/home/debian/test".to_owned(),
+    }];
+    let volumes = vec![VmVolume { sou }];
+    let command = "echo hello world";
+    let timeout = Duration::from_secs(10);
+    let options = VmOptions {
+        instance_id,
+        machine: &config.machine,
+        ports,
+        volumes,
+        command,
+        timeout,
+    };
+    let mut ctx = Context::create().unwrap();
+    run(&mut ctx, options).await.unwrap();
     todo!()
 }
 
