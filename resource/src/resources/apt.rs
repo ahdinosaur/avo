@@ -8,12 +8,6 @@ use serde::Deserialize;
 
 use crate::ResourceType;
 
-/// Desired Apt state spec for resource tree leaves.
-#[derive(Debug, Clone)]
-pub struct AptSpec {
-    pub packages: Vec<String>,
-}
-
 /// Atomic resource (per-package)
 #[derive(Debug, Clone)]
 pub struct AptResource {
@@ -68,32 +62,26 @@ impl ResourceType for Apt {
     }
 
     type Params = AptParams;
-    type Spec = AptSpec;
-
-    fn spec(params: Self::Params) -> Self::Spec {
-        match params {
-            AptParams::Package { package } => AptSpec {
-                packages: vec![package],
-            },
-            AptParams::Packages { packages } => AptSpec { packages },
-        }
-    }
-
     type Resource = AptResource;
 
-    fn atoms(specs: impl IntoIterator<Item = Self::Spec>) -> Vec<Self::Resource> {
-        let mut out = Vec::new();
-        for spec in specs {
-            for p in spec.packages {
-                out.push(AptResource { package: p });
-            }
+    fn resources(params: Self::Params) -> Vec<Self::Resource> {
+        match params {
+            AptParams::Package { package } => vec![AptResource { package }],
+            AptParams::Packages { packages } => packages
+                .into_iter()
+                .map(|package| AptResource { package })
+                .collect(),
         }
-        out
     }
 
     type State = AptState;
     type StateError = std::convert::Infallible;
+    async fn state(_resource: &Self::Resource) -> Result<Self::State, Self::StateError> {
+        // For demo purposes: always claim not installed.
+        Ok(AptState { installed: false })
+    }
 
+    type Change = AptChange;
     fn change(resource: &Self::Resource, state: &Self::State) -> Option<Self::Change> {
         if state.installed {
             None
@@ -104,9 +92,7 @@ impl ResourceType for Apt {
         }
     }
 
-    type Change = AptChange;
-
-    fn to_operations(change: Self::Change) -> Vec<Operation> {
+    fn operations(change: Self::Change) -> Vec<Operation> {
         match change {
             AptChange::Install { package } => {
                 vec![Operation::Apt(AptOperation::Install {
@@ -114,10 +100,5 @@ impl ResourceType for Apt {
                 })]
             }
         }
-    }
-
-    // For demo purposes: always claim not installed.
-    async fn state(_resource: &Self::Resource) -> Result<Self::State, Self::StateError> {
-        Ok(AptState { installed: false })
     }
 }

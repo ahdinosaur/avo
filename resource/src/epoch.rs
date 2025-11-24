@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use thiserror::Error;
 
-use crate::tree::{ResourceId, ResourceSpec, ResourceTree};
+use crate::tree::{NodeId, Tree};
 
 #[derive(Debug, Error)]
 pub enum EpochError {
@@ -20,30 +20,33 @@ pub enum EpochError {
 }
 
 /// Compute dependency layers of resource specs (Kahn's algorithm).
-/// Returns a list of epochs (layers), each epoch is a Vec<ResourceSpec>.
-pub fn compute_epochs(tree: ResourceTree) -> Result<Vec<Vec<ResourceSpec>>, EpochError> {
+/// Returns a list of epochs (layers), each epoch is a Vec<Node>.
+pub fn compute_epochs<Node>(tree: Tree<Node>) -> Result<Vec<Vec<Node>>, EpochError>
+where
+    Node: Clone,
+{
     #[derive(Debug)]
-    struct CollectedLeaf {
-        spec: ResourceSpec,
-        before: Vec<ResourceId>,
-        after: Vec<ResourceId>,
+    struct CollectedLeaf<Node> {
+        node: Node,
+        before: Vec<NodeId>,
+        after: Vec<NodeId>,
     }
 
-    let mut leaves: Vec<CollectedLeaf> = Vec::new();
-    let mut id_to_leaves: HashMap<ResourceId, Vec<usize>> = HashMap::new();
-    let mut seen_ids: HashSet<ResourceId> = HashSet::new();
+    let mut leaves: Vec<CollectedLeaf<Node>> = Vec::new();
+    let mut id_to_leaves: HashMap<NodeId, Vec<usize>> = HashMap::new();
+    let mut seen_ids: HashSet<NodeId> = HashSet::new();
 
-    fn collect_recursive(
-        node: ResourceTree,
-        ancestor_before: &mut Vec<ResourceId>,
-        ancestor_after: &mut Vec<ResourceId>,
-        active_branch_ids: &mut Vec<ResourceId>,
-        seen_ids: &mut HashSet<ResourceId>,
-        id_to_leaves: &mut HashMap<ResourceId, Vec<usize>>,
-        leaves: &mut Vec<CollectedLeaf>,
+    fn collect_recursive<Node>(
+        tree: Tree<Node>,
+        ancestor_before: &mut Vec<NodeId>,
+        ancestor_after: &mut Vec<NodeId>,
+        active_branch_ids: &mut Vec<NodeId>,
+        seen_ids: &mut HashSet<NodeId>,
+        id_to_leaves: &mut HashMap<NodeId, Vec<usize>>,
+        leaves: &mut Vec<CollectedLeaf<Node>>,
     ) -> Result<(), EpochError> {
-        match node {
-            ResourceTree::Branch {
+        match tree {
+            Tree::Branch {
                 id,
                 before,
                 after,
@@ -85,23 +88,23 @@ pub fn compute_epochs(tree: ResourceTree) -> Result<Vec<Vec<ResourceSpec>>, Epoc
                 }
                 Ok(())
             }
-            ResourceTree::Leaf {
+            Tree::Leaf {
                 id,
-                resource,
+                node,
                 before,
                 after,
             } => {
-                let mut effective_before: Vec<ResourceId> = Vec::new();
+                let mut effective_before: Vec<NodeId> = Vec::new();
                 effective_before.extend(ancestor_before.iter().cloned());
                 effective_before.extend(before);
 
-                let mut effective_after: Vec<ResourceId> = Vec::new();
+                let mut effective_after: Vec<NodeId> = Vec::new();
                 effective_after.extend(ancestor_after.iter().cloned());
                 effective_after.extend(after);
 
                 let index = leaves.len();
                 leaves.push(CollectedLeaf {
-                    spec: resource,
+                    node,
                     before: effective_before,
                     after: effective_after,
                 });
@@ -123,9 +126,9 @@ pub fn compute_epochs(tree: ResourceTree) -> Result<Vec<Vec<ResourceSpec>>, Epoc
         }
     }
 
-    let mut ancestor_before: Vec<ResourceId> = Vec::new();
-    let mut ancestor_after: Vec<ResourceId> = Vec::new();
-    let mut active_branch_ids: Vec<ResourceId> = Vec::new();
+    let mut ancestor_before: Vec<NodeId> = Vec::new();
+    let mut ancestor_after: Vec<NodeId> = Vec::new();
+    let mut active_branch_ids: Vec<NodeId> = Vec::new();
 
     collect_recursive(
         tree,
@@ -170,16 +173,16 @@ pub fn compute_epochs(tree: ResourceTree) -> Result<Vec<Vec<ResourceSpec>>, Epoc
         .collect();
 
     let mut seen = 0usize;
-    let mut epochs: Vec<Vec<ResourceSpec>> = Vec::new();
+    let mut epochs: Vec<Vec<Node>> = Vec::new();
     let mut indegree_mut = indegree;
 
     while !queue.is_empty() {
         let current_wave: Vec<usize> = queue.drain(..).collect();
         seen += current_wave.len();
 
-        let mut specs: Vec<ResourceSpec> = Vec::new();
+        let mut specs: Vec<Node> = Vec::new();
         for i in current_wave.iter().copied() {
-            specs.push(leaves[i].spec.clone());
+            specs.push(leaves[i].node.clone());
         }
         epochs.push(specs);
 

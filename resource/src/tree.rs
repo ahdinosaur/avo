@@ -1,29 +1,24 @@
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ResourceId(pub String);
+pub struct NodeId(pub String);
 
-impl ResourceId {
+impl NodeId {
     pub fn new(id: String) -> Self {
         Self(id)
     }
 }
 
 #[derive(Debug, Clone)]
-pub enum ResourceSpec {
-    Apt(super::resources::apt::AptSpec),
-}
-
-#[derive(Debug, Clone)]
-pub enum ResourceTree {
+pub enum Tree<Node> {
     Branch {
-        id: Option<ResourceId>,
-        before: Vec<ResourceId>,
-        after: Vec<ResourceId>,
-        children: Vec<ResourceTree>,
+        id: Option<NodeId>,
+        before: Vec<NodeId>,
+        after: Vec<NodeId>,
+        children: Vec<Tree<Node>>,
     },
     Leaf {
-        id: Option<ResourceId>,
-        resource: ResourceSpec,
-        before: Vec<ResourceId>,
-        after: Vec<ResourceId>,
+        id: Option<NodeId>,
+        node: Node,
+        before: Vec<NodeId>,
+        after: Vec<NodeId>,
     },
 }

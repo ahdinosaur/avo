@@ -22,7 +22,7 @@ use crate::{
     load::{load, LoadError},
 };
 
-use ludis_resource::{ResourceId, ResourceTree};
+use ludis_resource::{ResourceId, ResourceParams, ResourceTree};
 
 #[derive(Debug, Error, Display)]
 pub enum PlanError {
@@ -51,7 +51,7 @@ pub async fn plan(
     plan_id: PlanId,
     param_values: Option<Spanned<ParamValues>>,
     store: &mut Store,
-) -> Result<ResourceTree, PlanError> {
+) -> Result<Tree<ResourceParams>, PlanError> {
     tracing::debug!("Plan {plan_id:?} with params {param_values:?}");
     let children = plan_recursive(plan_id, param_values.as_ref(), store).await?;
     let tree = ResourceTree::Branch {
