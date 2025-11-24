@@ -13,7 +13,7 @@ pub fn core_module(
     param_values: Option<Spanned<ParamValues>>,
 ) -> Result<ResourceParams, PlanActionToResourceError> {
     match core_module_id {
-        "apt" => core_module_for_resource::<Apt>(param_values).map(ResourceParams::Apt),
+        Apt::ID => core_module_for_resource::<Apt>(param_values).map(ResourceParams::Apt),
         other => Err(PlanActionToResourceError::UnsupportedCoreModuleId {
             id: other.to_string(),
         }),
