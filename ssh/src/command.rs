@@ -50,7 +50,7 @@ impl SshCommandHandle {
 
     /// Obtain a reader for the command's stderr.
     pub fn stderr(&mut self) -> &mut ReadStream {
-        &mut self.stdout
+        &mut self.stderr
     }
 
     /// Promise that resolves to the remote exit code when received.

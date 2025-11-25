@@ -1,14 +1,14 @@
+use futures_util::StreamExt;
+use signal_hook::consts::SIGWINCH;
+use signal_hook_tokio::Signals;
 use std::fmt::Debug;
 use std::{env, io};
-
-use async_promise::Promise;
+use termion::raw::IntoRawMode;
 use thiserror::Error;
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::{copy, stderr, stdout};
 use tracing::info;
 
-use crate::session::{AsyncChannel, AsyncSession, NoCheckHandler};
-use crate::stream::ReadStream;
-use crate::SshError;
+use crate::session::{AsyncSession, NoCheckHandler};
 
 /// Terminal execution specific errors.
 #[derive(Error, Debug)]
@@ -24,70 +24,12 @@ pub enum SshTerminalError {
 
     #[error("failed to get terminal size: {0}")]
     TerminalSize(#[source] io::Error),
-}
 
-/// A streaming handle to a running SSH terminal.
-///
-/// - stdout/stderr are AsyncBufRead (and AsyncRead) via ReadStream.
-/// - stdin is available via stdin().
-/// - exit code and other events exposed as Promises.
-/// - call wait() to await completion and get the exit code.
-pub struct SshTerminalHandle {
-    pub stdout: ReadStream,
-    pub stderr: ReadStream,
-    pub channel: AsyncChannel,
-}
+    #[error("failed to create signals stream")]
+    Signals(#[source] io::Error),
 
-impl SshTerminalHandle {
-    /// Obtain a writer for the terminal's stdin.
-    pub fn stdin(&self) -> impl AsyncWrite + use<> {
-        self.channel.stdin()
-    }
-
-    /// Obtain a reader for the terminal's stdout.
-    pub fn stdout(&mut self) -> &mut ReadStream {
-        &mut self.stdout
-    }
-
-    /// Obtain a reader for the terminal's stderr.
-    pub fn stderr(&mut self) -> &mut ReadStream {
-        &mut self.stdout
-    }
-
-    /// Promise that resolves to the remote exit code when received.
-    pub fn exit_code(&self) -> &Promise<u32> {
-        self.channel.recv_exit_status()
-    }
-
-    /// Promise that resolves when EOF is received for stdout/stderr.
-    pub fn eof(&self) -> &Promise<()> {
-        self.channel.recv_eof()
-    }
-
-    /// Promise that resolves when the server replies Success/Failure to exec.
-    pub fn success_failure(&self) -> &Promise<bool> {
-        self.channel.recv_success_failure()
-    }
-
-    /// Close the channel cleanly and wait for it to be closed, returning exit
-    /// code if received.
-    #[tracing::instrument(skip(self))]
-    pub async fn wait(mut self) -> Result<Option<u32>, SshError> {
-        let exit_code = self.exit_code().wait().await.copied();
-
-        if !self.channel.is_closed() {
-            self.channel
-                .close()
-                .await
-                .map_err(SshTerminalError::Russh)
-                .map_err(SshError::Terminal)?;
-            self.channel.wait_close().await;
-        }
-
-        info!(exit_code = exit_code, "Remote terminal completed");
-
-        Ok(exit_code)
-    }
+    #[error("failed to put stdout into raw mode: {0}")]
+    StdoutRawMode(#[source] io::Error),
 }
 
 /// Execute a remote terminal and return a streaming handle.
@@ -97,14 +39,19 @@ impl SshTerminalHandle {
 #[tracing::instrument(skip(session), fields(terminal))]
 pub(super) async fn ssh_terminal(
     session: &AsyncSession<NoCheckHandler>,
-) -> Result<SshTerminalHandle, SshTerminalError> {
-    let channel = session
+) -> Result<Option<u32>, SshTerminalError> {
+    let mut channel = session
         .open_channel()
         .await
         .map_err(SshTerminalError::ChannelOpen)?;
 
-    let stdout = channel.stdout();
-    let stderr = channel.stderr();
+    let mut signals = Signals::new(&[SIGWINCH]).map_err(SshTerminalError::Signals)?;
+
+    // We're using `termion` to put the terminal into raw mode, so that we can
+    // display the output of interactive applications correctly.
+    let _raw_term = std::io::stdout()
+        .into_raw_mode()
+        .map_err(SshTerminalError::StdoutRawMode)?;
 
     let want_reply = true;
     let term = &env::var("TERM").unwrap_or("xterm-256color".into());
@@ -127,9 +74,31 @@ pub(super) async fn ssh_terminal(
         .await
         .map_err(SshTerminalError::RequestPty);
 
-    Ok(SshTerminalHandle {
-        stdout,
-        stderr,
-        channel,
-    })
+    copy(&mut channel.stdout(), &mut stdout());
+    copy(&mut channel.stderr(), &mut stderr());
+
+    let signals_handle = signals.handle();
+
+    tokio::spawn(async move {
+        while let Some(signal) = signals.next().await {
+            match signal {
+                SIGWINCH => {
+                    let (col_width, row_height) =
+                        termion::terminal_size().map_err(SshTerminalError::TerminalSize)?;
+                    channel.window_change(col_width.into(), row_height.into(), 0, 0);
+                }
+                _ => unreachable!(),
+            }
+        }
+    });
+
+    let exit_code = channel.recv_exit_status().wait().await.copied();
+    if !channel.is_closed() {
+        channel.close().await;
+        channel.wait_close().await;
+    }
+
+    info!(exit_code = exit_code, "Remote terminal completed");
+
+    Ok(exit_code)
 }
