@@ -1,9 +1,12 @@
 use russh::client::{Handle, Handler};
 use russh_sftp::{
     client::{error::Error as SftpError, SftpSession},
-    protocol::OpenFlags,
+    protocol::{FileAttributes, OpenFlags},
 };
-use std::path::{Path, PathBuf};
+use std::{
+    fmt::Debug,
+    path::{Path, PathBuf},
+};
 use thiserror::Error;
 use tokio::{
     fs as tfs,
@@ -14,11 +17,33 @@ use tracing::{debug, info, instrument, trace, warn};
 use super::SshClientHandle;
 use lusid_fs::{self as fs, FsError};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum SshVolume {
-    DirPath { local: PathBuf, remote: String },
-    FilePath { local: PathBuf, remote: String },
-    FileBytes { local: Vec<u8>, remote: String },
+    DirPath {
+        local: PathBuf,
+        remote: String,
+    },
+    FilePath {
+        local: PathBuf,
+        remote: String,
+    },
+    FileBytes {
+        local: Vec<u8>,
+        permissions: Option<u32>,
+        remote: String,
+    },
+}
+
+impl Debug for SshVolume {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SshVolume::DirPath { local, remote } => write!(f, "{}:{}", local.display(), remote),
+            SshVolume::FilePath { local, remote } => write!(f, "{}:{}", local.display(), remote),
+            SshVolume::FileBytes { local, remote, .. } => {
+                write!(f, "<{} bytes>:{}", local.len(), remote)
+            }
+        }
+    }
 }
 
 #[derive(Error, Debug)]
@@ -78,13 +103,21 @@ async fn sftp_upload_volume(
     match volume {
         SshVolume::DirPath { local, remote } => sftp_upload_dir(sftp, local, remote).await,
         SshVolume::FilePath { local, remote } => sftp_upload_file(sftp, local, remote).await,
-        SshVolume::FileBytes { local, remote } => sftp_upload_file_bytes(sftp, local, remote).await,
+        SshVolume::FileBytes {
+            local,
+            permissions,
+            remote,
+        } => sftp_upload_file_bytes(sftp, local, *permissions, remote).await,
     }
 }
 
 // Recursively traverse local directory and upload everything.
 // - Skips symlinks and special files for safety.
 // - Creates remote directories as needed (mkdir -p).
+//
+// TODO:
+// - Update remote fs metadata to match local metadata
+// - Remove existing content in directories
 #[instrument(skip(sftp))]
 async fn sftp_upload_dir(
     sftp: &mut SftpSession,
@@ -147,29 +180,31 @@ async fn sftp_upload_file(
         }
     }
 
-    let mut lf = fs::open_file(local).await?;
-    let size = match lf.metadata().await {
-        Ok(m) => m.len(),
-        Err(_) => 0,
-    };
+    let mut local_file = fs::open_file(local).await?;
+    let local_metadata = local_file.metadata().await?;
+    let size = local_metadata.len();
+
     trace!(local = %local.display(), size_bytes = size, "Opened local file");
 
     let flags = OpenFlags::CREATE
         .union(OpenFlags::TRUNCATE)
         .union(OpenFlags::WRITE);
-    let mut rf = sftp.open_with_flags(remote, flags).await?;
+    let mut remote_file = sftp.open_with_flags(remote, flags).await?;
     trace!("Opened remote file for writing");
 
     let mut buf = vec![0u8; 128 * 1024];
     loop {
-        let n = lf.read(&mut buf).await?;
+        let n = local_file.read(&mut buf).await?;
         if n == 0 {
             break;
         }
-        rf.write_all(&buf[..n]).await?;
+        remote_file.write_all(&buf[..n]).await?;
     }
-    rf.flush().await?;
-    rf.shutdown().await?;
+    remote_file.flush().await?;
+    remote_file.shutdown().await?;
+
+    let remote_metadata: FileAttributes = (&local_metadata).into();
+    sftp.set_metadata(remote, remote_metadata).await?;
 
     debug!("File upload completed");
     Ok(())
@@ -179,10 +214,11 @@ async fn sftp_upload_file(
 async fn sftp_upload_file_bytes(
     sftp: &mut SftpSession,
     local: &[u8],
+    permissions: Option<u32>,
     remote: &str,
 ) -> Result<(), SshSyncError> {
     #[allow(clippy::collapsible_if)]
-    if let Some((parent, _)) = remote.rsplit_once('/') {
+    if let Some(parent) = remote_parent(remote) {
         if !parent.is_empty() {
             trace!(parent, "Ensuring remote parent directory exists");
             sftp_mkdirs(sftp, parent).await?;
@@ -192,12 +228,19 @@ async fn sftp_upload_file_bytes(
     let flags = OpenFlags::CREATE
         .union(OpenFlags::TRUNCATE)
         .union(OpenFlags::WRITE);
-    let mut rf = sftp.open_with_flags(remote, flags).await?;
+    let mut remote_file = sftp.open_with_flags(remote, flags).await?;
     trace!("Opened remote file for writing");
 
-    rf.write_all(local).await?;
-    rf.flush().await?;
-    rf.shutdown().await?;
+    remote_file.write_all(local).await?;
+    remote_file.flush().await?;
+    remote_file
+        .set_metadata(FileAttributes {
+            permissions,
+            ..FileAttributes::empty()
+        })
+        .await?;
+
+    remote_file.shutdown().await?;
 
     debug!("File upload completed");
     Ok(())
@@ -274,5 +317,12 @@ fn remote_join(base: &str, rel: &Path) -> String {
         "/".to_string()
     } else {
         out
+    }
+}
+
+fn remote_parent(path: &str) -> Option<&str> {
+    match path.rsplit_once('/') {
+        Some((parent, _)) => Some(parent),
+        None => None,
     }
 }

@@ -229,6 +229,7 @@ async fn cmd_dev_apply(
     let volumes = vec![
         SshVolume::FileBytes {
             local: LUDIS_APPLY_X86_64.to_vec(),
+            permissions: Some(0o755),
             remote: "/home/debian/lusid-apply".to_owned(),
         },
         SshVolume::DirPath {
