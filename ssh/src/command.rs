@@ -43,16 +43,6 @@ impl SshCommandHandle {
         self.channel.stdin()
     }
 
-    /// Obtain a reader for the command's stdout.
-    pub fn stdout(&mut self) -> &mut ReadStream {
-        &mut self.stdout
-    }
-
-    /// Obtain a reader for the command's stderr.
-    pub fn stderr(&mut self) -> &mut ReadStream {
-        &mut self.stderr
-    }
-
     /// Promise that resolves to the remote exit code when received.
     pub fn exit_code(&self) -> &Promise<u32> {
         self.channel.recv_exit_status()

@@ -10,10 +10,9 @@ pub use crate::command::{SshCommandError, SshCommandHandle};
 pub use crate::connect::{SshConnectError, SshConnectOptions};
 pub use crate::keypair::{SshKeypair, SshKeypairError};
 pub use crate::sync::{SshSyncError, SshVolume};
-pub use crate::terminal::{SshTerminalError, SshTerminalHandle};
+pub use crate::terminal::SshTerminalError;
 
 use thiserror::Error;
-use tokio::io::AsyncRead;
 use tokio::net::ToSocketAddrs;
 
 use crate::connect::connect_with_retry;
@@ -79,10 +78,10 @@ impl Ssh {
 
     /// Synchronize a volume (directory, file, or raw bytes) via SFTP.
     #[tracing::instrument(skip(self))]
-    pub async fn terminal(&mut self) -> Result<SshTerminalHandle, SshError> {
+    pub async fn terminal(&mut self) -> Result<Option<u32>, SshError> {
         terminal::ssh_terminal(&self.session)
             .await
-            .map_err(SshError::Sync)
+            .map_err(SshError::Terminal)
     }
 
     /// Disconnect the SSH session.

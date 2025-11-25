@@ -1,8 +1,7 @@
 use lusid_ssh::{Ssh, SshConnectOptions, SshError, SshVolume};
-use serde_json::Value;
 use std::{net::Ipv4Addr, sync::Arc, time::Duration};
 use thiserror::Error;
-use tokio::io::{self, copy, stdout, AsyncBufReadExt, AsyncWriteExt};
+use tokio::io::{self, copy};
 use tracing::info;
 
 use crate::instance::Instance;
@@ -43,7 +42,25 @@ pub(super) async fn instance_exec(
     info!("ssh.command: {}", command);
     let mut handle = ssh.command(command).await?;
 
-    copy(handle.stdout(), &mut stdout()).await?;
+    {
+        let mut channel_stdout = &mut handle.stdout;
+        let mut terminal_stdout = tokio::io::stdout();
+        let stdout_future = copy(&mut channel_stdout, &mut terminal_stdout);
+        tokio::pin!(stdout_future);
+
+        let mut channel_stderr = &mut handle.stderr;
+        let mut terminal_stderr = tokio::io::stderr();
+        let stderr_future = copy(&mut channel_stderr, &mut terminal_stderr);
+        tokio::pin!(stderr_future);
+        tokio::select! {
+            res = stdout_future => {
+                let _ = res?;
+            },
+            res = stderr_future => {
+                let _ = res?;
+            },
+        };
+    }
 
     let exit_code = handle.wait().await?;
 
