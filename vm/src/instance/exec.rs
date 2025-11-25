@@ -1,6 +1,7 @@
 use lusid_ssh::{Ssh, SshConnectOptions, SshError, SshVolume};
 use std::{net::Ipv4Addr, sync::Arc, time::Duration};
 use thiserror::Error;
+use tokio::io::{self, copy, stdout};
 use tracing::info;
 
 use crate::instance::Instance;
@@ -9,6 +10,9 @@ use crate::instance::Instance;
 pub enum InstanceExecError {
     #[error(transparent)]
     Ssh(#[from] SshError),
+
+    #[error(transparent)]
+    Io(#[from] io::Error),
 }
 
 pub(super) async fn instance_exec(
@@ -36,8 +40,11 @@ pub(super) async fn instance_exec(
     }
 
     info!("ssh.command: {}", command);
-    let handle = ssh.command(command).await?;
-    let exit_code = handle.wait().await?;
+    let mut handle = ssh.command(command).await?;
+    let exit_code = {
+        copy(handle.stdout(), &mut stdout()).await?;
+        handle.wait().await?
+    };
     ssh.disconnect().await?;
     Ok(exit_code)
 }

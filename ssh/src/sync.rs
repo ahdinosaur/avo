@@ -55,16 +55,22 @@ impl Debug for SshVolume {
 pub enum SshSyncError {
     #[error("filesystem error: {0}")]
     Fs(#[from] FsError),
+
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+
     #[error("SSH protocol error: {0}")]
     Russh(#[from] russh::Error),
+
     #[error("SFTP error: {0}")]
     RusshSftp(#[from] SftpError),
+
     #[error("refusing to upload: top-level source is a symlink")]
     TopLevelSymlink,
+
     #[error("unsupported source type (must be file or directory)")]
     UnsupportedSource,
+
     #[error("source path must be a directory")]
     SourceMustBeDirectory,
 }

@@ -1,6 +1,7 @@
 use async_promise::Promise;
 use thiserror::Error;
 use tokio::io::AsyncWrite;
+use tracing::info;
 
 use crate::channel::{AsyncChannel, AsyncSession, NoCheckHandler};
 use crate::stream::ReadStream;
@@ -27,12 +28,13 @@ pub enum SshCommandError {
 ///
 /// - stdout/stderr are AsyncBufRead (and AsyncRead) via ReadStream.
 /// - stdin is available via stdin().
-/// - exit status and other events exposed as Promises.
+/// - exit code and other events exposed as Promises.
 /// - call wait() to await completion and get the exit code.
 pub struct SshCommandHandle {
     pub stdout: ReadStream,
     pub stderr: ReadStream,
-    channel: AsyncChannel,
+    pub channel: AsyncChannel,
+    pub command: String,
 }
 
 impl SshCommandHandle {
@@ -41,8 +43,18 @@ impl SshCommandHandle {
         self.channel.stdin()
     }
 
-    /// Promise that resolves to the remote exit status when received.
-    pub fn exit_status(&self) -> &Promise<u32> {
+    /// Obtain a reader for the command's stdout.
+    pub fn stdout(&mut self) -> &mut ReadStream {
+        &mut self.stdout
+    }
+
+    /// Obtain a reader for the command's stderr.
+    pub fn stderr(&mut self) -> &mut ReadStream {
+        &mut self.stdout
+    }
+
+    /// Promise that resolves to the remote exit code when received.
+    pub fn exit_code(&self) -> &Promise<u32> {
         self.channel.recv_exit_status()
     }
 
@@ -57,10 +69,10 @@ impl SshCommandHandle {
     }
 
     /// Close the channel cleanly and wait for it to be closed, returning exit
-    /// status if received.
+    /// code if received.
     #[tracing::instrument(skip(self))]
     pub async fn wait(mut self) -> Result<Option<u32>, SshError> {
-        let status = self.exit_status().wait().await.copied();
+        let exit_code = self.exit_code().wait().await.copied();
 
         if !self.channel.is_closed() {
             self.channel
@@ -71,7 +83,9 @@ impl SshCommandHandle {
             self.channel.wait_close().await;
         }
 
-        Ok(status)
+        info!(exit_code = exit_code, "Remote command completed");
+
+        Ok(exit_code)
     }
 }
 
@@ -104,5 +118,6 @@ pub(super) async fn ssh_command(
         stdout,
         stderr,
         channel,
+        command: command.to_owned(),
     })
 }
