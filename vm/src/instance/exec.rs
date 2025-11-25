@@ -2,7 +2,7 @@ use lusid_ssh::{Ssh, SshConnectOptions, SshError, SshVolume};
 use serde_json::Value;
 use std::{net::Ipv4Addr, sync::Arc, time::Duration};
 use thiserror::Error;
-use tokio::io::{self, stdout, AsyncBufReadExt, AsyncWriteExt};
+use tokio::io::{self, copy, stdout, AsyncBufReadExt, AsyncWriteExt};
 use tracing::info;
 
 use crate::instance::Instance;
@@ -42,22 +42,12 @@ pub(super) async fn instance_exec(
 
     info!("ssh.command: {}", command);
     let mut handle = ssh.command(command).await?;
-    let exit_code = {
-        let mut out = stdout();
-        let mut lines = handle.stdout().lines();
-        loop {
-            let Some(line) = lines.next_line().await? else {
-                break;
-            };
-            let Ok(value) = serde_json::from_str::<Value>(&line) else {
-                out.write_all(line.as_bytes()).await?;
-                out.write_all(b"\n").await?;
-                continue;
-            };
-            let value: Valueabl
-        }
-        handle.wait().await?
-    };
+
+    copy(handle.stdout(), &mut stdout()).await?;
+
+    let exit_code = handle.wait().await?;
+
     ssh.disconnect().await?;
+
     Ok(exit_code)
 }

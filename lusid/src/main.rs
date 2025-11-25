@@ -20,6 +20,6 @@ pub fn install_tracing(level: &str) {
         .with_env_filter(filter)
         .with_target(true)
         .with_level(true)
-        .with_ansi(false)
+        .with_ansi(true)
         .init();
 }

@@ -48,10 +48,8 @@ fn install_tracing(level: &str) {
     let filter = EnvFilter::try_new(level).unwrap_or_else(|_| EnvFilter::new("info"));
     fmt()
         .with_env_filter(filter)
-        .json()
-        .with_current_span(true)
         .with_target(true)
         .with_level(true)
-        .with_ansi(false)
+        .with_ansi(true)
         .init();
 }
