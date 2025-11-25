@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use tokio::fs::read_to_string;
+use toml::Value;
 
 #[derive(Error, Debug)]
 pub enum ConfigError {
@@ -51,12 +52,14 @@ struct MachineConfigToml {
     #[serde(flatten)]
     pub machine: Machine,
     pub plan: PathBuf,
+    pub params: Option<Value>,
 }
 
 #[derive(Debug, Clone)]
 pub struct MachineConfig {
     pub machine: Machine,
     pub plan: PlanId,
+    pub params: Option<Value>,
 }
 
 impl Config {
@@ -66,12 +69,17 @@ impl Config {
         let machines = machines
             .into_iter()
             .map(|(name, config)| {
-                let MachineConfigToml { machine, plan } = config;
+                let MachineConfigToml {
+                    machine,
+                    plan,
+                    params,
+                } = config;
                 Ok((
                     name,
                     MachineConfig {
                         machine,
                         plan: Self::resolve_plan_id(&path, &plan)?,
+                        params,
                     },
                 ))
             })
@@ -106,7 +114,11 @@ impl Config {
             .set_header(vec!["id", "plan", "hostname", "arch", "os"]);
 
         for (machine_id, config) in self.machines.iter() {
-            let MachineConfig { machine, plan } = config;
+            let MachineConfig {
+                machine,
+                plan,
+                params: _,
+            } = config;
             let Machine {
                 hostname,
                 arch,

@@ -1,9 +1,11 @@
-use russh::ChannelMsg;
+use async_promise::Promise;
 use thiserror::Error;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tracing::{debug, info, instrument};
+use tokio::io::AsyncWrite;
+use tracing::info;
 
-use super::SshClientHandle;
+use crate::session::{AsyncChannel, AsyncSession, NoCheckHandler};
+use crate::stream::ReadStream;
+use crate::SshError;
 
 /// Command execution specific errors.
 #[derive(Error, Debug)]
@@ -18,24 +20,91 @@ pub enum SshCommandError {
         source: russh::Error,
     },
 
-    #[error("I/O error while streaming command data: {0}")]
-    Io(#[from] std::io::Error),
-
     #[error("SSH protocol error: {0}")]
     Russh(#[from] russh::Error),
 }
 
-#[instrument(skip(handle), fields(command))]
+/// A streaming handle to a running SSH command.
+///
+/// - stdout/stderr are AsyncBufRead (and AsyncRead) via ReadStream.
+/// - stdin is available via stdin().
+/// - exit code and other events exposed as Promises.
+/// - call wait() to await completion and get the exit code.
+pub struct SshCommandHandle {
+    pub stdout: ReadStream,
+    pub stderr: ReadStream,
+    pub channel: AsyncChannel,
+    pub command: String,
+}
+
+impl SshCommandHandle {
+    /// Obtain a writer for the command's stdin.
+    pub fn stdin(&self) -> impl AsyncWrite + use<> {
+        self.channel.stdin()
+    }
+
+    /// Obtain a reader for the command's stdout.
+    pub fn stdout(&mut self) -> &mut ReadStream {
+        &mut self.stdout
+    }
+
+    /// Obtain a reader for the command's stderr.
+    pub fn stderr(&mut self) -> &mut ReadStream {
+        &mut self.stdout
+    }
+
+    /// Promise that resolves to the remote exit code when received.
+    pub fn exit_code(&self) -> &Promise<u32> {
+        self.channel.recv_exit_status()
+    }
+
+    /// Promise that resolves when EOF is received for stdout/stderr.
+    pub fn eof(&self) -> &Promise<()> {
+        self.channel.recv_eof()
+    }
+
+    /// Promise that resolves when the server replies Success/Failure to exec.
+    pub fn success_failure(&self) -> &Promise<bool> {
+        self.channel.recv_success_failure()
+    }
+
+    /// Close the channel cleanly and wait for it to be closed, returning exit
+    /// code if received.
+    #[tracing::instrument(skip(self))]
+    pub async fn wait(mut self) -> Result<Option<u32>, SshError> {
+        let exit_code = self.exit_code().wait().await.copied();
+
+        if !self.channel.is_closed() {
+            self.channel
+                .close()
+                .await
+                .map_err(SshCommandError::Russh)
+                .map_err(SshError::Command)?;
+            self.channel.wait_close().await;
+        }
+
+        info!(exit_code = exit_code, "Remote command completed");
+
+        Ok(exit_code)
+    }
+}
+
+/// Execute a remote command and return a streaming handle.
+///
+/// - stdout/stderr streams are created before exec to avoid missing data.
+/// - exec requests a reply, so success_failure() will resolve.
+#[tracing::instrument(skip(session), fields(command))]
 pub(super) async fn ssh_command(
-    handle: &mut SshClientHandle,
+    session: &AsyncSession<NoCheckHandler>,
     command: &str,
-) -> Result<u32, SshCommandError> {
-    let mut channel = handle
-        .channel_open_session()
+) -> Result<SshCommandHandle, SshCommandError> {
+    let channel = session
+        .open_channel()
         .await
         .map_err(SshCommandError::ChannelOpen)?;
 
-    info!("Executing remote command");
+    let stdout = channel.stdout();
+    let stderr = channel.stderr();
 
     channel
         .exec(true, command)
@@ -45,65 +114,10 @@ pub(super) async fn ssh_command(
             source: e,
         })?;
 
-    let mut stdin = tokio::io::stdin();
-    let mut stdin_buf = vec![0u8; 4096];
-    let mut stdin_open = true;
-
-    let mut stdout = tokio::io::stdout();
-    let mut stderr = tokio::io::stderr();
-
-    let mut exit_code: Option<u32> = None;
-
-    loop {
-        tokio::select! {
-            read = stdin.read(&mut stdin_buf), if stdin_open => {
-                match read {
-                    Ok(0) => {
-                        stdin_open = false;
-                        let _ = channel.eof().await;
-                    }
-                    Ok(n) => {
-                        channel.data(&stdin_buf[..n]).await?;
-                    }
-                    Err(e) => {
-                        stdin_open = false;
-                        let _ = channel.eof().await;
-                        eprintln!("stdin read error: {e}");
-                    }
-                }
-            }
-
-            msg = channel.wait() => {
-                match msg {
-                    Some(ChannelMsg::Data { data }) => {
-                        stdout.write_all(&data).await?;
-                        stdout.flush().await?;
-                    }
-                    Some(ChannelMsg::ExtendedData { data, ext }) => {
-                        if ext == 1 {
-                            stderr.write_all(&data).await?;
-                            stderr.flush().await?;
-                        }
-                    }
-                    Some(ChannelMsg::ExitStatus { exit_status }) => {
-                        exit_code = Some(exit_status);
-                        debug!(exit_status, "Remote process reported exit status");
-                    }
-                    Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) | None => {
-                        break;
-                    }
-                    _ => {}
-                }
-            }
-        }
-    }
-
-    let _ = channel.eof().await;
-    let _ = channel.close().await;
-
-    let code = exit_code.unwrap_or(255);
-
-    info!(exit_code = code, "Remote command completed");
-
-    Ok(code)
+    Ok(SshCommandHandle {
+        stdout,
+        stderr,
+        channel,
+        command: command.to_owned(),
+    })
 }

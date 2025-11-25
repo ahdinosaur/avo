@@ -4,17 +4,21 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+lusid-apply = { path = "../lusid-apply", version = "0.1" }
 lusid-ctx = { path = "../ctx", version = "0.1" }
 lusid-machine = { path = "../machine", version = "0.1" }
 lusid-operation = { path = "../operation", version = "0.1" }
 lusid-params = { path = "../params", version = "0.1" }
 lusid-plan = { path = "../plan", version = "0.1" }
+lusid-ssh = { path = "../ssh", version = "0.1" }
 lusid-store = { path = "../store", version = "0.1" }
 lusid-system = { path = "../system", version = "0.1" }
+lusid-vm = { path = "../vm", version = "0.1" }
 clap.workspace = true
 rimu.workspace = true
 rimu-interop = { path = "../rimu-interop", version = "0.1" }
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 toml = "0.9.8"

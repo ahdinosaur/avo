@@ -25,6 +25,7 @@ const PRIVATE_KEY_FILE: &str = "id_ed25519";
 const PUBLIC_KEY_FILE: &str = "id_ed25519.pub";
 
 impl SshKeypair {
+    /// Load an existing keypair if present, otherwise create and save a new one.
     #[tracing::instrument(skip_all)]
     pub async fn load_or_create(directory: &Path) -> Result<Self, SshKeypairError> {
         if Self::exists(directory).await? {
@@ -38,6 +39,7 @@ impl SshKeypair {
         Ok(keypair)
     }
 
+    /// Create a new in-memory keypair.
     #[tracing::instrument(skip_all)]
     pub fn create() -> Result<Self, SshKeypairError> {
         let ed25519 = Ed25519Keypair::random(&mut OsRng);
@@ -50,6 +52,7 @@ impl SshKeypair {
         })
     }
 
+    /// Save the keypair as OpenSSH files.
     #[tracing::instrument(skip_all)]
     pub async fn save(&self, directory: &Path) -> Result<(), SshKeypairError> {
         fs::setup_directory_access(directory).await?;
@@ -62,6 +65,7 @@ impl SshKeypair {
 
         fs::write_file(&public_key_path, public_key_string.as_bytes()).await?;
         fs::write_file(&private_key_path, private_key_string.as_bytes()).await?;
+
         fs::set_file_mode(&private_key_path, 0o600).await?;
 
         debug!(
@@ -69,19 +73,21 @@ impl SshKeypair {
             private_key = %private_key_path.display(),
             "Saved SSH keypair"
         );
+
         Ok(())
     }
 
+    /// Whether a keypair exists on disk in the directory.
     #[tracing::instrument(skip_all)]
     pub async fn exists(directory: &Path) -> Result<bool, SshKeypairError> {
         let public_key_path = directory.join(PUBLIC_KEY_FILE);
         let private_key_path = directory.join(PRIVATE_KEY_FILE);
-
         let public_key_exists = fs::path_exists(&public_key_path).await?;
         let private_key_exists = fs::path_exists(&private_key_path).await?;
         Ok(public_key_exists && private_key_exists)
     }
 
+    /// Load a keypair from the directory.
     #[tracing::instrument(skip_all)]
     pub async fn load(directory: &Path) -> Result<Self, SshKeypairError> {
         let public_key_path = directory.join(PUBLIC_KEY_FILE);

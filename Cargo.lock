@@ -204,6 +204,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-promise"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "89ec425ee5fc50a9920787f4b3f221d41c68bacb4fb9257a078b89c81cac5e1e"
+dependencies = [
+ "thiserror 2.0.17",
+]
+
+[[package]]
 name = "async-trait"
 version = "0.1.89"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1862,16 +1871,20 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "comfy-table",
+ "lusid-apply",
  "lusid-ctx",
  "lusid-machine",
  "lusid-operation",
  "lusid-params",
  "lusid-plan",
+ "lusid-ssh",
  "lusid-store",
  "lusid-system",
+ "lusid-vm",
  "rimu",
  "rimu-interop",
  "serde",
+ "serde_json",
  "thiserror 2.0.17",
  "tokio",
  "toml",
@@ -2006,6 +2019,7 @@ dependencies = [
 name = "lusid-ssh"
 version = "0.1.0"
 dependencies = [
+ "async-promise",
  "base64ct",
  "lusid-fs",
  "russh",

@@ -1,6 +1,8 @@
 use lusid_ssh::{Ssh, SshConnectOptions, SshError, SshVolume};
+use serde_json::Value;
 use std::{net::Ipv4Addr, sync::Arc, time::Duration};
 use thiserror::Error;
+use tokio::io::{self, copy, stdout, AsyncBufReadExt, AsyncWriteExt};
 use tracing::info;
 
 use crate::instance::Instance;
@@ -9,17 +11,20 @@ use crate::instance::Instance;
 pub enum InstanceExecError {
     #[error(transparent)]
     Ssh(#[from] SshError),
+
+    #[error(transparent)]
+    Io(#[from] io::Error),
 }
 
 pub(super) async fn instance_exec(
     instance: &Instance,
     command: &str,
+    volumes: Vec<SshVolume>,
     timeout: Duration,
-) -> Result<u32, InstanceExecError> {
+) -> Result<Option<u32>, InstanceExecError> {
     let ssh_keypair = instance.ssh_keypair().await.map_err(SshError::Keypair)?;
     let ssh_port = instance.ssh_port;
     let username = instance.user.clone();
-    let volumes = instance.volumes.clone();
 
     let mut ssh = Ssh::connect(SshConnectOptions {
         private_key: ssh_keypair.private_key,
@@ -31,16 +36,18 @@ pub(super) async fn instance_exec(
     .await?;
 
     for volume in volumes {
-        let v = SshVolume {
-            source: volume.source.clone(),
-            dest: volume.dest.clone(),
-        };
-        info!("ssh.sync: {:?}", v);
-        ssh.sync(v).await?;
+        info!("ssh.sync: {:?}", volume);
+        ssh.sync(volume).await?;
     }
 
     info!("ssh.command: {}", command);
-    let exit_code = ssh.command(command).await?;
+    let mut handle = ssh.command(command).await?;
+
+    copy(handle.stdout(), &mut stdout()).await?;
+
+    let exit_code = handle.wait().await?;
+
     ssh.disconnect().await?;
+
     Ok(exit_code)
 }

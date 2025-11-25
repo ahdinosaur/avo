@@ -29,7 +29,6 @@ pub(super) async fn instance_start(
         ssh_port,
         memory_size,
         cpu_count,
-        volumes: _,
         ports,
         graphics,
         kvm,

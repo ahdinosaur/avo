@@ -9,6 +9,7 @@ pub use self::setup::*;
 pub use self::start::*;
 
 use lusid_fs::{self as fs, FsError};
+use lusid_ssh::SshVolume;
 use lusid_ssh::{SshKeypair, SshKeypairError};
 use lusid_system::{Arch, CpuCount, Linux, MemorySize};
 use nix::{
@@ -71,7 +72,6 @@ pub struct Instance {
     pub ssh_port: u16,
     pub memory_size: Option<MemorySize>,
     pub cpu_count: Option<CpuCount>,
-    pub volumes: Vec<VmVolume>,
     pub ports: Vec<VmPort>,
     pub graphics: Option<bool>,
     pub kvm: Option<bool>,
@@ -155,8 +155,13 @@ impl Instance {
         SshKeypair::load_or_create(&self.dir).await
     }
 
-    pub async fn exec(&self, command: &str, timeout: Duration) -> Result<u32, InstanceError> {
-        Ok(instance_exec(self, command, timeout).await?)
+    pub async fn exec(
+        &self,
+        command: &str,
+        volumes: Vec<SshVolume>,
+        timeout: Duration,
+    ) -> Result<Option<u32>, InstanceError> {
+        Ok(instance_exec(self, command, volumes, timeout).await?)
     }
 }
 
@@ -185,19 +190,5 @@ impl Display for VmPort {
             write!(f, "->")?;
         }
         write!(f, "{}/tcp", self.vm_port)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct VmVolume {
-    pub source: PathBuf,
-    pub dest: String,
-}
-
-impl Display for VmVolume {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let source = self.source.to_string_lossy();
-        let dest = &self.dest;
-        write!(f, "{source}:{dest}")
     }
 }
