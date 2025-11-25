@@ -10,5 +10,6 @@ base64ct = "1.6.0"
 russh.workspace = true
 russh-sftp = "2.1.1"
 thiserror.workspace = true
+termion = "4.0.6"
 tokio.workspace = true
 tracing.workspace = true

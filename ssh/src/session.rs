@@ -279,6 +279,19 @@ impl AsyncChannel {
     pub fn is_closed(&self) -> bool {
         self.reader.is_finished()
     }
+
+    /// Change the window size
+    pub async fn window_change(
+        &self,
+        col_width: u32,
+        row_height: u32,
+        pix_width: u32,
+        pix_height: u32,
+    ) -> Result<(), SshError> {
+        self.write_half
+            .window_change(col_width, row_height, pix_width, pix_height)
+            .await
+    }
 }
 
 impl Deref for AsyncChannel {
