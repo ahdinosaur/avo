@@ -74,13 +74,13 @@ pub(super) async fn ssh_command(
                 resolve_exit_code.into_resolve(exit_status);
             }
             Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) | None => {
+                info!(exit_code = code, "Remote command completed");
                 break;
             }
             _ => {}
         }
     }
 
-    info!(exit_code = code, "Remote command completed");
-
-    Ok(code)
+    // TODO: How do I return the channels above? The current code will just await until done, then
+    // return. I want to return before await.
 }
