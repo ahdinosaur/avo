@@ -1,6 +1,7 @@
-use russh::ChannelMsg;
+use async_promise::Promise;
+use russh::{ChannelMsg, CryptoVec};
 use thiserror::Error;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::mpsc::{self, Receiver};
 use tracing::{debug, info, instrument};
 
 use super::SshClientHandle;
@@ -23,6 +24,15 @@ pub enum SshCommandError {
 
     #[error("SSH protocol error: {0}")]
     Russh(#[from] russh::Error),
+
+    #[error("SSH protocol error: {0}")]
+    ChannelSend(#[from] mpsc::error::SendError<CryptoVec>),
+}
+
+pub struct SshCommandOutput {
+    stdout: Receiver<CryptoVec>,
+    stderr: Receiver<CryptoVec>,
+    exit_code: Promise<u32>,
 }
 
 #[instrument(skip(handle), fields(command))]
@@ -45,63 +55,30 @@ pub(super) async fn ssh_command(
             source: e,
         })?;
 
-    let mut stdin = tokio::io::stdin();
-    let mut stdin_buf = vec![0u8; 4096];
-    let mut stdin_open = true;
-
-    let mut stdout = tokio::io::stdout();
-    let mut stderr = tokio::io::stderr();
-
-    let mut exit_code: Option<u32> = None;
+    let (stdout_tx, stdout_rx) = mpsc::unbounded_channel();
+    let (stderr_tx, stderr_rx) = mpsc::unbounded_channel();
+    let (resolve_exit_code, exit_code) = async_promise::channel::<u32>();
 
     loop {
-        tokio::select! {
-            read = stdin.read(&mut stdin_buf), if stdin_open => {
-                match read {
-                    Ok(0) => {
-                        stdin_open = false;
-                        let _ = channel.eof().await;
-                    }
-                    Ok(n) => {
-                        channel.data(&stdin_buf[..n]).await?;
-                    }
-                    Err(e) => {
-                        stdin_open = false;
-                        let _ = channel.eof().await;
-                        eprintln!("stdin read error: {e}");
-                    }
+        match channel.wait().await {
+            Some(ChannelMsg::Data { data }) => {
+                stdout_tx.send(data)?;
+            }
+            Some(ChannelMsg::ExtendedData { data, ext }) => {
+                if ext == 1 {
+                    stdout_tx.send(data)?;
                 }
             }
-
-            msg = channel.wait() => {
-                match msg {
-                    Some(ChannelMsg::Data { data }) => {
-                        stdout.write_all(&data).await?;
-                        stdout.flush().await?;
-                    }
-                    Some(ChannelMsg::ExtendedData { data, ext }) => {
-                        if ext == 1 {
-                            stderr.write_all(&data).await?;
-                            stderr.flush().await?;
-                        }
-                    }
-                    Some(ChannelMsg::ExitStatus { exit_status }) => {
-                        exit_code = Some(exit_status);
-                        debug!(exit_status, "Remote process reported exit status");
-                    }
-                    Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) | None => {
-                        break;
-                    }
-                    _ => {}
-                }
+            Some(ChannelMsg::ExitStatus { exit_status }) => {
+                debug!(exit_status, "Remote process reported exit status");
+                resolve_exit_code.into_resolve(exit_status);
             }
+            Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) | None => {
+                break;
+            }
+            _ => {}
         }
     }
-
-    let _ = channel.eof().await;
-    let _ = channel.close().await;
-
-    let code = exit_code.unwrap_or(255);
 
     info!(exit_code = code, "Remote command completed");
 
