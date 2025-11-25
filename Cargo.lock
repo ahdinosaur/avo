@@ -2069,6 +2069,7 @@ dependencies = [
  "tokio",
  "toml",
  "tracing",
+ "valuable",
  "which",
 ]
 

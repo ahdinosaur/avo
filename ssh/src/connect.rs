@@ -26,9 +26,6 @@ pub enum SshConnectError {
     #[error("timed out connecting to SSH server")]
     Timeout,
 
-    #[error("SSH authentication failed (public key)")]
-    AuthFailed,
-
     #[error("SSH protocol error: {0}")]
     Russh(#[from] russh::Error),
 }
