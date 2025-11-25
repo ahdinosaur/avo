@@ -4,12 +4,14 @@ use std::{env, io, path::PathBuf, time::Duration};
 
 use clap::{Parser, Subcommand};
 use lusid_apply::{apply, ApplyError, ApplyOptions};
+use lusid_ctx::Context;
+use lusid_ssh::SshVolume;
 use lusid_system::Hostname;
-use lusid_vm::{VmOptions, VmVolume};
+use lusid_vm::{vm, VmError, VmOptions};
 use thiserror::Error;
 use tracing::error;
 
-use crate::config::{Config, ConfigError};
+use crate::config::{Config, ConfigError, MachineConfig};
 
 const LUDIS_APPLY_X86_64: &[u8] =
     include_bytes!("../../target/x86_64-unknown-linux-gnu/release/lusid-apply");
@@ -126,6 +128,9 @@ pub enum AppError {
 
     #[error(transparent)]
     ApplyError(#[from] ApplyError),
+
+    #[error(transparent)]
+    VmError(#[from] VmError),
 }
 
 pub async fn get_config(cli: &Cli) -> Result<Config, AppError> {
@@ -207,31 +212,50 @@ async fn cmd_dev_apply(
     machine_id: String,
     params_json: Option<String>,
 ) -> Result<(), AppError> {
-    let config = config
-        .machines
-        .get(&machine_id)
-        .ok_or_else(|| AppError::MachineIdNotFound { machine_id })?;
+    let MachineConfig { plan, machine } =
+        config
+            .machines
+            .get(&machine_id)
+            .cloned()
+            .ok_or_else(|| AppError::MachineIdNotFound {
+                machine_id: machine_id.clone(),
+            })?;
     let instance_id = &machine_id;
     let ports = vec![];
 
-    VmVolume {
-        source: cwd.join("vm/examples"),
-        dest: "/home/debian/test".to_owned(),
-    }];
-    let volumes = vec![VmVolume { sou }];
-    let command = "echo hello world";
+    let plan_path = plan.as_path().unwrap();
+    let plan_dir = plan_path.parent().unwrap();
+    let plan_filename = plan_path.file_name().unwrap().to_string_lossy();
+    let volumes = vec![
+        SshVolume::FileBytes {
+            local: LUDIS_APPLY_X86_64.to_vec(),
+            remote: "/home/debian/lusid-apply".to_owned(),
+        },
+        SshVolume::DirPath {
+            local: plan_dir.to_path_buf(),
+            remote: "/home/debian/plan".to_owned(),
+        },
+    ];
+
+    let mut command = format!("/home/debian/lusid-apply --plan /home/debian/plan/{plan_filename}");
+    if let Some(params_json) = params_json {
+        command.push_str(&format!(" --params '{params_json}'"));
+    }
+
     let timeout = Duration::from_secs(10);
     let options = VmOptions {
         instance_id,
-        machine: &config.machine,
+        machine: &machine,
         ports,
         volumes,
-        command,
+        command: &command,
         timeout,
     };
+
     let mut ctx = Context::create().unwrap();
-    run(&mut ctx, options).await.unwrap();
-    todo!()
+    vm(&mut ctx, options).await?;
+
+    Ok(())
 }
 
 async fn cmd_dev_ssh(config: Config, machine_id: String) -> Result<(), AppError> {

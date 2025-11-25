@@ -19,7 +19,7 @@ use crate::{
             overlay::{setup_overlay, CreateOverlayImageError},
             ovmf::{setup_ovmf_uefi_variables, ConvertOvmfVarsError},
         },
-        Instance, InstancePaths, VmPort, VmVolume,
+        Instance, InstancePaths, VmPort,
     },
 };
 
@@ -27,7 +27,6 @@ pub struct InstanceSetupOptions<'a> {
     pub instance_id: &'a str,
     pub machine: &'a Machine,
     pub ports: Vec<VmPort>,
-    pub volumes: Vec<VmVolume>,
 }
 
 #[derive(Error, Debug)]
@@ -65,7 +64,6 @@ pub async fn setup_instance(
         instance_id,
         machine,
         ports,
-        volumes,
     } = options;
 
     let source_image = get_image(ctx, machine).await?;
@@ -118,7 +116,6 @@ pub async fn setup_instance(
         ssh_port,
         memory_size,
         cpu_count,
-        volumes,
         ports,
         graphics,
         // TODO set via global lusid config

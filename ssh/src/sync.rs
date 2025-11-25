@@ -15,9 +15,10 @@ use super::SshClientHandle;
 use lusid_fs::{self as fs, FsError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SshVolume {
-    pub source: PathBuf,
-    pub dest: String,
+pub enum SshVolume {
+    DirPath { local: PathBuf, remote: String },
+    FilePath { local: PathBuf, remote: String },
+    FileBytes { local: Vec<u8>, remote: String },
 }
 
 #[derive(Error, Debug)]
@@ -74,17 +75,10 @@ async fn sftp_upload_volume(
     sftp: &mut SftpSession,
     volume: &SshVolume,
 ) -> Result<(), SshSyncError> {
-    let md = tfs::symlink_metadata(&volume.source).await?;
-    let ft = md.file_type();
-
-    if ft.is_file() {
-        sftp_upload_file(sftp, &volume.source, &volume.dest).await
-    } else if ft.is_dir() {
-        sftp_upload_dir(sftp, &volume.source, &volume.dest).await
-    } else if ft.is_symlink() {
-        Err(SshSyncError::TopLevelSymlink)
-    } else {
-        Err(SshSyncError::UnsupportedSource)
+    match volume {
+        SshVolume::DirPath { local, remote } => sftp_upload_dir(sftp, local, remote).await,
+        SshVolume::FilePath { local, remote } => sftp_upload_file(sftp, local, remote).await,
+        SshVolume::FileBytes { local, remote } => sftp_upload_file_bytes(sftp, local, remote).await,
     }
 }
 
@@ -138,13 +132,14 @@ async fn sftp_upload_dir(
     Ok(())
 }
 
-// Upload a single file by overwriting it (create + truncate).
+// Upload a single file by overwriting it
 #[instrument(skip(sftp))]
 async fn sftp_upload_file(
     sftp: &mut SftpSession,
     local: &Path,
     remote: &str,
 ) -> Result<(), SshSyncError> {
+    #[allow(clippy::collapsible_if)]
     if let Some((parent, _)) = remote.rsplit_once('/') {
         if !parent.is_empty() {
             trace!(parent, "Ensuring remote parent directory exists");
@@ -173,6 +168,34 @@ async fn sftp_upload_file(
         }
         rf.write_all(&buf[..n]).await?;
     }
+    rf.flush().await?;
+    rf.shutdown().await?;
+
+    debug!("File upload completed");
+    Ok(())
+}
+
+#[instrument(skip(sftp))]
+async fn sftp_upload_file_bytes(
+    sftp: &mut SftpSession,
+    local: &[u8],
+    remote: &str,
+) -> Result<(), SshSyncError> {
+    #[allow(clippy::collapsible_if)]
+    if let Some((parent, _)) = remote.rsplit_once('/') {
+        if !parent.is_empty() {
+            trace!(parent, "Ensuring remote parent directory exists");
+            sftp_mkdirs(sftp, parent).await?;
+        }
+    }
+
+    let flags = OpenFlags::CREATE
+        .union(OpenFlags::TRUNCATE)
+        .union(OpenFlags::WRITE);
+    let mut rf = sftp.open_with_flags(remote, flags).await?;
+    trace!("Opened remote file for writing");
+
+    rf.write_all(local).await?;
     rf.flush().await?;
     rf.shutdown().await?;
 

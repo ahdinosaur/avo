@@ -21,6 +21,13 @@ impl PlanId {
             }
         }
     }
+
+    pub fn as_path(self) -> Option<PathBuf> {
+        match self {
+            PlanId::Path(path) => Some(path),
+            PlanId::Git(_, _) => None,
+        }
+    }
 }
 
 fn relative<P: AsRef<Path>>(current_path: &Path, next_path: P) -> PathBuf {

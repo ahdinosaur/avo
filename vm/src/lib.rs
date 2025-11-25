@@ -6,10 +6,11 @@ mod paths;
 mod qemu;
 mod utils;
 
-pub use crate::instance::{VmPort, VmVolume};
+pub use crate::instance::VmPort;
 
 use lusid_ctx::Context as BaseContext;
 use lusid_machine::Machine;
+use lusid_ssh::SshVolume;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::time::sleep;
@@ -32,7 +33,7 @@ pub struct VmOptions<'a> {
     pub instance_id: &'a str,
     pub machine: &'a Machine,
     pub ports: Vec<VmPort>,
-    pub volumes: Vec<VmVolume>,
+    pub volumes: Vec<SshVolume>,
     pub command: &'a str,
     pub timeout: Duration,
 }
@@ -56,7 +57,6 @@ pub async fn vm(ctx: &mut BaseContext, options: VmOptions<'_>) -> Result<(), VmE
             instance_id,
             machine,
             ports,
-            volumes,
         };
         let inst = Instance::setup(&mut ctx, setup_options).await?;
         inst.save().await?;
@@ -75,7 +75,7 @@ pub async fn vm(ctx: &mut BaseContext, options: VmOptions<'_>) -> Result<(), VmE
         }
     }
 
-    instance.exec(command, timeout).await?;
+    instance.exec(command, volumes, timeout).await?;
 
     Ok(())
 }
