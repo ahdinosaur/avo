@@ -1,4 +1,4 @@
-//! Async SSH channel and session abstractions, adapted from async-ssh2-russh.
+//! Async SSH channel and session abstractions.
 //!
 //! Provides:
 //! - AsyncSession: thin wrapper around russh::client::Handle with convenience
