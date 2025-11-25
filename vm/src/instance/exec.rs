@@ -16,7 +16,7 @@ pub(super) async fn instance_exec(
     command: &str,
     volumes: Vec<SshVolume>,
     timeout: Duration,
-) -> Result<u32, InstanceExecError> {
+) -> Result<Option<u32>, InstanceExecError> {
     let ssh_keypair = instance.ssh_keypair().await.map_err(SshError::Keypair)?;
     let ssh_port = instance.ssh_port;
     let username = instance.user.clone();
@@ -36,7 +36,8 @@ pub(super) async fn instance_exec(
     }
 
     info!("ssh.command: {}", command);
-    let exit_code = ssh.command(command).await?;
+    let handle = ssh.command(command).await?;
+    let exit_code = handle.wait().await?;
     ssh.disconnect().await?;
     Ok(exit_code)
 }

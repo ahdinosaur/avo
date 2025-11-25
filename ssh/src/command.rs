@@ -1,10 +1,10 @@
 use async_promise::Promise;
-use russh::{ChannelMsg, CryptoVec};
 use thiserror::Error;
-use tokio::sync::mpsc::{self, Receiver};
-use tracing::{debug, info, instrument};
+use tokio::io::AsyncWrite;
 
-use super::SshClientHandle;
+use crate::channel::{AsyncChannel, AsyncSession, NoCheckHandler};
+use crate::stream::ReadStream;
+use crate::SshError;
 
 /// Command execution specific errors.
 #[derive(Error, Debug)]
@@ -19,33 +19,78 @@ pub enum SshCommandError {
         source: russh::Error,
     },
 
-    #[error("I/O error while streaming command data: {0}")]
-    Io(#[from] std::io::Error),
-
     #[error("SSH protocol error: {0}")]
     Russh(#[from] russh::Error),
-
-    #[error("SSH protocol error: {0}")]
-    ChannelSend(#[from] mpsc::error::SendError<CryptoVec>),
 }
 
-pub struct SshCommandOutput {
-    stdout: Receiver<CryptoVec>,
-    stderr: Receiver<CryptoVec>,
-    exit_code: Promise<u32>,
+/// A streaming handle to a running SSH command.
+///
+/// - stdout/stderr are AsyncBufRead (and AsyncRead) via ReadStream.
+/// - stdin is available via stdin().
+/// - exit status and other events exposed as Promises.
+/// - call wait() to await completion and get the exit code.
+pub struct SshCommandHandle {
+    pub stdout: ReadStream,
+    pub stderr: ReadStream,
+    channel: AsyncChannel,
 }
 
-#[instrument(skip(handle), fields(command))]
+impl SshCommandHandle {
+    /// Obtain a writer for the command's stdin.
+    pub fn stdin(&self) -> impl AsyncWrite + use<> {
+        self.channel.stdin()
+    }
+
+    /// Promise that resolves to the remote exit status when received.
+    pub fn exit_status(&self) -> &Promise<u32> {
+        self.channel.recv_exit_status()
+    }
+
+    /// Promise that resolves when EOF is received for stdout/stderr.
+    pub fn eof(&self) -> &Promise<()> {
+        self.channel.recv_eof()
+    }
+
+    /// Promise that resolves when the server replies Success/Failure to exec.
+    pub fn success_failure(&self) -> &Promise<bool> {
+        self.channel.recv_success_failure()
+    }
+
+    /// Close the channel cleanly and wait for it to be closed, returning exit
+    /// status if received.
+    #[tracing::instrument(skip(self))]
+    pub async fn wait(mut self) -> Result<Option<u32>, SshError> {
+        let status = self.exit_status().wait().await.copied();
+
+        if !self.channel.is_closed() {
+            self.channel
+                .close()
+                .await
+                .map_err(SshCommandError::Russh)
+                .map_err(SshError::Command)?;
+            self.channel.wait_close().await;
+        }
+
+        Ok(status)
+    }
+}
+
+/// Execute a remote command and return a streaming handle.
+///
+/// - stdout/stderr streams are created before exec to avoid missing data.
+/// - exec requests a reply, so success_failure() will resolve.
+#[tracing::instrument(skip(session), fields(command))]
 pub(super) async fn ssh_command(
-    handle: &mut SshClientHandle,
+    session: &AsyncSession<NoCheckHandler>,
     command: &str,
-) -> Result<u32, SshCommandError> {
-    let mut channel = handle
-        .channel_open_session()
+) -> Result<SshCommandHandle, SshCommandError> {
+    let channel = session
+        .open_channel()
         .await
         .map_err(SshCommandError::ChannelOpen)?;
 
-    info!("Executing remote command");
+    let stdout = channel.stdout();
+    let stderr = channel.stderr();
 
     channel
         .exec(true, command)
@@ -55,32 +100,9 @@ pub(super) async fn ssh_command(
             source: e,
         })?;
 
-    let (stdout_tx, stdout_rx) = mpsc::unbounded_channel();
-    let (stderr_tx, stderr_rx) = mpsc::unbounded_channel();
-    let (resolve_exit_code, exit_code) = async_promise::channel::<u32>();
-
-    loop {
-        match channel.wait().await {
-            Some(ChannelMsg::Data { data }) => {
-                stdout_tx.send(data)?;
-            }
-            Some(ChannelMsg::ExtendedData { data, ext }) => {
-                if ext == 1 {
-                    stdout_tx.send(data)?;
-                }
-            }
-            Some(ChannelMsg::ExitStatus { exit_status }) => {
-                debug!(exit_status, "Remote process reported exit status");
-                resolve_exit_code.into_resolve(exit_status);
-            }
-            Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) | None => {
-                info!(exit_code = code, "Remote command completed");
-                break;
-            }
-            _ => {}
-        }
-    }
-
-    // TODO: How do I return the channels above? The current code will just await until done, then
-    // return. I want to return before await.
+    Ok(SshCommandHandle {
+        stdout,
+        stderr,
+        channel,
+    })
 }
