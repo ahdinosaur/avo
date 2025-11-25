@@ -62,11 +62,7 @@ pub enum MachinesCommand {
 #[derive(Subcommand, Debug)]
 pub enum LocalCommand {
     // Apply config to local machine.
-    Apply {
-        /// Parameters as a JSON string.
-        #[arg(long = "params")]
-        params_json: Option<String>,
-    },
+    Apply,
 }
 
 #[derive(Subcommand, Debug)]
@@ -76,10 +72,6 @@ pub enum RemoteCommand {
         /// Machine identifier
         #[arg(long = "machine")]
         machine_id: String,
-
-        /// Parameters as a JSON string.
-        #[arg(long = "params")]
-        params_json: Option<String>,
     },
 
     // Ssh into remote machine.
@@ -96,10 +88,6 @@ pub enum DevCommand {
         /// Machine identifier
         #[arg(long = "machine")]
         machine_id: String,
-
-        /// Parameters as a JSON string.
-        #[arg(long = "params")]
-        params_json: Option<String>,
     },
 
     // Ssh into virtual machine.
@@ -131,6 +119,9 @@ pub enum AppError {
 
     #[error(transparent)]
     VmError(#[from] VmError),
+
+    #[error("failed to convert params toml to json: {0}")]
+    ParamsTomlToJson(#[from] serde_json::Error),
 }
 
 pub async fn get_config(cli: &Cli) -> Result<Config, AppError> {
@@ -151,20 +142,14 @@ pub async fn run(cli: Cli) -> Result<(), AppError> {
             MachinesCommand::List => cmd_machines_list(config).await,
         },
         Command::Local { command } => match command {
-            LocalCommand::Apply { params_json } => cmd_local_apply(config, params_json).await,
+            LocalCommand::Apply => cmd_local_apply(config).await,
         },
         Command::Remote { command } => match command {
-            RemoteCommand::Apply {
-                machine_id,
-                params_json,
-            } => cmd_remote_apply(config, machine_id, params_json).await,
+            RemoteCommand::Apply { machine_id } => cmd_remote_apply(config, machine_id).await,
             RemoteCommand::Ssh { machine_id } => cmd_remote_ssh(config, machine_id).await,
         },
         Command::Dev { command } => match command {
-            DevCommand::Apply {
-                machine_id,
-                params_json,
-            } => cmd_dev_apply(config, machine_id, params_json).await,
+            DevCommand::Apply { machine_id } => cmd_dev_apply(config, machine_id).await,
             DevCommand::Ssh { machine_id } => cmd_dev_ssh(config, machine_id).await,
         },
     }
@@ -175,17 +160,22 @@ async fn cmd_machines_list(config: Config) -> Result<(), AppError> {
     Ok(())
 }
 
-async fn cmd_local_apply(config: Config, params_json: Option<String>) -> Result<(), AppError> {
+async fn cmd_local_apply(config: Config) -> Result<(), AppError> {
     let hostname = Hostname::get().map_err(AppError::GetHostname)?;
-    let machine = config
+    let Some(MachineConfig {
+        plan,
+        machine: _,
+        params,
+    }) = config
         .machines
         .into_values()
-        .find(|config| config.machine.hostname == hostname);
-    let Some(machine) = machine else {
+        .find(|config| config.machine.hostname == hostname)
+    else {
         return Err(AppError::LocalMachineNotFound { hostname });
     };
 
-    let plan_id = machine.plan;
+    let plan_id = plan;
+    let params_json = params.map(|p| serde_json::to_string(&p)).transpose()?;
     let options = ApplyOptions {
         plan_id,
         params_json,
@@ -195,11 +185,7 @@ async fn cmd_local_apply(config: Config, params_json: Option<String>) -> Result<
     Ok(())
 }
 
-async fn cmd_remote_apply(
-    config: Config,
-    machine_id: String,
-    params_json: Option<String>,
-) -> Result<(), AppError> {
+async fn cmd_remote_apply(config: Config, machine_id: String) -> Result<(), AppError> {
     todo!()
 }
 
@@ -207,19 +193,21 @@ async fn cmd_remote_ssh(config: Config, machine_id: String) -> Result<(), AppErr
     todo!()
 }
 
-async fn cmd_dev_apply(
-    config: Config,
-    machine_id: String,
-    params_json: Option<String>,
-) -> Result<(), AppError> {
-    let MachineConfig { plan, machine } =
-        config
-            .machines
-            .get(&machine_id)
-            .cloned()
-            .ok_or_else(|| AppError::MachineIdNotFound {
-                machine_id: machine_id.clone(),
-            })?;
+async fn cmd_dev_apply(config: Config, machine_id: String) -> Result<(), AppError> {
+    let MachineConfig {
+        plan,
+        machine,
+        params,
+    } = config
+        .machines
+        .get(&machine_id)
+        .cloned()
+        .ok_or_else(|| AppError::MachineIdNotFound {
+            machine_id: machine_id.clone(),
+        })?;
+
+    let params_json = params.map(|p| serde_json::to_string(&p)).transpose()?;
+
     let instance_id = &machine_id;
     let ports = vec![];
 
