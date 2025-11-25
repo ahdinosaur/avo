@@ -16,7 +16,7 @@ use tracing::{debug, info, instrument, trace, warn};
 
 use lusid_fs::{self as fs, FsError};
 
-use crate::channel::{AsyncSession, NoCheckHandler};
+use crate::session::{AsyncSession, NoCheckHandler};
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum SshVolume {
@@ -172,7 +172,8 @@ async fn sftp_upload_file(
     local: &Path,
     remote: &str,
 ) -> Result<(), SshSyncError> {
-    if let Some((parent, _)) = remote.rsplit_once('/') {
+    #[allow(clippy::collapsible_if)]
+    if let Some(parent) = remote_parent(remote) {
         if !parent.is_empty() {
             trace!(parent, "Ensuring remote parent directory exists");
             sftp_mkdirs(sftp, parent).await?;
@@ -216,6 +217,7 @@ async fn sftp_upload_file_bytes(
     permissions: Option<u32>,
     remote: &str,
 ) -> Result<(), SshSyncError> {
+    #[allow(clippy::collapsible_if)]
     if let Some(parent) = remote_parent(remote) {
         if !parent.is_empty() {
             trace!(parent, "Ensuring remote parent directory exists");

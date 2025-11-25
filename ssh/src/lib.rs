@@ -1,7 +1,7 @@
-mod channel;
 mod command;
 mod connect;
 mod keypair;
+mod session;
 mod stream;
 mod sync;
 
@@ -13,8 +13,8 @@ pub use crate::sync::{SshSyncError, SshVolume};
 use thiserror::Error;
 use tokio::net::ToSocketAddrs;
 
-use crate::channel::{AsyncSession, NoCheckHandler};
 use crate::connect::connect_with_retry;
+use crate::session::{AsyncSession, NoCheckHandler};
 
 type Session = AsyncSession<NoCheckHandler>;
 

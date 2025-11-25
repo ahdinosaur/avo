@@ -2,12 +2,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use russh::client::Config;
-use russh::keys::{PrivateKey, PrivateKeyWithHashAlg};
+use russh::keys::PrivateKey;
 use thiserror::Error;
 use tokio::net::ToSocketAddrs;
 use tokio::time::{sleep, Instant};
 
-use crate::channel::{AsyncSession, NoCheckHandler};
+use crate::session::{AsyncSession, NoCheckHandler};
 
 #[derive(Debug, Clone)]
 pub struct SshConnectOptions<Addrs>

@@ -6,7 +6,6 @@ use lusid_plan::{self, plan, PlanError, PlanId};
 use lusid_resource::{Resource, ResourceState, ResourceStateError};
 use lusid_store::Store;
 use rimu::SourceId;
-use std::path::PathBuf;
 use thiserror::Error;
 use tracing::{debug, error, info};
 

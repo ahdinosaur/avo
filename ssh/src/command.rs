@@ -3,7 +3,7 @@ use thiserror::Error;
 use tokio::io::AsyncWrite;
 use tracing::info;
 
-use crate::channel::{AsyncChannel, AsyncSession, NoCheckHandler};
+use crate::session::{AsyncChannel, AsyncSession, NoCheckHandler};
 use crate::stream::ReadStream;
 use crate::SshError;
 
