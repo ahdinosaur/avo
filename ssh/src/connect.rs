@@ -57,9 +57,7 @@ where
     tracing::info!("Connecting to SSH");
 
     let mut session = loop {
-        match AsyncSession::connect_unauthenticated(config.clone(), addrs.clone(), NoCheckHandler)
-            .await
-        {
+        match AsyncSession::connect(config.clone(), addrs.clone(), NoCheckHandler).await {
             Ok(session) => {
                 tracing::trace!("SSH transport established");
                 break session;
@@ -94,19 +92,7 @@ where
 
     tracing::debug!(username = %username, "Authenticating over SSH");
 
-    let hash_alg = session.best_supported_rsa_hash().await?.flatten();
-    let auth = session
-        .authenticate_publickey(
-            &username,
-            PrivateKeyWithHashAlg::new(Arc::new(private_key), hash_alg),
-        )
-        .await?;
+    session.auth_publickey(username, private_key).await?;
 
-    if !auth.success() {
-        tracing::warn!("SSH authentication failed");
-        return Err(SshConnectError::AuthFailed);
-    }
-
-    tracing::info!("SSH authentication successful");
     Ok(session)
 }

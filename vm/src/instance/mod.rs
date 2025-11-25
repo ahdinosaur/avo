@@ -160,7 +160,7 @@ impl Instance {
         command: &str,
         volumes: Vec<SshVolume>,
         timeout: Duration,
-    ) -> Result<u32, InstanceError> {
+    ) -> Result<Option<u32>, InstanceError> {
         Ok(instance_exec(self, command, volumes, timeout).await?)
     }
 }

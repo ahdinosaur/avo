@@ -9,12 +9,11 @@
 
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
-use std::path::Path;
 use std::sync::Arc;
 
 use async_promise::Promise;
 use russh::client::{connect, Config, Handle, Handler, Msg};
-use russh::keys::{load_secret_key, ssh_key, PrivateKeyWithHashAlg};
+use russh::keys::{ssh_key, PrivateKey, PrivateKeyWithHashAlg};
 use russh::{ChannelMsg, ChannelWriteHalf, CryptoVec, Error as SshError};
 use tokio::io::AsyncWrite;
 use tokio::net::ToSocketAddrs;
@@ -50,7 +49,7 @@ pub struct AsyncSession<H: Handler> {
 impl<H: 'static + Handler> AsyncSession<H> {
     /// Connect to an SSH server using the provided configuration and handler,
     /// without beginning authentication.
-    pub async fn connect_unauthenticated(
+    pub async fn connect(
         config: Arc<Config>,
         addrs: impl ToSocketAddrs,
         handler: H,
@@ -70,30 +69,26 @@ impl AsyncSession<NoCheckHandler> {
     /// Connect and authenticate with the given user and key_path via public key.
     ///
     /// Uses NoCheckHandler (skips host key verification).
-    pub async fn connect_publickey(
-        config: impl Into<Arc<Config>>,
-        addrs: impl ToSocketAddrs,
-        user: impl Into<String>,
-        key_path: impl AsRef<Path>,
-    ) -> Result<Self, SshError> {
-        let key_pair = load_secret_key(key_path, None)?;
-        let mut session = connect(config.into(), addrs, NoCheckHandler).await?;
-
-        let auth_res = session
+    pub async fn auth_publickey(
+        &mut self,
+        username: impl AsRef<str>,
+        private_key: PrivateKey,
+    ) -> Result<(), SshError> {
+        let hash_alg = self.best_supported_rsa_hash().await?.flatten();
+        let auth = self
             .authenticate_publickey(
-                user,
-                PrivateKeyWithHashAlg::new(
-                    Arc::new(key_pair),
-                    session.best_supported_rsa_hash().await?.flatten(),
-                ),
+                username.as_ref(),
+                PrivateKeyWithHashAlg::new(Arc::new(private_key), hash_alg),
             )
             .await?;
 
-        if auth_res.success() {
-            Ok(Self { session })
-        } else {
-            Err(SshError::NotAuthenticated)
+        if !auth.success() {
+            tracing::warn!("SSH authentication failed");
+            return Err(SshError::NotAuthenticated);
         }
+
+        tracing::info!("SSH authentication successful");
+        Ok(())
     }
 }
 
