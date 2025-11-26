@@ -1,6 +1,9 @@
 use async_trait::async_trait;
 use lusid_cmd::{Command, CommandError};
-use std::collections::BTreeSet;
+use std::{
+    collections::BTreeSet,
+    io::{stdout, Write},
+};
 use thiserror::Error;
 use tracing::{debug, info};
 
@@ -63,7 +66,8 @@ impl OperationType for Apt {
                     let mut cmd = Command::new("apt-get");
                     cmd.env("DEBIAN_FRONTEND", "noninteractive")
                         .arg("update")
-                        .stdout(true);
+                        .stdout(true)
+                        .stderr(true);
                     cmd.sudo().run().await?;
                 }
                 AptOperation::Install { packages } => {
@@ -78,9 +82,9 @@ impl OperationType for Apt {
                         .arg("install")
                         .arg("-y")
                         .args(packages)
-                        .stdout(true);
-                    let output = cmd.sudo().run().await?;
-                    // info!("apt output: {}", String::from_utf8_lossy(&output.stdout));
+                        .stdout(true)
+                        .stderr(true);
+                    cmd.sudo().run().await?;
                 }
             }
         }

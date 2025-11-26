@@ -23,6 +23,7 @@ pub enum CommandError {
 pub struct Command {
     cmd: BaseCommand,
     stdout: bool,
+    stderr: bool,
 }
 
 impl Display for Command {
@@ -47,6 +48,7 @@ impl Command {
         Self {
             cmd: BaseCommand::new(program),
             stdout: false,
+            stderr: false,
         }
     }
 
@@ -93,8 +95,17 @@ impl Command {
         self
     }
 
+    pub fn stderr(&mut self, stderr: bool) -> &mut Command {
+        self.stderr = stderr;
+        self
+    }
+
     pub fn get_stdout(&self) -> bool {
         self.stdout
+    }
+
+    pub fn get_stderr(&self) -> bool {
+        self.stderr
     }
 
     pub fn sudo(self) -> Self {
@@ -104,9 +115,11 @@ impl Command {
 
         privileged_cmd
             .arg("-n") // non-interactive
+            .arg("-E") // preserve environment variables
             .arg(cmd.get_program())
             .args(cmd.get_args())
-            .stdout(self.get_stdout());
+            .stdout(self.get_stdout())
+            .stderr(self.get_stderr());
 
         for env in cmd.get_envs() {
             if let (key, Some(value)) = env {
@@ -129,7 +142,11 @@ impl Command {
             } else {
                 Stdio::piped()
             })
-            .stderr(Stdio::piped())
+            .stderr(if self.stderr {
+                Stdio::inherit()
+            } else {
+                Stdio::piped()
+            })
             .spawn()
             .map_err(|error| CommandError::Spawn {
                 command: self.to_string(),
@@ -138,6 +155,8 @@ impl Command {
     }
 
     pub async fn output(&mut self) -> Result<Output, CommandError> {
+        // NOTE: output() with stdout or stderr = true doesn't seem
+        //   to work as expected, whereas spawn() does.
         self.cmd
             .stdin(Stdio::piped())
             .stdout(if self.stdout {
@@ -145,7 +164,11 @@ impl Command {
             } else {
                 Stdio::piped()
             })
-            .stderr(Stdio::piped())
+            .stderr(if self.stderr {
+                Stdio::inherit()
+            } else {
+                Stdio::piped()
+            })
             .output()
             .await
             .map_err(|error| CommandError::Spawn {
@@ -155,16 +178,25 @@ impl Command {
     }
 
     pub async fn run(&mut self) -> Result<Output, CommandError> {
-        self.output().await.and_then(|out| {
-            if out.status.success() {
-                Ok(out)
-            } else {
-                Err(CommandError::Failure {
-                    command: self.to_string(),
-                    stderr: String::from_utf8_lossy(&out.stderr).to_string(),
-                })
-            }
-        })
+        // NOTE: we use spawn() because output() doesn't seem to work
+        //   with stdout or stderr as expected.
+        let out = self
+            .spawn()?
+            .wait_with_output()
+            .await
+            .map_err(|error| CommandError::Spawn {
+                command: self.to_string(),
+                error,
+            })?;
+
+        if out.status.success() {
+            Ok(out)
+        } else {
+            Err(CommandError::Failure {
+                command: self.to_string(),
+                stderr: String::from_utf8_lossy(&out.stderr).to_string(),
+            })
+        }
     }
 
     pub async fn handle<OutHandler, ErrHandler, HandlerValue, HandlerError>(
