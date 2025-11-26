@@ -6,22 +6,34 @@ use lusid_operation::Operation;
 use lusid_params::{ParamField, ParamType, ParamTypes};
 use rimu::{SourceId, Span, Spanned};
 use serde::Deserialize;
+use thiserror::Error;
+use tokio::process::Command;
 
 use crate::ResourceType;
 
-/// Atomic resource (per-package)
 #[derive(Debug, Clone)]
 pub struct AptResource {
     pub package: String,
 }
 
-/// A minimal state model (placeholder).
 #[derive(Debug, Clone)]
-pub struct AptState {
-    pub installed: bool,
+pub enum AptState {
+    NotInstalled,
+    Installed,
 }
 
-/// A change needed to reach desired state.
+#[derive(Error, Debug)]
+pub enum AptStateError {
+    #[error("failed to spawn dpkg: {0}")]
+    DpkgSpawn(#[from] tokio::io::Error),
+
+    #[error("dpkg failed: {stderr}")]
+    DpkgFailure { stderr: String },
+
+    #[error("failed to parse status: {status}")]
+    ParseStatus { status: String },
+}
+
 #[derive(Debug, Clone)]
 pub enum AptChange {
     Install { package: String },
@@ -78,20 +90,51 @@ impl ResourceType for Apt {
     }
 
     type State = AptState;
-    type StateError = std::convert::Infallible;
-    async fn state(_resource: &Self::Resource) -> Result<Self::State, Self::StateError> {
-        // For demo purposes: always claim not installed.
-        Ok(AptState { installed: false })
+    type StateError = AptStateError;
+    async fn state(resource: &Self::Resource) -> Result<Self::State, Self::StateError> {
+        let output = Command::new("dpkg-query")
+            .args(["-W", "-f='${Status}'", &resource.package])
+            .output()
+            .await
+            .map_err(AptStateError::DpkgSpawn)?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if stderr.contains("no packages found matching") {
+                Ok(AptState::NotInstalled)
+            } else {
+                Err(AptStateError::DpkgFailure {
+                    stderr: stderr.trim().to_string(),
+                })
+            }
+        } else {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let status_parts: Vec<_> = stdout.trim_matches('\'').split(" ").collect();
+            let Some(status) = status_parts.get(2) else {
+                return Err(AptStateError::ParseStatus {
+                    status: stdout.to_string(),
+                });
+            };
+            match *status {
+                "not-installed" => Ok(AptState::NotInstalled),
+                "unpacked" => Ok(AptState::NotInstalled),
+                "half-installed" => Ok(AptState::NotInstalled),
+                "installed" => Ok(AptState::Installed),
+                "config-files" => Ok(AptState::NotInstalled),
+                _ => Err(AptStateError::ParseStatus {
+                    status: stdout.to_string(),
+                }),
+            }
+        }
     }
 
     type Change = AptChange;
     fn change(resource: &Self::Resource, state: &Self::State) -> Option<Self::Change> {
-        if state.installed {
-            None
-        } else {
-            Some(AptChange::Install {
+        match state {
+            AptState::Installed => None,
+            AptState::NotInstalled => Some(AptChange::Install {
                 package: resource.package.clone(),
-            })
+            }),
         }
     }
 
