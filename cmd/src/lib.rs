@@ -15,6 +15,13 @@ pub enum CommandError {
         error: tokio::io::Error,
     },
 
+    #[error("failed to get command output: {command}")]
+    Output {
+        command: String,
+        #[source]
+        error: tokio::io::Error,
+    },
+
     #[error("command failed: {command}\n{stderr}")]
     Failure { command: String, stderr: String },
 }
@@ -155,46 +162,32 @@ impl Command {
     }
 
     pub async fn output(&mut self) -> Result<Output, CommandError> {
-        // NOTE: output() with stdout or stderr = true doesn't seem
-        //   to work as expected, whereas spawn() does.
-        self.cmd
-            .stdin(Stdio::piped())
-            .stdout(if self.stdout {
-                Stdio::inherit()
-            } else {
-                Stdio::piped()
-            })
-            .stderr(if self.stderr {
-                Stdio::inherit()
-            } else {
-                Stdio::piped()
-            })
-            .output()
+        // NOTE (mw): we use spawn() because output() doesn't work
+        //   with stdout or stderr as we expect.
+        //
+        // See: https://docs.rs/tokio/latest/tokio/process/struct.Command.html#method.output
+        //
+        // > Note: `output()`, unlike the standard library, will unconditionally configure
+        // > the stdout/stderr handles to be pipes, even if they have been previously configured.
+        // > If this is not desired then the `spawn` method should be used in combination with the
+        // > `wait_with_output` method on child.
+        self.spawn()?
+            .wait_with_output()
             .await
-            .map_err(|error| CommandError::Spawn {
+            .map_err(|error| CommandError::Output {
                 command: self.to_string(),
                 error,
             })
     }
 
     pub async fn run(&mut self) -> Result<Output, CommandError> {
-        // NOTE: we use spawn() because output() doesn't seem to work
-        //   with stdout or stderr as expected.
-        let out = self
-            .spawn()?
-            .wait_with_output()
-            .await
-            .map_err(|error| CommandError::Spawn {
-                command: self.to_string(),
-                error,
-            })?;
-
-        if out.status.success() {
-            Ok(out)
+        let output = self.output().await?;
+        if output.status.success() {
+            Ok(output)
         } else {
             Err(CommandError::Failure {
                 command: self.to_string(),
-                stderr: String::from_utf8_lossy(&out.stderr).to_string(),
+                stderr: String::from_utf8_lossy(&output.stderr).to_string(),
             })
         }
     }
