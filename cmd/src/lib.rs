@@ -1,8 +1,6 @@
-use std::borrow::Cow;
-use std::env::current_dir;
 use std::fmt::Display;
 use std::path::Path;
-use std::process::ExitStatus;
+use std::process::Stdio;
 use std::{ffi::OsStr, process::Output};
 use tokio::process::{Child, Command as BaseCommand};
 
@@ -24,6 +22,7 @@ pub enum CommandError {
 #[derive(Debug)]
 pub struct Command {
     cmd: BaseCommand,
+    stdout: bool,
 }
 
 impl Display for Command {
@@ -47,6 +46,7 @@ impl Command {
     pub fn new<S: AsRef<OsStr>>(program: S) -> Self {
         Self {
             cmd: BaseCommand::new(program),
+            stdout: false,
         }
     }
 
@@ -88,15 +88,25 @@ impl Command {
         self
     }
 
-    pub fn sudo(self) -> Self {
-        let cmd = self.cmd.into_std();
+    pub fn stdout(&mut self, stdout: bool) -> &mut Command {
+        self.stdout = stdout;
+        self
+    }
 
+    pub fn get_stdout(&self) -> bool {
+        self.stdout
+    }
+
+    pub fn sudo(self) -> Self {
         let mut privileged_cmd = Command::new("sudo");
+
+        let cmd = self.cmd.as_std();
 
         privileged_cmd
             .arg("-n") // non-interactive
             .arg(cmd.get_program())
-            .args(cmd.get_args());
+            .args(cmd.get_args())
+            .stdout(self.get_stdout());
 
         for env in cmd.get_envs() {
             if let (key, Some(value)) = env {
@@ -111,10 +121,43 @@ impl Command {
         privileged_cmd
     }
 
-    pub async fn run(&mut self) -> Result<(ExitStatus, Vec<u8>), CommandError> {
+    pub fn spawn(&mut self) -> Result<Child, CommandError> {
+        self.cmd
+            .stdin(Stdio::piped())
+            .stdout(if self.stdout {
+                Stdio::inherit()
+            } else {
+                Stdio::piped()
+            })
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|error| CommandError::Spawn {
+                command: self.to_string(),
+                error,
+            })
+    }
+
+    pub async fn output(&mut self) -> Result<Output, CommandError> {
+        self.cmd
+            .stdin(Stdio::piped())
+            .stdout(if self.stdout {
+                Stdio::inherit()
+            } else {
+                Stdio::piped()
+            })
+            .stderr(Stdio::piped())
+            .output()
+            .await
+            .map_err(|error| CommandError::Spawn {
+                command: self.to_string(),
+                error,
+            })
+    }
+
+    pub async fn run(&mut self) -> Result<Output, CommandError> {
         self.output().await.and_then(|out| {
             if out.status.success() {
-                Ok((out.status, out.stdout))
+                Ok(out)
             } else {
                 Err(CommandError::Failure {
                     command: self.to_string(),
@@ -147,23 +190,6 @@ impl Command {
                 }),
             }
         })
-    }
-
-    pub fn spawn(&mut self) -> Result<Child, CommandError> {
-        self.cmd.spawn().map_err(|error| CommandError::Spawn {
-            command: self.to_string(),
-            error,
-        })
-    }
-
-    pub async fn output(&mut self) -> Result<Output, CommandError> {
-        self.cmd
-            .output()
-            .await
-            .map_err(|error| CommandError::Spawn {
-                command: self.to_string(),
-                error,
-            })
     }
 }
 

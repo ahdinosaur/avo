@@ -61,7 +61,9 @@ impl OperationType for Apt {
                 AptOperation::Update => {
                     info!("[apt] update");
                     let mut cmd = Command::new("apt-get");
-                    cmd.env("DEBIAN_FRONTEND", "noninteractive").arg("update");
+                    cmd.env("DEBIAN_FRONTEND", "noninteractive")
+                        .arg("update")
+                        .stdout(true);
                     cmd.sudo().run().await?;
                 }
                 AptOperation::Install { packages } => {
@@ -75,8 +77,10 @@ impl OperationType for Apt {
                     cmd.env("DEBIAN_FRONTEND", "noninteractive")
                         .arg("install")
                         .arg("-y")
-                        .args(packages);
-                    cmd.sudo().run().await?;
+                        .args(packages)
+                        .stdout(true);
+                    let output = cmd.sudo().run().await?;
+                    // info!("apt output: {}", String::from_utf8_lossy(&output.stdout));
                 }
             }
         }
