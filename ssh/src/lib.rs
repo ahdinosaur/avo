@@ -4,11 +4,13 @@ mod keypair;
 mod session;
 mod stream;
 mod sync;
+mod terminal;
 
 pub use crate::command::{SshCommandError, SshCommandHandle};
 pub use crate::connect::{SshConnectError, SshConnectOptions};
 pub use crate::keypair::{SshKeypair, SshKeypairError};
 pub use crate::sync::{SshSyncError, SshVolume};
+pub use crate::terminal::SshTerminalError;
 
 use thiserror::Error;
 use tokio::net::ToSocketAddrs;
@@ -25,6 +27,9 @@ pub enum SshError {
 
     #[error(transparent)]
     Command(#[from] SshCommandError),
+
+    #[error(transparent)]
+    Terminal(#[from] SshTerminalError),
 
     #[error(transparent)]
     Sync(#[from] SshSyncError),
@@ -69,6 +74,14 @@ impl Ssh {
         sync::ssh_sync(&self.session, volume)
             .await
             .map_err(SshError::Sync)
+    }
+
+    /// Synchronize a volume (directory, file, or raw bytes) via SFTP.
+    #[tracing::instrument(skip(self))]
+    pub async fn terminal(&mut self) -> Result<Option<u32>, SshError> {
+        terminal::ssh_terminal(&self.session)
+            .await
+            .map_err(SshError::Terminal)
     }
 
     /// Disconnect the SSH session.

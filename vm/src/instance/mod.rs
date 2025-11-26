@@ -2,11 +2,13 @@ mod exec;
 mod paths;
 mod setup;
 mod start;
+mod terminal;
 
-pub use self::exec::*;
-pub use self::paths::*;
+use self::exec::*;
+use self::paths::*;
 pub use self::setup::*;
-pub use self::start::*;
+use self::start::*;
+use self::terminal::*;
 
 use lusid_fs::{self as fs, FsError};
 use lusid_ssh::SshVolume;
@@ -34,6 +36,9 @@ pub enum InstanceError {
 
     #[error(transparent)]
     Exec(#[from] InstanceExecError),
+
+    #[error(transparent)]
+    Terminal(#[from] InstanceTerminalError),
 
     #[error("failed to check whether instance dir exists")]
     DirExists(#[source] fs::FsError),
@@ -162,6 +167,10 @@ impl Instance {
         timeout: Duration,
     ) -> Result<Option<u32>, InstanceError> {
         Ok(instance_exec(self, command, volumes, timeout).await?)
+    }
+
+    pub async fn terminal(&self, timeout: Duration) -> Result<Option<u32>, InstanceError> {
+        Ok(instance_terminal(self, timeout).await?)
     }
 }
 

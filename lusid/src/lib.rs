@@ -5,9 +5,9 @@ use std::{env, io, path::PathBuf, time::Duration};
 use clap::{Parser, Subcommand};
 use lusid_apply::{apply, ApplyError, ApplyOptions};
 use lusid_ctx::Context;
-use lusid_ssh::SshVolume;
+use lusid_ssh::{Ssh, SshVolume};
 use lusid_system::Hostname;
-use lusid_vm::{vm, VmError, VmOptions};
+use lusid_vm::{vm_exec, vm_terminal, VmError, VmExecOptions, VmTerminalOptions};
 use thiserror::Error;
 use tracing::error;
 
@@ -232,7 +232,7 @@ async fn cmd_dev_apply(config: Config, machine_id: String) -> Result<(), AppErro
     }
 
     let timeout = Duration::from_secs(10);
-    let options = VmOptions {
+    let options = VmExecOptions {
         instance_id,
         machine: &machine,
         ports,
@@ -242,11 +242,19 @@ async fn cmd_dev_apply(config: Config, machine_id: String) -> Result<(), AppErro
     };
 
     let mut ctx = Context::create().unwrap();
-    vm(&mut ctx, options).await?;
+    vm_exec(&mut ctx, options).await?;
 
     Ok(())
 }
 
-async fn cmd_dev_ssh(config: Config, machine_id: String) -> Result<(), AppError> {
-    todo!()
+async fn cmd_dev_ssh(_config: Config, machine_id: String) -> Result<(), AppError> {
+    let instance_id = &machine_id;
+    let timeout = Duration::from_secs(10);
+    let options = VmTerminalOptions {
+        instance_id,
+        timeout,
+    };
+    let mut ctx = Context::create().unwrap();
+    vm_terminal(&mut ctx, options).await?;
+    Ok(())
 }

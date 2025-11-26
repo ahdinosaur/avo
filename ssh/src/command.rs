@@ -43,16 +43,6 @@ impl SshCommandHandle {
         self.channel.stdin()
     }
 
-    /// Obtain a reader for the command's stdout.
-    pub fn stdout(&mut self) -> &mut ReadStream {
-        &mut self.stdout
-    }
-
-    /// Obtain a reader for the command's stderr.
-    pub fn stderr(&mut self) -> &mut ReadStream {
-        &mut self.stdout
-    }
-
     /// Promise that resolves to the remote exit code when received.
     pub fn exit_code(&self) -> &Promise<u32> {
         self.channel.recv_exit_status()
@@ -93,7 +83,7 @@ impl SshCommandHandle {
 ///
 /// - stdout/stderr streams are created before exec to avoid missing data.
 /// - exec requests a reply, so success_failure() will resolve.
-#[tracing::instrument(skip(session), fields(command))]
+#[tracing::instrument(skip(session))]
 pub(super) async fn ssh_command(
     session: &AsyncSession<NoCheckHandler>,
     command: &str,
