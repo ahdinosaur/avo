@@ -9,7 +9,6 @@ use tokio::io::copy;
 
 use crate::session::{AsyncSession, NoCheckHandler};
 
-/// Terminal execution specific errors.
 #[derive(Error, Debug)]
 pub enum SshTerminalError {
     #[error("failed to open SSH session channel: {0}")]
@@ -30,6 +29,9 @@ pub enum SshTerminalError {
     #[error("failed to put stdout into raw mode: {0}")]
     StdoutRawMode(#[source] io::Error),
 
+    #[error("stdin piping failed: {0}")]
+    StdinPipe(#[source] io::Error),
+
     #[error("stdout piping failed: {0}")]
     StdoutPipe(#[source] io::Error),
 
@@ -37,10 +39,6 @@ pub enum SshTerminalError {
     StderrPipe(#[source] io::Error),
 }
 
-/// Execute a remote terminal and return a streaming handle.
-///
-/// - stdout/stderr streams are created before exec to avoid missing data.
-/// - exec requests a reply, so success_failure() will resolve.
 #[tracing::instrument(skip(session))]
 pub(super) async fn ssh_terminal(
     session: &AsyncSession<NoCheckHandler>,
@@ -80,7 +78,17 @@ pub(super) async fn ssh_terminal(
         .await
         .map_err(SshTerminalError::RequestPty)?;
 
+    // Start an interactive shell
+    channel.request_shell(want_reply).await?;
+
     let exit_code = {
+        // Handle I/O streams: stdin -> channel_stdin, channel_stdout/err -> terminal
+
+        let mut terminal_stdin = tokio::io::stdin();
+        let mut channel_stdin = channel.stdin();
+        let stdin_future = copy(&mut terminal_stdin, &mut channel_stdin);
+        tokio::pin!(stdin_future);
+
         let mut channel_stdout = channel.stdout();
         let mut terminal_stdout = tokio::io::stdout();
         let stdout_future = copy(&mut channel_stdout, &mut terminal_stdout);
@@ -91,6 +99,7 @@ pub(super) async fn ssh_terminal(
         let stderr_future = copy(&mut channel_stderr, &mut terminal_stderr);
         tokio::pin!(stderr_future);
 
+        let mut stdin_done = false;
         let mut stdout_done = false;
         let mut stderr_done = false;
 
@@ -127,6 +136,15 @@ pub(super) async fn ssh_terminal(
                 res = &mut stderr_future, if !stderr_done => {
                     let _ = res.map_err(SshTerminalError::StderrPipe)?;
                     stderr_done = true
+                }
+                res = &mut stdin_future, if !stdin_done => {
+                    #[allow(clippy::collapsible_if)]
+                    if let Err(error) = res {
+                        if error.kind() != io::ErrorKind::BrokenPipe {
+                            return Err(SshTerminalError::StdinPipe(error));
+                        }
+                    }
+                    stdin_done = true;
                 }
             }
         }
