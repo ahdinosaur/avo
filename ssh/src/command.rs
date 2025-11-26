@@ -83,7 +83,7 @@ impl SshCommandHandle {
 ///
 /// - stdout/stderr streams are created before exec to avoid missing data.
 /// - exec requests a reply, so success_failure() will resolve.
-#[tracing::instrument(skip(session), fields(command))]
+#[tracing::instrument(skip(session))]
 pub(super) async fn ssh_command(
     session: &AsyncSession<NoCheckHandler>,
     command: &str,
