@@ -81,23 +81,27 @@ impl Command {
         })
     }
 
-    pub async fn run_with_error_handler<ErrorHandler, ErrorValue>(
+    pub async fn handle<OutHandler, ErrHandler, HandlerValue, HandlerError>(
         &mut self,
-        error_handler: ErrorHandler,
-    ) -> Result<(ExitStatus, Vec<u8>, Option<ErrorValue>), CommandError>
+        stdout_handler: OutHandler,
+        stderr_handler: ErrHandler,
+    ) -> Result<Result<HandlerValue, HandlerError>, CommandError>
     where
-        ErrorHandler: Fn(&Vec<u8>) -> Option<ErrorValue>,
+        ErrHandler: Fn(&Vec<u8>) -> Result<Option<HandlerValue>, HandlerError>,
+        OutHandler: Fn(&Vec<u8>) -> Result<HandlerValue, HandlerError>,
     {
-        self.output().await.and_then(|out| {
-            if out.status.success() {
-                Ok((out.status, out.stdout, None))
-            } else if let Some(value) = error_handler(&out.stderr) {
-                Ok((out.status, out.stdout, Some(value)))
-            } else {
-                Err(CommandError::Failure {
+        self.output().await.and_then(|output| {
+            if output.status.success() {
+                return Ok(stdout_handler(&output.stdout));
+            }
+
+            match stderr_handler(&output.stderr) {
+                Err(error) => Ok(Err(error)),
+                Ok(Some(value)) => Ok(Ok(value)),
+                Ok(None) => Err(CommandError::Failure {
                     command: self.to_string(),
-                    stderr: String::from_utf8_lossy(&out.stderr).to_string(),
-                })
+                    stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+                }),
             }
         })
     }

@@ -89,39 +89,38 @@ impl ResourceType for Apt {
     type State = AptState;
     type StateError = AptStateError;
     async fn state(resource: &Self::Resource) -> Result<Self::State, Self::StateError> {
-        let (_status, stdout, error_value) = Command::new("dpkg-query")
+        Command::new("dpkg-query")
             .args(["-W", "-f='${Status}'", &resource.package])
-            .run_with_error_handler(|stderr| {
-                let stderr = String::from_utf8_lossy(stderr);
-                if stderr.contains("no packages found matching") {
-                    Some(AptState::NotInstalled)
-                } else {
-                    None
-                }
-            })
-            .await?;
-
-        if let Some(state) = error_value {
-            return Ok(state);
-        }
-
-        let stdout = String::from_utf8_lossy(&stdout);
-        let status_parts: Vec<_> = stdout.trim_matches('\'').split(" ").collect();
-        let Some(status) = status_parts.get(2) else {
-            return Err(AptStateError::ParseStatus {
-                status: stdout.to_string(),
-            });
-        };
-        match *status {
-            "not-installed" => Ok(AptState::NotInstalled),
-            "unpacked" => Ok(AptState::NotInstalled),
-            "half-installed" => Ok(AptState::NotInstalled),
-            "installed" => Ok(AptState::Installed),
-            "config-files" => Ok(AptState::NotInstalled),
-            _ => Err(AptStateError::ParseStatus {
-                status: stdout.to_string(),
-            }),
-        }
+            .handle(
+                |stdout| {
+                    let stdout = String::from_utf8_lossy(stdout);
+                    let status_parts: Vec<_> = stdout.trim_matches('\'').split(" ").collect();
+                    let Some(status) = status_parts.get(2) else {
+                        return Err(AptStateError::ParseStatus {
+                            status: stdout.to_string(),
+                        });
+                    };
+                    match *status {
+                        "not-installed" => Ok(AptState::NotInstalled),
+                        "unpacked" => Ok(AptState::NotInstalled),
+                        "half-installed" => Ok(AptState::NotInstalled),
+                        "installed" => Ok(AptState::Installed),
+                        "config-files" => Ok(AptState::NotInstalled),
+                        _ => Err(AptStateError::ParseStatus {
+                            status: stdout.to_string(),
+                        }),
+                    }
+                },
+                |stderr| {
+                    let stderr = String::from_utf8_lossy(stderr);
+                    if stderr.contains("no packages found matching") {
+                        Ok(Some(AptState::NotInstalled))
+                    } else {
+                        Ok(None)
+                    }
+                },
+            )
+            .await?
     }
 
     type Change = AptChange;
