@@ -1,4 +1,3 @@
-mod cmd;
 mod context;
 mod image;
 mod instance;

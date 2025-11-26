@@ -1,5 +1,4 @@
 use std::fmt::Display;
-use std::process::Stdio;
 use std::{ffi::OsStr, process::Output};
 use tokio::process::{Child, Command as BaseCommand};
 
@@ -7,7 +6,7 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum CommandError {
-    #[error("failed to get output from command: {command}")]
+    #[error("failed to spawn command: {command}")]
     Spawn {
         command: String,
         #[source]
@@ -21,7 +20,6 @@ pub enum CommandError {
 #[derive(Debug)]
 pub struct Command {
     cmd: BaseCommand,
-    stdout: bool,
 }
 
 impl Display for Command {
@@ -45,14 +43,7 @@ impl Command {
     pub fn new<S: AsRef<OsStr>>(program: S) -> Self {
         Self {
             cmd: BaseCommand::new(program),
-            stdout: false,
         }
-    }
-
-    #[allow(dead_code)]
-    pub fn set_stdout(&mut self, stdout: bool) -> &mut Self {
-        self.stdout = stdout;
-        self
     }
 
     #[allow(dead_code)]
@@ -90,26 +81,14 @@ impl Command {
 
     #[allow(dead_code)]
     pub fn spawn(&mut self) -> Result<Child, CommandError> {
-        self.cmd
-            .stdin(Stdio::inherit())
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|error| CommandError::Spawn {
-                command: self.to_string(),
-                error,
-            })
+        self.cmd.spawn().map_err(|error| CommandError::Spawn {
+            command: self.to_string(),
+            error,
+        })
     }
 
     pub async fn output(&mut self) -> Result<Output, CommandError> {
         self.cmd
-            .stdin(Stdio::null())
-            .stdout(if self.stdout {
-                Stdio::inherit()
-            } else {
-                Stdio::null()
-            })
-            .stderr(Stdio::piped())
             .output()
             .await
             .map_err(|error| CommandError::Spawn {

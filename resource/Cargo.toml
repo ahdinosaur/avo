@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+lusid-cmd = { path = "../cmd", version = "0.1" }
 lusid-causality = { path = "../causality", version = "0.1" }
 lusid-params = { path = "../params", version = "0.1" }
 lusid-operation = { path = "../operation", version = "0.1" }

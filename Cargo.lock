@@ -1923,6 +1923,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "lusid-cmd"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.17",
+ "tokio",
+]
+
+[[package]]
 name = "lusid-ctx"
 version = "0.1.0"
 dependencies = [
@@ -1965,6 +1973,7 @@ name = "lusid-operation"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "lusid-cmd",
  "thiserror 2.0.17",
  "tracing",
 ]
@@ -2007,6 +2016,7 @@ dependencies = [
  "futures-util",
  "indexmap",
  "lusid-causality",
+ "lusid-cmd",
  "lusid-operation",
  "lusid-params",
  "rimu",
@@ -2058,6 +2068,7 @@ dependencies = [
 name = "lusid-vm"
 version = "0.1.0"
 dependencies = [
+ "lusid-cmd",
  "lusid-ctx",
  "lusid-fs",
  "lusid-http",

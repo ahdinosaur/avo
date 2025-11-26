@@ -1,11 +1,8 @@
+use lusid_cmd::{Command, CommandError};
 use lusid_fs::{self as fs, FsError};
 use thiserror::Error;
 
-use crate::{
-    cmd::{Command, CommandError},
-    instance::InstancePaths,
-    paths::ExecutablePaths,
-};
+use crate::{instance::InstancePaths, paths::ExecutablePaths};
 
 #[derive(Error, Debug)]
 pub enum ConvertOvmfVarsError {

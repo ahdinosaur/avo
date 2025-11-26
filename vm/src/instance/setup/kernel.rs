@@ -1,12 +1,9 @@
+use lusid_cmd::{Command, CommandError};
 use lusid_fs::{self as fs, FsError};
 use std::path::Path;
 use thiserror::Error;
 
-use crate::{
-    cmd::{Command, CommandError},
-    instance::InstancePaths,
-    paths::ExecutablePaths,
-};
+use crate::{instance::InstancePaths, paths::ExecutablePaths};
 
 pub(super) struct VmInstanceKernelDetails {
     pub has_initrd: bool,
