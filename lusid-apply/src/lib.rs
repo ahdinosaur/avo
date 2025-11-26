@@ -1,6 +1,6 @@
 use lusid_causality::{compute_epochs, EpochError};
 use lusid_ctx::{Context, ContextError};
-use lusid_operation::{apply_operations, merge_operations, OperationApplyError};
+use lusid_operation::{apply_operations, merge_operations, partition_by_type, OperationApplyError};
 use lusid_params::{ParamValues, ParamValuesFromTypeError};
 use lusid_plan::{self, plan, PlanError, PlanId};
 use lusid_resource::{Resource, ResourceState, ResourceStateError};
@@ -102,8 +102,9 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
             "processing epoch"
         );
 
-        let merged = merge_operations(&operations);
-        apply_operations(&merged).await?;
+        let operations = partition_by_type(operations);
+        let merged = merge_operations(operations);
+        apply_operations(merged).await?;
     }
 
     info!("Apply completed");

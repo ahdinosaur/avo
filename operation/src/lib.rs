@@ -17,16 +17,40 @@ pub trait OperationType {
 
     /// Merge a set of operations of this type within the same epoch.
     /// Implementations should coalesce operations to a minimal set.
-    fn merge(ops: Vec<Self::Operation>) -> Vec<Self::Operation>;
+    fn merge(operations: Vec<Self::Operation>) -> Vec<Self::Operation>;
 
     /// Apply the merged operations of this type for an epoch.
-    async fn apply(ops: Vec<Self::Operation>) -> Result<(), Self::ApplyError>;
+    async fn apply(operations: Vec<Self::Operation>) -> Result<(), Self::ApplyError>;
 }
 
-/// An operation produced by the resource layer.
 #[derive(Debug, Clone)]
 pub enum Operation {
     Apt(AptOperation),
+}
+
+#[derive(Debug, Clone)]
+pub struct OperationsByType {
+    apt: Vec<AptOperation>,
+}
+
+/// Merge a set of operations by type.
+pub fn partition_by_type(operations: Vec<Operation>) -> OperationsByType {
+    let mut apt: Vec<AptOperation> = Vec::new();
+    for operation in operations {
+        match operation {
+            Operation::Apt(op) => apt.push(op),
+        }
+    }
+    OperationsByType { apt }
+}
+
+/// Merge a set of operations by type.
+pub fn merge_operations(operations: OperationsByType) -> OperationsByType {
+    let OperationsByType { apt } = operations;
+
+    let apt = AptOperationType::merge(apt);
+
+    OperationsByType { apt }
 }
 
 #[derive(Error, Debug)]
@@ -35,59 +59,13 @@ pub enum OperationApplyError {
     Apt(<AptOperationType as OperationType>::ApplyError),
 }
 
-/// Merge a single epoch's operations by type.
-pub fn merge_operations(ops: &[Operation]) -> Vec<Operation> {
-    // Partition by type
-    let mut apt_ops: Vec<AptOperation> = Vec::new();
+/// Apply a set of operations by type
+pub async fn apply_operations(operations: OperationsByType) -> Result<(), OperationApplyError> {
+    let OperationsByType { apt } = operations;
 
-    for op in ops {
-        match op {
-            Operation::Apt(o) => apt_ops.push(o.clone()),
-        }
-    }
+    AptOperationType::apply(apt)
+        .await
+        .map_err(OperationApplyError::Apt)?;
 
-    // Merge per type and wrap back into the enum
-    let mut merged: Vec<Operation> = Vec::new();
-
-    if !apt_ops.is_empty() {
-        let m = AptOperationType::merge(apt_ops);
-        merged.extend(m.into_iter().map(Operation::Apt));
-    }
-
-    merged
-}
-
-/// Apply a single epoch's operations (already merged).
-pub async fn apply_operations(ops: &[Operation]) -> Result<(), OperationApplyError> {
-    let mut apt_ops: Vec<AptOperation> = Vec::new();
-
-    for op in ops {
-        match op {
-            Operation::Apt(o) => apt_ops.push(o.clone()),
-        }
-    }
-
-    if !apt_ops.is_empty() {
-        AptOperationType::apply(apt_ops)
-            .await
-            .map_err(OperationApplyError::Apt)?;
-    }
-
-    Ok(())
-}
-
-/// Merge operations by epoch.
-pub fn merge_operations_by_epoch(layers: &[Vec<Operation>]) -> Vec<Vec<Operation>> {
-    layers
-        .iter()
-        .map(|ops| merge_operations(ops))
-        .collect::<Vec<_>>()
-}
-
-/// Apply operations by epoch, in order.
-pub async fn apply_by_epoch(layers: &[Vec<Operation>]) -> Result<(), OperationApplyError> {
-    for ops in layers {
-        apply_operations(ops).await?;
-    }
     Ok(())
 }

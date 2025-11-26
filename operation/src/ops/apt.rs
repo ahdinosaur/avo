@@ -18,15 +18,15 @@ impl OperationType for AptOperationType {
     type Operation = AptOperation;
     type ApplyError = ();
 
-    fn merge(ops: Vec<Self::Operation>) -> Vec<Self::Operation> {
+    fn merge(operations: Vec<Self::Operation>) -> Vec<Self::Operation> {
         // Merge all Install ops into a single Install op with unique sorted packages.
         let mut install: BTreeSet<String> = BTreeSet::new();
 
-        for op in ops {
-            match op {
+        for operation in operations {
+            match operation {
                 AptOperation::Install { packages } => {
-                    for p in packages {
-                        install.insert(p);
+                    for package in packages {
+                        install.insert(package);
                     }
                 }
             }
