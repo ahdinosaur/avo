@@ -1,5 +1,7 @@
 use std::borrow::Cow;
+use std::env::current_dir;
 use std::fmt::Display;
+use std::path::Path;
 use std::process::ExitStatus;
 use std::{ffi::OsStr, process::Output};
 use tokio::process::{Child, Command as BaseCommand};
@@ -48,12 +50,6 @@ impl Command {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn env(&mut self, key: &str, value: &str) -> &mut Self {
-        self.cmd.env(key, value);
-        self
-    }
-
     pub fn arg<S: AsRef<OsStr>>(&mut self, arg: S) -> &mut Self {
         self.cmd.arg(arg);
         self
@@ -66,6 +62,53 @@ impl Command {
     {
         self.cmd.args(args);
         self
+    }
+
+    pub fn env<K, V>(&mut self, key: K, value: V) -> &mut Self
+    where
+        K: AsRef<OsStr>,
+        V: AsRef<OsStr>,
+    {
+        self.cmd.env(key, value);
+        self
+    }
+
+    pub fn envs<I, K, V>(&mut self, vars: I) -> &mut Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: AsRef<OsStr>,
+        V: AsRef<OsStr>,
+    {
+        self.cmd.envs(vars);
+        self
+    }
+
+    pub fn current_dir<P: AsRef<Path>>(&mut self, dir: P) -> &mut Command {
+        self.cmd.current_dir(dir);
+        self
+    }
+
+    pub fn sudo(self) -> Self {
+        let cmd = self.cmd.into_std();
+
+        let mut privileged_cmd = Command::new("sudo");
+
+        privileged_cmd
+            .arg("-n") // non-interactive
+            .arg(cmd.get_program())
+            .args(cmd.get_args());
+
+        for env in cmd.get_envs() {
+            if let (key, Some(value)) = env {
+                privileged_cmd.env(key, value);
+            }
+        }
+
+        if let Some(dir) = cmd.get_current_dir() {
+            privileged_cmd.current_dir(dir);
+        }
+
+        privileged_cmd
     }
 
     pub async fn run(&mut self) -> Result<(ExitStatus, Vec<u8>), CommandError> {

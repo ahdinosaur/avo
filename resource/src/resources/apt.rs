@@ -1,6 +1,7 @@
 use async_trait::async_trait;
+use cuid2::create_id;
 use indexmap::indexmap;
-use lusid_causality::Tree;
+use lusid_causality::{NodeId, Tree};
 use lusid_cmd::{Command, CommandError};
 use lusid_operation::{operations::apt::AptOperation, Operation};
 use lusid_params::{ParamField, ParamType, ParamTypes};
@@ -133,11 +134,25 @@ impl ResourceType for Apt {
     }
 
     fn operations(change: Self::Change) -> Vec<Tree<Operation>> {
+        let update_id = create_id();
         match change {
             AptChange::Install { package } => {
-                vec![Tree::leaf(Operation::Apt(AptOperation::Install {
-                    packages: vec![package],
-                }))]
+                vec![
+                    Tree::Leaf {
+                        id: Some(NodeId(update_id.clone())),
+                        node: Operation::Apt(AptOperation::Update),
+                        before: vec![],
+                        after: vec![],
+                    },
+                    Tree::Leaf {
+                        id: None,
+                        node: Operation::Apt(AptOperation::Install {
+                            packages: vec![package],
+                        }),
+                        before: vec![NodeId(update_id)],
+                        after: vec![],
+                    },
+                ]
             }
         }
     }

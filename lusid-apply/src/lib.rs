@@ -81,10 +81,13 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
     debug!("Resource states: {resource_states:?}");
 
     // Get Tree<ResourceChange>
-    let changes = resource_states
-        .map_option(|(resource, state)| resource.change(&state))
-        .unwrap();
+    let changes = resource_states.map_option(|(resource, state)| resource.change(&state));
     debug!("Changes: {changes:?}");
+
+    let Some(changes) = changes else {
+        info!("No changes to apply!");
+        return Ok(());
+    };
 
     // Get Tree<Operations>
     let operations = changes.map_tree(|change| change.operations());

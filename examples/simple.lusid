@@ -9,7 +9,7 @@ setup: (params) =>
   - module: "@core/apt"
     id: "install-nvim"
     params:
-      packages: ["nvim"]
+      packages: ["neovim"]
   - module: "@core/apt"
     before:
       - "install-nvim"

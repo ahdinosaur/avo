@@ -1,29 +1,40 @@
 use async_trait::async_trait;
+use lusid_cmd::{Command, CommandError};
 use std::collections::BTreeSet;
-
-use tracing::info;
+use thiserror::Error;
+use tracing::{debug, info};
 
 use crate::OperationType;
 
 #[derive(Debug, Clone)]
 pub enum AptOperation {
+    Update,
     Install { packages: Vec<String> },
 }
 
+#[derive(Error, Debug)]
+pub enum AptApplyError {
+    #[error(transparent)]
+    Command(#[from] CommandError),
+}
+
 #[derive(Debug, Clone)]
-pub struct AptOperationType;
+pub struct Apt;
 
 #[async_trait]
-impl OperationType for AptOperationType {
+impl OperationType for Apt {
     type Operation = AptOperation;
-    type ApplyError = ();
+    type ApplyError = AptApplyError;
 
     fn merge(operations: Vec<Self::Operation>) -> Vec<Self::Operation> {
-        // Merge all Install ops into a single Install op with unique sorted packages.
+        let mut update = false;
         let mut install: BTreeSet<String> = BTreeSet::new();
 
         for operation in operations {
             match operation {
+                AptOperation::Update => {
+                    update = true;
+                }
                 AptOperation::Install { packages } => {
                     for package in packages {
                         install.insert(package);
@@ -32,26 +43,40 @@ impl OperationType for AptOperationType {
             }
         }
 
-        if install.is_empty() {
-            Vec::new()
-        } else {
-            vec![AptOperation::Install {
-                packages: install.into_iter().collect(),
-            }]
+        let mut operations = Vec::new();
+        if update {
+            operations.push(AptOperation::Update);
         }
+        if !install.is_empty() {
+            operations.push(AptOperation::Install {
+                packages: install.into_iter().collect(),
+            })
+        }
+        operations
     }
 
-    async fn apply(ops: Vec<Self::Operation>) -> Result<(), Self::ApplyError> {
-        for op in ops {
-            match op {
+    async fn apply(operations: Vec<Self::Operation>) -> Result<(), Self::ApplyError> {
+        for operation in operations {
+            match operation {
+                AptOperation::Update => {
+                    info!("[apt] update");
+                    let mut cmd = Command::new("apt-get");
+                    cmd.env("DEBIAN_FRONTEND", "noninteractive").arg("update");
+                    cmd.sudo().run().await?;
+                }
                 AptOperation::Install { packages } => {
                     if packages.is_empty() {
-                        info!("[apt] nothing to install");
-                    } else {
-                        info!("[apt] install: {}", packages.join(", "));
-                        // Real world: run apt-get install -y <packages> (privilege required)
-                        // For now, we just log.
+                        debug!("[apt] nothing to install");
+                        continue;
                     }
+
+                    info!("[apt] install: {}", packages.join(", "));
+                    let mut cmd = Command::new("apt-get");
+                    cmd.env("DEBIAN_FRONTEND", "noninteractive")
+                        .arg("install")
+                        .arg("-y")
+                        .args(packages);
+                    cmd.sudo().run().await?;
                 }
             }
         }

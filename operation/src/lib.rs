@@ -4,7 +4,7 @@ use thiserror::Error;
 
 pub mod operations;
 
-use crate::operations::apt::{AptOperation, AptOperationType};
+use crate::operations::apt::{Apt, AptOperation};
 
 /// OperationType specifies how to merge and apply a concrete Operation type.
 ///
@@ -48,7 +48,7 @@ pub fn partition_by_type(operations: Vec<Operation>) -> OperationsByType {
 pub fn merge_operations(operations: OperationsByType) -> OperationsByType {
     let OperationsByType { apt } = operations;
 
-    let apt = AptOperationType::merge(apt);
+    let apt = Apt::merge(apt);
 
     OperationsByType { apt }
 }
@@ -56,16 +56,14 @@ pub fn merge_operations(operations: OperationsByType) -> OperationsByType {
 #[derive(Error, Debug)]
 pub enum OperationApplyError {
     #[error("apt operation failed: {0:?}")]
-    Apt(<AptOperationType as OperationType>::ApplyError),
+    Apt(<Apt as OperationType>::ApplyError),
 }
 
 /// Apply a set of operations by type
 pub async fn apply_operations(operations: OperationsByType) -> Result<(), OperationApplyError> {
     let OperationsByType { apt } = operations;
 
-    AptOperationType::apply(apt)
-        .await
-        .map_err(OperationApplyError::Apt)?;
+    Apt::apply(apt).await.map_err(OperationApplyError::Apt)?;
 
     Ok(())
 }
