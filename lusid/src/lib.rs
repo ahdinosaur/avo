@@ -226,7 +226,8 @@ async fn cmd_dev_apply(config: Config, machine_id: String) -> Result<(), AppErro
         },
     ];
 
-    let mut command = format!("/home/debian/lusid-apply --plan /home/debian/plan/{plan_filename}");
+    let mut command =
+        format!("/home/debian/lusid-apply --plan /home/debian/plan/{plan_filename} --log trace");
     if let Some(params_json) = params_json {
         command.push_str(&format!(" --params '{params_json}'"));
     }

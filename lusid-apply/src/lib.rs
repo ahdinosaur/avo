@@ -101,9 +101,14 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
             count = epochs_count,
             "processing epoch"
         );
+        debug!("Operations: {operations:?}");
 
         let operations = partition_by_type(operations);
+        debug!("Operations by type: {operations:?}");
+
         let merged = merge_operations(operations);
+        debug!("Merged operations: {merged:?}");
+
         apply_operations(merged).await?;
     }
 
