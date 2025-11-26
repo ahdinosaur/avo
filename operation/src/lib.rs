@@ -2,9 +2,9 @@ use async_trait::async_trait;
 use std::fmt::Debug;
 use thiserror::Error;
 
-pub mod ops;
+pub mod operations;
 
-use crate::ops::apt::{AptOperation, AptOperationType};
+use crate::operations::apt::{AptOperation, AptOperationType};
 
 /// OperationType specifies how to merge and apply a concrete Operation type.
 ///
