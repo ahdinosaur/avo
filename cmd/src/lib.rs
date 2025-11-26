@@ -1,4 +1,6 @@
+use std::borrow::Cow;
 use std::fmt::Display;
+use std::process::ExitStatus;
 use std::{ffi::OsStr, process::Output};
 use tokio::process::{Child, Command as BaseCommand};
 
@@ -66,10 +68,10 @@ impl Command {
         self
     }
 
-    pub async fn run(&mut self) -> Result<(), CommandError> {
+    pub async fn run(&mut self) -> Result<(ExitStatus, Vec<u8>), CommandError> {
         self.output().await.and_then(|out| {
             if out.status.success() {
-                Ok(())
+                Ok((out.status, out.stdout))
             } else {
                 Err(CommandError::Failure {
                     command: self.to_string(),
@@ -79,7 +81,27 @@ impl Command {
         })
     }
 
-    #[allow(dead_code)]
+    pub async fn run_with_error_handler<ErrorHandler, ErrorValue>(
+        &mut self,
+        error_handler: ErrorHandler,
+    ) -> Result<(ExitStatus, Vec<u8>, Option<ErrorValue>), CommandError>
+    where
+        ErrorHandler: Fn(&Vec<u8>) -> Option<ErrorValue>,
+    {
+        self.output().await.and_then(|out| {
+            if out.status.success() {
+                Ok((out.status, out.stdout, None))
+            } else if let Some(value) = error_handler(&out.stderr) {
+                Ok((out.status, out.stdout, Some(value)))
+            } else {
+                Err(CommandError::Failure {
+                    command: self.to_string(),
+                    stderr: String::from_utf8_lossy(&out.stderr).to_string(),
+                })
+            }
+        })
+    }
+
     pub fn spawn(&mut self) -> Result<Child, CommandError> {
         self.cmd.spawn().map_err(|error| CommandError::Spawn {
             command: self.to_string(),
