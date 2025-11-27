@@ -1,6 +1,6 @@
 use lusid_causality::{compute_epochs, EpochError};
 use lusid_ctx::{Context, ContextError};
-use lusid_operation::{apply_operations, merge_operations, OperationApplyError};
+use lusid_operation::{apply_operations, merge_operations, partition_by_type, OperationApplyError};
 use lusid_params::{ParamValues, ParamValuesFromTypeError};
 use lusid_plan::{self, plan, PlanError, PlanId};
 use lusid_resource::{Resource, ResourceState, ResourceStateError};
@@ -81,10 +81,13 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
     debug!("Resource states: {resource_states:?}");
 
     // Get Tree<ResourceChange>
-    let changes = resource_states
-        .map_option(|(resource, state)| resource.change(&state))
-        .unwrap();
+    let changes = resource_states.map_option(|(resource, state)| resource.change(&state));
     debug!("Changes: {changes:?}");
+
+    let Some(changes) = changes else {
+        info!("No changes to apply!");
+        return Ok(());
+    };
 
     // Get Tree<Operations>
     let operations = changes.map_tree(|change| change.operations());
@@ -101,9 +104,15 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
             count = epochs_count,
             "processing epoch"
         );
+        debug!("Operations: {operations:?}");
 
-        let merged = merge_operations(&operations);
-        apply_operations(&merged).await?;
+        let operations = partition_by_type(operations);
+        debug!("Operations by type: {operations:?}");
+
+        let merged = merge_operations(operations);
+        debug!("Merged operations: {merged:?}");
+
+        apply_operations(merged).await?;
     }
 
     info!("Apply completed");

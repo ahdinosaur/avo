@@ -1,11 +1,9 @@
+use lusid_cmd::{Command, CommandError};
 use lusid_fs::{self as fs, FsError};
 use std::path::Path;
 use thiserror::Error;
 
-use crate::{
-    cmd::{Command, CommandError},
-    instance::InstancePaths,
-};
+use crate::instance::InstancePaths;
 
 #[derive(Error, Debug)]
 pub enum CreateOverlayImageError {

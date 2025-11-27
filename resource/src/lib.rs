@@ -23,20 +23,34 @@ use crate::resources::apt::{Apt, AptChange, AptResource, AptState};
 pub trait ResourceType {
     const ID: &'static str;
 
+    /// Schema for resource params.
     fn param_types() -> Option<Spanned<ParamTypes>>;
 
+    /// Resource params (friendly user definition).
     type Params: DeserializeOwned;
+
+    /// Resource atom (indivisible system definition).
     type Resource: Clone;
 
+    /// Create resource atom from params.
     fn resources(params: Self::Params) -> Vec<Tree<Self::Resource>>;
 
+    /// Current state of resource on machine.
     type State;
+
+    /// Possible error when fetching current state of resource on machine.
     type StateError;
+
+    /// Fetch current state of resource on machine.
     async fn state(resource: &Self::Resource) -> Result<Self::State, Self::StateError>;
 
+    /// A change from current state.
     type Change;
+
+    /// Get change atomic resource from current state to intended state.
     fn change(resource: &Self::Resource, state: &Self::State) -> Option<Self::Change>;
 
+    // Convert atomic resource change into operations (mutations).
     fn operations(change: Self::Change) -> Vec<Tree<Operation>>;
 }
 

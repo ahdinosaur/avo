@@ -43,23 +43,12 @@ pub(super) async fn instance_exec(
     let mut handle = ssh.command(command).await?;
 
     {
-        let mut channel_stdout = &mut handle.stdout;
-        let mut terminal_stdout = tokio::io::stdout();
-        let stdout_future = copy(&mut channel_stdout, &mut terminal_stdout);
-        tokio::pin!(stdout_future);
-
-        let mut channel_stderr = &mut handle.stderr;
-        let mut terminal_stderr = tokio::io::stderr();
-        let stderr_future = copy(&mut channel_stderr, &mut terminal_stderr);
-        tokio::pin!(stderr_future);
-        tokio::select! {
-            res = stdout_future => {
-                let _ = res?;
-            },
-            res = stderr_future => {
-                let _ = res?;
-            },
-        };
+        let mut stdout = tokio::io::stdout();
+        let mut stderr = tokio::io::stderr();
+        tokio::try_join!(
+            copy(&mut handle.stdout, &mut stdout),
+            copy(&mut handle.stderr, &mut stderr),
+        )?;
     }
 
     let exit_code = handle.wait().await?;

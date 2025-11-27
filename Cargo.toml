@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
   "causality",
+  "cmd",
   "ctx",
   "fs",
   "http",
