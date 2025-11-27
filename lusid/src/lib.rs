@@ -1,14 +1,15 @@
 mod config;
 
-use std::{env, io, path::PathBuf, time::Duration};
+use std::{env, io, net::Ipv4Addr, path::PathBuf, sync::Arc, time::Duration};
 
 use clap::{Parser, Subcommand};
 use lusid_apply::{apply, ApplyError, ApplyOptions};
 use lusid_ctx::Context;
-use lusid_ssh::{Ssh, SshVolume};
+use lusid_ssh::{Ssh, SshConnectOptions, SshError, SshVolume};
 use lusid_system::Hostname;
-use lusid_vm::{vm_exec, vm_terminal, VmError, VmExecOptions, VmTerminalOptions};
+use lusid_vm::{Vm, VmError, VmOptions};
 use thiserror::Error;
+use tokio::io::copy;
 use tracing::error;
 
 use crate::config::{Config, ConfigError, MachineConfig};
@@ -118,10 +119,16 @@ pub enum AppError {
     ApplyError(#[from] ApplyError),
 
     #[error(transparent)]
-    VmError(#[from] VmError),
+    Vm(#[from] VmError),
+
+    #[error(transparent)]
+    Ssh(#[from] SshError),
 
     #[error("failed to convert params toml to json: {0}")]
     ParamsTomlToJson(#[from] serde_json::Error),
+
+    #[error("failed to join stdio streams")]
+    JoinStdio(#[source] tokio::io::Error),
 }
 
 pub async fn get_config(cli: &Cli) -> Result<Config, AppError> {
@@ -185,11 +192,11 @@ async fn cmd_local_apply(config: Config) -> Result<(), AppError> {
     Ok(())
 }
 
-async fn cmd_remote_apply(config: Config, machine_id: String) -> Result<(), AppError> {
+async fn cmd_remote_apply(_config: Config, _machine_id: String) -> Result<(), AppError> {
     todo!()
 }
 
-async fn cmd_remote_ssh(config: Config, machine_id: String) -> Result<(), AppError> {
+async fn cmd_remote_ssh(_config: Config, _machine_id: String) -> Result<(), AppError> {
     todo!()
 }
 
@@ -207,7 +214,6 @@ async fn cmd_dev_apply(config: Config, machine_id: String) -> Result<(), AppErro
         })?;
 
     let params_json = params.map(|p| serde_json::to_string(&p)).transpose()?;
-
     let instance_id = &machine_id;
     let ports = vec![];
 
@@ -232,30 +238,81 @@ async fn cmd_dev_apply(config: Config, machine_id: String) -> Result<(), AppErro
         command.push_str(&format!(" --params '{params_json}'"));
     }
 
-    let timeout = Duration::from_secs(10);
-    let options = VmExecOptions {
+    let mut ctx = Context::create().unwrap();
+    let options = VmOptions {
         instance_id,
         machine: &machine,
         ports,
-        volumes,
-        command: &command,
-        timeout,
     };
+    let vm = Vm::run(&mut ctx, options).await?;
 
-    let mut ctx = Context::create().unwrap();
-    vm_exec(&mut ctx, options).await?;
+    let mut ssh = Ssh::connect(SshConnectOptions {
+        private_key: vm.ssh_keypair().await?.private_key,
+        addrs: (Ipv4Addr::LOCALHOST, vm.ssh_port),
+        username: vm.user,
+        config: Arc::new(Default::default()),
+        timeout: Duration::from_secs(10),
+    })
+    .await?;
+
+    for volume in volumes {
+        ssh.sync(volume).await?;
+    }
+
+    let mut handle = ssh.command(&command).await?;
+
+    {
+        let mut stdout = tokio::io::stdout();
+        let mut stderr = tokio::io::stderr();
+        tokio::try_join!(
+            copy(&mut handle.stdout, &mut stdout),
+            copy(&mut handle.stderr, &mut stderr),
+        )
+        .map_err(AppError::JoinStdio)?;
+    }
+
+    let _exit_code = handle.wait().await?;
+
+    ssh.disconnect().await?;
 
     Ok(())
 }
 
-async fn cmd_dev_ssh(_config: Config, machine_id: String) -> Result<(), AppError> {
+async fn cmd_dev_ssh(config: Config, machine_id: String) -> Result<(), AppError> {
+    let MachineConfig {
+        plan: _,
+        machine,
+        params: _,
+    } = config
+        .machines
+        .get(&machine_id)
+        .cloned()
+        .ok_or_else(|| AppError::MachineIdNotFound {
+            machine_id: machine_id.clone(),
+        })?;
     let instance_id = &machine_id;
-    let timeout = Duration::from_secs(10);
-    let options = VmTerminalOptions {
-        instance_id,
-        timeout,
-    };
+    let ports = vec![];
+
     let mut ctx = Context::create().unwrap();
-    vm_terminal(&mut ctx, options).await?;
+    let options = VmOptions {
+        instance_id,
+        machine: &machine,
+        ports,
+    };
+    let vm = Vm::run(&mut ctx, options).await?;
+
+    let mut ssh = Ssh::connect(SshConnectOptions {
+        private_key: vm.ssh_keypair().await?.private_key,
+        addrs: (Ipv4Addr::LOCALHOST, vm.ssh_port),
+        username: vm.user,
+        config: Arc::new(Default::default()),
+        timeout: Duration::from_secs(10),
+    })
+    .await?;
+
+    let _exit_code = ssh.terminal().await?;
+
+    ssh.disconnect().await?;
+
     Ok(())
 }

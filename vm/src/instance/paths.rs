@@ -1,11 +1,11 @@
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
-pub struct InstancePaths<'a> {
+pub struct VmPaths<'a> {
     instance_dir: &'a Path,
 }
 
-impl<'a> InstancePaths<'a> {
+impl<'a> VmPaths<'a> {
     pub fn new(instance_dir: &'a Path) -> Self {
         Self { instance_dir }
     }

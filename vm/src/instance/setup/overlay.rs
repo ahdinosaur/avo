@@ -3,7 +3,7 @@ use lusid_fs::{self as fs, FsError};
 use std::path::Path;
 use thiserror::Error;
 
-use crate::instance::InstancePaths;
+use crate::instance::VmPaths;
 
 #[derive(Error, Debug)]
 pub enum CreateOverlayImageError {
@@ -15,7 +15,7 @@ pub enum CreateOverlayImageError {
 }
 /// Create an overlay image based on a source image
 pub(super) async fn setup_overlay(
-    paths: &InstancePaths<'_>,
+    paths: &VmPaths<'_>,
     source_image_path: &Path,
 ) -> Result<(), CreateOverlayImageError> {
     let overlay_image_path = paths.overlay_image_path();

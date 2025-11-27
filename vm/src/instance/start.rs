@@ -3,22 +3,22 @@ use std::net::Ipv4Addr;
 use thiserror::Error;
 
 use crate::{
-    instance::{Instance, VmPort},
+    instance::{Vm, VmPort},
     paths::ExecutablePaths,
     qemu::{Qemu, QemuError},
 };
 
 #[derive(Error, Debug)]
-pub enum InstanceStartError {
+pub enum VmStartError {
     #[error(transparent)]
     Qemu(#[from] QemuError),
 }
 
 pub(super) async fn instance_start(
     executables: &ExecutablePaths,
-    instance: &Instance,
-) -> Result<(), InstanceStartError> {
-    let Instance {
+    instance: &Vm,
+) -> Result<(), VmStartError> {
+    let Vm {
         id: _instance_id,
         dir: _instance_dir,
         arch,

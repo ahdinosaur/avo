@@ -5,7 +5,7 @@ use russh::keys::PublicKey;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{instance::InstancePaths, paths::ExecutablePaths};
+use crate::{instance::VmPaths, paths::ExecutablePaths};
 
 #[derive(Error, Debug)]
 pub enum CloudInitError {
@@ -37,7 +37,7 @@ struct CloudInitUserData {
 
 pub(super) async fn setup_cloud_init(
     executables: &ExecutablePaths,
-    paths: &InstancePaths<'_>,
+    paths: &VmPaths<'_>,
     instance_id: &str,
     hostname: &Hostname,
     ssh_public_key: &PublicKey,

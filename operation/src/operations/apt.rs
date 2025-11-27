@@ -1,9 +1,6 @@
 use async_trait::async_trait;
 use lusid_cmd::{Command, CommandError};
-use std::{
-    collections::BTreeSet,
-    io::{stdout, Write},
-};
+use std::collections::BTreeSet;
 use thiserror::Error;
 use tracing::{debug, info};
 

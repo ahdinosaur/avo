@@ -15,22 +15,22 @@ use crate::{
     instance::{
         setup::{
             cloud_init::{setup_cloud_init, CloudInitError},
-            kernel::{setup_kernel, ExtractKernelError, VmInstanceKernelDetails},
+            kernel::{setup_kernel, ExtractKernelError, VmKernelDetails},
             overlay::{setup_overlay, CreateOverlayImageError},
             ovmf::{setup_ovmf_uefi_variables, ConvertOvmfVarsError},
         },
-        Instance, InstancePaths, VmPort,
+        Vm, VmPaths, VmPort,
     },
 };
 
-pub struct InstanceSetupOptions<'a> {
+pub struct VmSetupOptions<'a> {
     pub instance_id: &'a str,
     pub machine: &'a Machine,
     pub ports: Vec<VmPort>,
 }
 
 #[derive(Error, Debug)]
-pub enum InstanceSetupError {
+pub enum VmSetupError {
     #[error(transparent)]
     Image(#[from] VmImageError),
 
@@ -58,9 +58,9 @@ pub enum InstanceSetupError {
 
 pub async fn setup_instance(
     ctx: &mut Context,
-    options: InstanceSetupOptions<'_>,
-) -> Result<Instance, InstanceSetupError> {
-    let InstanceSetupOptions {
+    options: VmSetupOptions<'_>,
+) -> Result<Vm, VmSetupError> {
+    let VmSetupOptions {
         instance_id,
         machine,
         ports,
@@ -85,16 +85,16 @@ pub async fn setup_instance(
     fs::setup_directory_access(&instance_dir).await?;
 
     let executables = ctx.executables();
-    let instance_paths = InstancePaths::new(&instance_dir);
+    let instance_paths = VmPaths::new(&instance_dir);
 
     setup_overlay(&instance_paths, &source_image_path).await?;
     setup_ovmf_uefi_variables(executables, &instance_paths).await?;
 
-    let VmInstanceKernelDetails { has_initrd } =
+    let VmKernelDetails { has_initrd } =
         setup_kernel(executables, &instance_paths, &source_image_path).await?;
 
     let ssh_keypair = SshKeypair::load_or_create(&instance_dir).await?;
-    let ssh_port = get_free_tcp_port().ok_or(InstanceSetupError::NoOpenPortsAvailable)?;
+    let ssh_port = get_free_tcp_port().ok_or(VmSetupError::NoOpenPortsAvailable)?;
 
     setup_cloud_init(
         executables,
@@ -105,7 +105,7 @@ pub async fn setup_instance(
     )
     .await?;
 
-    Ok(Instance {
+    Ok(Vm {
         id: instance_id.to_owned(),
         dir: instance_dir,
         arch,

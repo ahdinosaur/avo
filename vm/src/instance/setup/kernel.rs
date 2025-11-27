@@ -3,9 +3,9 @@ use lusid_fs::{self as fs, FsError};
 use std::path::Path;
 use thiserror::Error;
 
-use crate::{instance::InstancePaths, paths::ExecutablePaths};
+use crate::{instance::VmPaths, paths::ExecutablePaths};
 
-pub(super) struct VmInstanceKernelDetails {
+pub(super) struct VmKernelDetails {
     pub has_initrd: bool,
 }
 
@@ -25,9 +25,9 @@ pub enum ExtractKernelError {
 /// Original source: https://gitlab.archlinux.org/archlinux/vmexec/-/blob/03b649bdbcdc64d30b2943f61b51165f390b920d/src/qemu.rs#L48-91
 pub(super) async fn setup_kernel(
     executables: &ExecutablePaths,
-    paths: &InstancePaths<'_>,
+    paths: &VmPaths<'_>,
     source_image_path: &Path,
-) -> Result<VmInstanceKernelDetails, ExtractKernelError> {
+) -> Result<VmKernelDetails, ExtractKernelError> {
     let kernel_path = paths.kernel_path();
 
     if !fs::path_exists(&kernel_path).await? {
@@ -41,5 +41,5 @@ pub(super) async fn setup_kernel(
 
     let has_initrd = fs::path_exists(&paths.initrd_path()).await?;
 
-    Ok(VmInstanceKernelDetails { has_initrd })
+    Ok(VmKernelDetails { has_initrd })
 }

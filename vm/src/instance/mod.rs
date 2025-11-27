@@ -1,17 +1,14 @@
-mod exec;
 mod paths;
 mod setup;
 mod start;
-mod terminal;
 
-use self::exec::*;
 use self::paths::*;
-pub use self::setup::*;
+use self::setup::*;
 use self::start::*;
-use self::terminal::*;
 
+use lusid_ctx::Context as BaseContext;
 use lusid_fs::{self as fs, FsError};
-use lusid_ssh::SshVolume;
+use lusid_machine::Machine;
 use lusid_ssh::{SshKeypair, SshKeypairError};
 use lusid_system::{Arch, CpuCount, Linux, MemorySize};
 use nix::{
@@ -23,22 +20,32 @@ use std::num::ParseIntError;
 use std::time::Duration;
 use std::{fmt::Display, net::Ipv4Addr, path::PathBuf, str::FromStr};
 use thiserror::Error;
+use tokio::time::sleep;
 
-use crate::{context::Context, instance::exec::InstanceExecError, utils::is_tcp_port_open};
+use crate::{
+    context::{Context, ContextError},
+    utils::is_tcp_port_open,
+};
+
+pub struct VmOptions<'a> {
+    pub instance_id: &'a str,
+    pub machine: &'a Machine,
+    pub ports: Vec<VmPort>,
+}
 
 #[derive(Error, Debug)]
-pub enum InstanceError {
+pub enum VmError {
     #[error(transparent)]
-    Setup(#[from] InstanceSetupError),
+    Context(#[from] ContextError),
 
     #[error(transparent)]
-    Start(#[from] InstanceStartError),
+    Setup(#[from] VmSetupError),
 
     #[error(transparent)]
-    Exec(#[from] InstanceExecError),
+    Start(#[from] VmStartError),
 
-    #[error(transparent)]
-    Terminal(#[from] InstanceTerminalError),
+    #[error("failed to load ssh keypair")]
+    LoadSshKeypair(#[source] SshKeypairError),
 
     #[error("failed to check whether instance dir exists")]
     DirExists(#[source] fs::FsError),
@@ -66,7 +73,7 @@ pub enum InstanceError {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Instance {
+pub struct Vm {
     pub id: String,
     pub dir: PathBuf,
     pub arch: Arch,
@@ -82,95 +89,114 @@ pub struct Instance {
     pub kvm: Option<bool>,
 }
 
-impl Instance {
-    pub fn paths(&self) -> InstancePaths<'_> {
-        InstancePaths::new(&self.dir)
-    }
+impl Vm {
+    pub async fn run(ctx: &mut BaseContext, options: VmOptions<'_>) -> Result<Vm, VmError> {
+        let mut ctx = Context::create(ctx)?;
 
-    pub async fn setup(
-        ctx: &mut Context,
-        options: InstanceSetupOptions<'_>,
-    ) -> Result<Self, InstanceError> {
-        Ok(setup_instance(ctx, options).await?)
-    }
+        let VmOptions {
+            instance_id,
+            machine,
+            ports,
+        } = options;
 
-    pub async fn exists(ctx: &mut Context, instance_id: &str) -> Result<bool, InstanceError> {
-        let instance_dir = ctx.paths().instance_dir(instance_id);
-        let exists = fs::path_exists(instance_dir)
-            .await
-            .map_err(InstanceError::DirExists)?;
-        Ok(exists)
-    }
+        let instance = if Vm::exists(&mut ctx, instance_id).await? {
+            Vm::load(&mut ctx, instance_id).await?
+        } else {
+            let setup_options = VmSetupOptions {
+                instance_id,
+                machine,
+                ports,
+            };
+            let inst = Vm::setup(&mut ctx, setup_options).await?;
+            inst.save().await?;
+            inst
+        };
 
-    pub async fn load(ctx: &mut Context, instance_id: &str) -> Result<Self, InstanceError> {
-        let instance_dir = ctx.paths().instance_dir(instance_id);
-        let paths = InstancePaths::new(&instance_dir);
-        let state_path = paths.state();
-        let state_str = fs::read_file_to_string(state_path)
-            .await
-            .map_err(InstanceError::StateRead)?;
-        let instance = serde_json::from_str(&state_str).map_err(InstanceError::StateSerde)?;
+        if !instance.is_qemu_running().await? {
+            instance.start(&mut ctx).await?;
+
+            loop {
+                if instance.is_ssh_open() {
+                    break;
+                }
+
+                sleep(Duration::from_millis(100)).await;
+            }
+        }
+
         Ok(instance)
     }
 
-    pub async fn save(&self) -> Result<(), InstanceError> {
+    fn paths(&self) -> VmPaths<'_> {
+        VmPaths::new(&self.dir)
+    }
+
+    async fn setup(ctx: &mut Context, options: VmSetupOptions<'_>) -> Result<Self, VmError> {
+        Ok(setup_instance(ctx, options).await?)
+    }
+
+    async fn exists(ctx: &mut Context, instance_id: &str) -> Result<bool, VmError> {
+        let instance_dir = ctx.paths().instance_dir(instance_id);
+        let exists = fs::path_exists(instance_dir)
+            .await
+            .map_err(VmError::DirExists)?;
+        Ok(exists)
+    }
+
+    async fn load(ctx: &mut Context, instance_id: &str) -> Result<Self, VmError> {
+        let instance_dir = ctx.paths().instance_dir(instance_id);
+        let paths = VmPaths::new(&instance_dir);
+        let state_path = paths.state();
+        let state_str = fs::read_file_to_string(state_path)
+            .await
+            .map_err(VmError::StateRead)?;
+        let instance = serde_json::from_str(&state_str).map_err(VmError::StateSerde)?;
+        Ok(instance)
+    }
+
+    async fn save(&self) -> Result<(), VmError> {
         let state_path = self.paths().state();
-        let state = serde_json::to_string_pretty(self).map_err(InstanceError::StateSerde)?;
+        let state = serde_json::to_string_pretty(self).map_err(VmError::StateSerde)?;
         fs::write_file(state_path, state.as_bytes())
             .await
-            .map_err(InstanceError::StateWrite)?;
+            .map_err(VmError::StateWrite)?;
         Ok(())
     }
 
-    #[allow(dead_code)]
-    pub async fn remove(self) -> Result<(), InstanceError> {
-        fs::remove_dir(self.dir)
-            .await
-            .map_err(InstanceError::RemoveDir)?;
+    pub async fn remove(self) -> Result<(), VmError> {
+        fs::remove_dir(self.dir).await.map_err(VmError::RemoveDir)?;
         Ok(())
     }
 
-    pub async fn start(&self, ctx: &mut Context) -> Result<(), InstanceError> {
+    async fn start(&self, ctx: &mut Context) -> Result<(), VmError> {
         Ok(instance_start(ctx.executables(), self).await?)
     }
 
-    pub async fn is_qemu_running(&self) -> Result<bool, InstanceError> {
+    async fn is_qemu_running(&self) -> Result<bool, VmError> {
         let pid_exists = fs::path_exists(&self.paths().qemu_pid_path())
             .await
-            .map_err(InstanceError::ReadPid)?;
+            .map_err(VmError::ReadPid)?;
         Ok(pid_exists)
     }
 
-    pub fn is_ssh_open(&self) -> bool {
+    fn is_ssh_open(&self) -> bool {
         is_tcp_port_open(self.ssh_port)
     }
 
-    #[allow(dead_code)]
-    pub async fn stop(&self) -> Result<(), InstanceError> {
+    pub async fn stop(&self) -> Result<(), VmError> {
         let pid_str = fs::read_file_to_string(&self.paths().qemu_pid_path())
             .await
-            .map_err(InstanceError::ReadPid)?;
-        let pid_int: i32 = FromStr::from_str(&pid_str).map_err(InstanceError::ParsePid)?;
+            .map_err(VmError::ReadPid)?;
+        let pid_int: i32 = FromStr::from_str(&pid_str).map_err(VmError::ParsePid)?;
         let pid = Pid::from_raw(pid_int);
-        kill(pid, Some(Signal::SIGKILL)).map_err(InstanceError::KillPid)?;
+        kill(pid, Some(Signal::SIGKILL)).map_err(VmError::KillPid)?;
         Ok(())
     }
 
-    pub async fn ssh_keypair(&self) -> Result<SshKeypair, SshKeypairError> {
-        SshKeypair::load_or_create(&self.dir).await
-    }
-
-    pub async fn exec(
-        &self,
-        command: &str,
-        volumes: Vec<SshVolume>,
-        timeout: Duration,
-    ) -> Result<Option<u32>, InstanceError> {
-        Ok(instance_exec(self, command, volumes, timeout).await?)
-    }
-
-    pub async fn terminal(&self, timeout: Duration) -> Result<Option<u32>, InstanceError> {
-        Ok(instance_terminal(self, timeout).await?)
+    pub async fn ssh_keypair(&self) -> Result<SshKeypair, VmError> {
+        SshKeypair::load_or_create(&self.dir)
+            .await
+            .map_err(VmError::LoadSshKeypair)
     }
 }
 
