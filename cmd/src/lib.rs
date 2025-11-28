@@ -120,19 +120,19 @@ impl Command {
 
         let cmd = self.cmd.as_std();
 
-        privileged_cmd
-            .arg("-n") // non-interactive
-            .arg("-E") // preserve environment variables
-            .arg(cmd.get_program())
-            .args(cmd.get_args())
-            .stdout(self.get_stdout())
-            .stderr(self.get_stderr());
+        privileged_cmd.arg("-n"); // non-interactive
 
         for env in cmd.get_envs() {
             if let (key, Some(value)) = env {
                 privileged_cmd.env(key, value);
             }
         }
+
+        privileged_cmd
+            .arg(cmd.get_program())
+            .args(cmd.get_args())
+            .stdout(self.get_stdout())
+            .stderr(self.get_stderr());
 
         if let Some(dir) = cmd.get_current_dir() {
             privileged_cmd.current_dir(dir);
