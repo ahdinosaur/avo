@@ -1,3 +1,6 @@
+export JUST_APPLY_LINUX_X86_64 := "./target/x86_64-unknown-linux-gnu/release/lusid-apply"
+export JUST_APPLY_LINUX_AARCH64 := "./target/aarch64-unknown-linux-gnu/release/lusid-apply"
+
 build-lusid-apply:
   cargo build -p lusid-apply --target x86_64-unknown-linux-gnu --release
   # cargo build -p lusid-apply --target aarch64-unknown-linux-gnu --release

@@ -1,12 +1,16 @@
 mod config;
 
-use std::{env, io, net::Ipv4Addr, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    env,
+    net::Ipv4Addr,
+    path::PathBuf,
+    sync::Arc,
+    time::Duration,
+};
 
 use clap::{Parser, Subcommand};
-use lusid_apply::{apply, ApplyError, ApplyOptions};
 use lusid_ctx::Context;
 use lusid_ssh::{Ssh, SshConnectOptions, SshError, SshVolume};
-use lusid_system::Hostname;
 use lusid_vm::{Vm, VmError, VmOptions};
 use thiserror::Error;
 use tokio::io::copy;
@@ -14,20 +18,23 @@ use tracing::error;
 
 use crate::config::{Config, ConfigError, MachineConfig};
 
-const LUDIS_APPLY_X86_64: &[u8] =
-    include_bytes!("../../target/x86_64-unknown-linux-gnu/release/lusid-apply");
-
 #[derive(Parser, Debug)]
 #[command(name = "lusid", version, about = "Lusid CLI")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
 
-    #[arg(long = "config", global = true)]
+    #[arg(long = "config", env = "LUSID_CONFIG", global = true)]
     pub config_path: Option<PathBuf>,
 
-    #[arg(long = "log", global = true, default_value = "info")]
-    pub log: String,
+    #[arg(long = "log", env = "LUSID_LOG", global = true)]
+    pub log: Option<String>,
+
+    #[arg(env = "LUSID_APPLY_LINUX_X86_64", global = true)]
+    pub lusid_apply_linux_x86_64_path: Option<String>,
+
+    #[arg(env = "LUSID_APPLY_LINUX_AARCH64", global = true)]
+    pub lusid_apply_linux_aarch64_path: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -106,15 +113,6 @@ pub enum AppError {
     #[error(transparent)]
     EnvVar(#[from] env::VarError),
 
-    #[error("failed to get hostname: {0}")]
-    GetHostname(#[source] io::Error),
-
-    #[error("local machine not found: {hostname}")]
-    LocalMachineNotFound { hostname: Hostname },
-
-    #[error("machine id not found: {machine_id}")]
-    MachineIdNotFound { machine_id: String },
-
     #[error(transparent)]
     ApplyError(#[from] ApplyError),
 
@@ -135,10 +133,10 @@ pub async fn get_config(cli: &Cli) -> Result<Config, AppError> {
     let config_path = cli
         .config_path
         .clone()
-        .or_else(|| env::var("LUDIS_CONFIG").ok().map(PathBuf::from))
+        .or_else(|| env::var("LUSID_CONFIG").ok().map(PathBuf::from))
         .or_else(|| env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("."));
-    let config = Config::load(&config_path).await?;
+    let config = Config::load(&config_path, cli).await?;
     Ok(config)
 }
 
@@ -168,26 +166,18 @@ async fn cmd_machines_list(config: Config) -> Result<(), AppError> {
 }
 
 async fn cmd_local_apply(config: Config) -> Result<(), AppError> {
-    let hostname = Hostname::get().map_err(AppError::GetHostname)?;
-    let Some(MachineConfig {
+    let Config { ref lusid_apply_linux_x86_64_path, .. } = config;
+    let MachineConfig {
         plan,
-        machine: _,
         params,
-    }) = config
-        .machines
-        .into_values()
-        .find(|config| config.machine.hostname == hostname)
-    else {
-        return Err(AppError::LocalMachineNotFound { hostname });
-    };
+        ..
+    } = config.local_machine()?;
 
-    let plan_id = plan;
-    let params_json = params.map(|p| serde_json::to_string(&p)).transpose()?;
-    let options = ApplyOptions {
-        plan_id,
-        params_json,
-    };
-    apply(options).await?;
+    let mut command = format!("{lusid_apply_linux_x86_64_path} --plan {plan} --log trace");
+    if let Some(params) = params {
+        let params_json = serde_json::to_string(&params)?;
+        command.push_str(&format!(" --params '{params_json}'"));
+    }
 
     Ok(())
 }
@@ -213,30 +203,8 @@ async fn cmd_dev_apply(config: Config, machine_id: String) -> Result<(), AppErro
             machine_id: machine_id.clone(),
         })?;
 
-    let params_json = params.map(|p| serde_json::to_string(&p)).transpose()?;
     let instance_id = &machine_id;
     let ports = vec![];
-
-    let plan_path = plan.as_path().unwrap();
-    let plan_dir = plan_path.parent().unwrap();
-    let plan_filename = plan_path.file_name().unwrap().to_string_lossy();
-    let volumes = vec![
-        SshVolume::FileBytes {
-            local: LUDIS_APPLY_X86_64.to_vec(),
-            permissions: Some(0o755),
-            remote: "/home/debian/lusid-apply".to_owned(),
-        },
-        SshVolume::DirPath {
-            local: plan_dir.to_path_buf(),
-            remote: "/home/debian/plan".to_owned(),
-        },
-    ];
-
-    let mut command =
-        format!("/home/debian/lusid-apply --plan /home/debian/plan/{plan_filename} --log trace");
-    if let Some(params_json) = params_json {
-        command.push_str(&format!(" --params '{params_json}'"));
-    }
 
     let mut ctx = Context::create().unwrap();
     let options = VmOptions {
@@ -249,11 +217,33 @@ async fn cmd_dev_apply(config: Config, machine_id: String) -> Result<(), AppErro
     let mut ssh = Ssh::connect(SshConnectOptions {
         private_key: vm.ssh_keypair().await?.private_key,
         addrs: (Ipv4Addr::LOCALHOST, vm.ssh_port),
-        username: vm.user,
+        username: vm.user.clone(),
         config: Arc::new(Default::default()),
         timeout: Duration::from_secs(10),
     })
     .await?;
+
+    let dev_dir = format!("/home/{}", vm.user);
+    let plan_path = plan.as_path().unwrap();
+    let plan_dir = plan_path.parent().unwrap();
+    let plan_filename = plan_path.file_name().unwrap().to_string_lossy();
+    let volumes = vec![
+        SshVolume::FilePath {
+            local: LUSID_APPLY_X86_64.to_vec(),
+            remote: format!("{dev_dir}/lusid-apply"),
+        },
+        SshVolume::DirPath {
+            local: plan_dir.to_path_buf(),
+            remote: format!("{dev_dir}/plan"),
+        },
+    ];
+
+    let mut command =
+        format!("{dev_dir}/lusid-apply --plan {dev_dir}/plan/{plan_filename} --log trace");
+    if let Some(params) = params {
+        let params_json = serde_json::to_string(&params)?;
+        command.push_str(&format!(" --params '{params_json}'"));
+    }
 
     for volume in volumes {
         ssh.sync(volume).await?;
@@ -283,13 +273,7 @@ async fn cmd_dev_ssh(config: Config, machine_id: String) -> Result<(), AppError>
         plan: _,
         machine,
         params: _,
-    } = config
-        .machines
-        .get(&machine_id)
-        .cloned()
-        .ok_or_else(|| AppError::MachineIdNotFound {
-            machine_id: machine_id.clone(),
-        })?;
+    } =
     let instance_id = &machine_id;
     let ports = vec![];
 

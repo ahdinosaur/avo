@@ -1900,12 +1900,9 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "comfy-table",
- "lusid-apply",
  "lusid-ctx",
  "lusid-machine",
- "lusid-operation",
  "lusid-params",
- "lusid-plan",
  "lusid-ssh",
  "lusid-store",
  "lusid-system",
@@ -1943,6 +1940,10 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
 ]
+
+[[package]]
+name = "lusid-apply-progress"
+version = "0.1.0"
 
 [[package]]
 name = "lusid-causality"
@@ -2093,6 +2094,10 @@ dependencies = [
  "serde",
  "serde_json",
 ]
+
+[[package]]
+name = "lusid-view"
+version = "0.1.0"
 
 [[package]]
 name = "lusid-vm"
