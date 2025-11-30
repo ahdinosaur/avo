@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+  "apply-stdio",
   "causality",
   "cmd",
   "ctx",
@@ -17,7 +18,8 @@ members = [
   "ssh",
   "store",
   "system",
-  "vm", "apply-progress", "view",
+  "vm",
+  "view",
 ]
 
 [workspace.dependencies]
