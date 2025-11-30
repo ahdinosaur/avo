@@ -23,7 +23,7 @@ impl Span {
     }
 
     /// Create a new Span with given content and style.
-    pub fn new<T: Into<String>>(content: T, style: TextStyle) -> Self {
+    pub fn new_styled<T: Into<String>>(content: T, style: TextStyle) -> Self {
         Self {
             content: content.into(),
             style,

@@ -1949,6 +1949,7 @@ version = "0.1.0"
 name = "lusid-causality"
 version = "0.1.0"
 dependencies = [
+ "lusid-tree",
  "thiserror 2.0.17",
 ]
 
@@ -2094,6 +2095,10 @@ dependencies = [
  "serde",
  "serde_json",
 ]
+
+[[package]]
+name = "lusid-tree"
+version = "0.1.0"
 
 [[package]]
 name = "lusid-view"
