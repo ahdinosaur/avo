@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 pub use crate::resources::*;
 
 use async_trait::async_trait;
@@ -30,13 +32,13 @@ pub trait ResourceType {
     type Params: DeserializeOwned;
 
     /// Resource atom (indivisible system definition).
-    type Resource: Clone;
+    type Resource: Display;
 
     /// Create resource atom from params.
     fn resources(params: Self::Params) -> Vec<CausalityTree<Self::Resource>>;
 
     /// Current state of resource on machine.
-    type State;
+    type State: Display;
 
     /// Possible error when fetching current state of resource on machine.
     type StateError;
@@ -45,7 +47,7 @@ pub trait ResourceType {
     async fn state(resource: &Self::Resource) -> Result<Self::State, Self::StateError>;
 
     /// A change from current state.
-    type Change;
+    type Change: Display;
 
     /// Get change atomic resource from current state to intended state.
     fn change(resource: &Self::Resource, state: &Self::State) -> Option<Self::Change>;

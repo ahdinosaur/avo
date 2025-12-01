@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use async_trait::async_trait;
 use cuid2::create_id;
 use indexmap::indexmap;
@@ -16,10 +18,26 @@ pub struct AptResource {
     pub package: String,
 }
 
+impl Display for AptResource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { package } = self;
+        write!(f, "Apt({package})")
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum AptState {
     NotInstalled,
     Installed,
+}
+
+impl Display for AptState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AptState::NotInstalled => write!(f, "Apt::NotInstalled"),
+            AptState::Installed => write!(f, "Apt::Installed"),
+        }
+    }
 }
 
 #[derive(Error, Debug)]
@@ -34,6 +52,14 @@ pub enum AptStateError {
 #[derive(Debug, Clone)]
 pub enum AptChange {
     Install { package: String },
+}
+
+impl Display for AptChange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AptChange::Install { package } => write!(f, "Apt::Installed({package})"),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
