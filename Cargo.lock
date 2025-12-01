@@ -1946,6 +1946,10 @@ dependencies = [
 [[package]]
 name = "lusid-apply-progress"
 version = "0.1.0"
+dependencies = [
+ "lusid-view",
+ "serde",
+]
 
 [[package]]
 name = "lusid-causality"
