@@ -3,6 +3,7 @@ mod config;
 use std::{env, net::Ipv4Addr, path::PathBuf, sync::Arc, time::Duration};
 
 use clap::{Parser, Subcommand};
+use lusid_cmd::{Command, CommandError};
 use lusid_ctx::Context;
 use lusid_ssh::{Ssh, SshConnectOptions, SshError, SshVolume};
 use lusid_vm::{Vm, VmError, VmOptions};
@@ -17,7 +18,7 @@ use crate::config::{Config, ConfigError, MachineConfig};
 #[command(name = "lusid", version, about = "Lusid CLI")]
 pub struct Cli {
     #[command(subcommand)]
-    pub command: Command,
+    pub command: Cmd,
 
     #[arg(long = "config", env = "LUSID_CONFIG", global = true)]
     pub config_path: Option<PathBuf>,
@@ -33,43 +34,43 @@ pub struct Cli {
 }
 
 #[derive(Subcommand, Debug)]
-pub enum Command {
+pub enum Cmd {
     /// Manage machine definitions
     Machines {
         #[command(subcommand)]
-        command: MachinesCommand,
+        command: MachinesCmd,
     },
     /// Manage local machine
     Local {
         #[command(subcommand)]
-        command: LocalCommand,
+        command: LocalCmd,
     },
     /// Manage remote machines
     Remote {
         #[command(subcommand)]
-        command: RemoteCommand,
+        command: RemoteCmd,
     },
     /// Develop using virtual machines
     Dev {
         #[command(subcommand)]
-        command: DevCommand,
+        command: DevCmd,
     },
 }
 
 #[derive(Subcommand, Debug)]
-pub enum MachinesCommand {
+pub enum MachinesCmd {
     /// List machines from machines.toml
     List,
 }
 
 #[derive(Subcommand, Debug)]
-pub enum LocalCommand {
+pub enum LocalCmd {
     // Apply config to local machine.
     Apply,
 }
 
 #[derive(Subcommand, Debug)]
-pub enum RemoteCommand {
+pub enum RemoteCmd {
     // Apply config to remote machine.
     Apply {
         /// Machine identifier
@@ -85,7 +86,7 @@ pub enum RemoteCommand {
 }
 
 #[derive(Subcommand, Debug)]
-pub enum DevCommand {
+pub enum DevCmd {
     // Spin up virtual machine and apply config.
     Apply {
         /// Machine identifier
@@ -107,6 +108,9 @@ pub enum AppError {
 
     #[error(transparent)]
     EnvVar(#[from] env::VarError),
+
+    #[error(transparent)]
+    Command(#[from] CommandError),
 
     #[error(transparent)]
     Vm(#[from] VmError),
@@ -137,19 +141,19 @@ pub async fn get_config(cli: &Cli) -> Result<Config, AppError> {
 
 pub async fn run(cli: Cli, config: Config) -> Result<(), AppError> {
     match cli.command {
-        Command::Machines { command } => match command {
-            MachinesCommand::List => cmd_machines_list(config).await,
+        Cmd::Machines { command } => match command {
+            MachinesCmd::List => cmd_machines_list(config).await,
         },
-        Command::Local { command } => match command {
-            LocalCommand::Apply => cmd_local_apply(config).await,
+        Cmd::Local { command } => match command {
+            LocalCmd::Apply => cmd_local_apply(config).await,
         },
-        Command::Remote { command } => match command {
-            RemoteCommand::Apply { machine_id } => cmd_remote_apply(config, machine_id).await,
-            RemoteCommand::Ssh { machine_id } => cmd_remote_ssh(config, machine_id).await,
+        Cmd::Remote { command } => match command {
+            RemoteCmd::Apply { machine_id } => cmd_remote_apply(config, machine_id).await,
+            RemoteCmd::Ssh { machine_id } => cmd_remote_ssh(config, machine_id).await,
         },
-        Command::Dev { command } => match command {
-            DevCommand::Apply { machine_id } => cmd_dev_apply(config, machine_id).await,
-            DevCommand::Ssh { machine_id } => cmd_dev_ssh(config, machine_id).await,
+        Cmd::Dev { command } => match command {
+            DevCmd::Apply { machine_id } => cmd_dev_apply(config, machine_id).await,
+            DevCmd::Ssh { machine_id } => cmd_dev_ssh(config, machine_id).await,
         },
     }
 }
@@ -166,12 +170,17 @@ async fn cmd_local_apply(config: Config) -> Result<(), AppError> {
     } = config;
     let MachineConfig { plan, params, .. } = config.local_machine()?;
 
-    let plan = plan.display();
-    let mut command = format!("{lusid_apply_linux_x86_64_path} --plan {plan} --log trace");
+    let mut command = Command::new(lusid_apply_linux_x86_64_path);
+    command
+        .args(["--plan", &plan.to_string_lossy()])
+        .args(["--log", "trace"]);
+
     if let Some(params) = params {
         let params_json = serde_json::to_string(&params)?;
-        command.push_str(&format!(" --params '{params_json}'"));
+        command.args(["--params", &params_json]);
     }
+
+    let _output = command.run().await?;
 
     Ok(())
 }

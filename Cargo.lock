@@ -1900,6 +1900,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "comfy-table",
+ "lusid-cmd",
  "lusid-ctx",
  "lusid-machine",
  "lusid-params",
