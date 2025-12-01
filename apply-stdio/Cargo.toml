@@ -1,5 +1,5 @@
 [package]
-name = "lusid-apply-progress"
+name = "lusid-apply-stdio"
 version = "0.1.0"
 edition = "2024"
 

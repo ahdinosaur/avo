@@ -66,9 +66,27 @@ pub enum Resource {
     Apt(AptResource),
 }
 
+impl Display for Resource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use Resource::*;
+        match self {
+            Apt(apt) => apt.fmt(f),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum ResourceState {
     Apt(AptState),
+}
+
+impl Display for ResourceState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use ResourceState::*;
+        match self {
+            Apt(apt) => apt.fmt(f),
+        }
+    }
 }
 
 #[derive(Error, Debug)]
@@ -80,6 +98,15 @@ pub enum ResourceStateError {
 #[derive(Debug, Clone)]
 pub enum ResourceChange {
     Apt(AptChange),
+}
+
+impl Display for ResourceChange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use ResourceChange::*;
+        match self {
+            Apt(apt) => apt.fmt(f),
+        }
+    }
 }
 
 impl ResourceParams {

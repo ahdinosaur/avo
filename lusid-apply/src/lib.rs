@@ -5,8 +5,10 @@ use lusid_params::{ParamValues, ParamValuesFromTypeError};
 use lusid_plan::{self, plan, PlanError, PlanId};
 use lusid_resource::{Resource, ResourceState, ResourceStateError};
 use lusid_store::Store;
+use lusid_view::Render;
 use rimu::SourceId;
 use thiserror::Error;
+use tokio::io::{AsyncWriteExt, Stdout};
 use tracing::{debug, error, info};
 
 pub struct ApplyOptions {
@@ -19,10 +21,16 @@ pub enum ApplyError {
     #[error(transparent)]
     Context(#[from] ContextError),
 
-    #[error("JSON parameters parse failed: {0}")]
-    Json(#[from] serde_json::Error),
+    #[error("failed to parse JSON parameters: {0}")]
+    JsonParameters(#[source] serde_json::Error),
 
-    #[error("Failed to convert parameters for Lusid: {0}")]
+    #[error("failed to output JSON: {0}")]
+    JsonOutput(#[source] serde_json::Error),
+
+    #[error("failed to write to stdout: {0}")]
+    WriteStdout(#[source] tokio::io::Error),
+
+    #[error("failed to convert parameters for Lusid: {0}")]
     ParamValuesFromType(#[from] ParamValuesFromTypeError),
 
     #[error(transparent)]
@@ -45,6 +53,7 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
         params_json,
     } = options;
 
+    let mut stdout = tokio::io::stdout();
     let ctx = Context::create()?;
     let mut store = Store::new(ctx.paths().cache_dir());
 
@@ -56,22 +65,24 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
             None
         }
         Some(json) => {
-            let value: serde_json::Value = serde_json::from_str(&json)?;
+            let value: serde_json::Value =
+                serde_json::from_str(&json).map_err(ApplyError::JsonParameters)?;
             let source_id = SourceId::from("<cli:params>".to_string());
             let params = ParamValues::from_type(value, source_id)?;
             Some(params)
         }
     };
 
-    // Parse/evaluate to Tree<ResourceParams>
+    // Parse/evaluate to CausalityTree<ResourceParams>
     let resource_params = plan(plan_id, param_values, &mut store).await?;
     debug!("Resource params: {resource_params:?}");
 
-    // Map to Tree<Resource>
+    // Map to CausalityTree<Resource>
     let resources = resource_params.map_tree(|params| params.resources());
     debug!("Resources: {resources:?}");
+    writeln_output(&resources, &mut stdout).await?;
 
-    // Get Tree<(Resource, ResourceState)>
+    // Get CausalityTree<(Resource, ResourceState)>
     let resource_states = resources
         .map_result_async(|resource| async move {
             let state = resource.state().await?;
@@ -79,8 +90,10 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
         })
         .await?;
     debug!("Resource states: {resource_states:?}");
+    let states = resource_states.clone().map(|(_resource, state)| state);
+    writeln_output(&states, &mut stdout).await?;
 
-    // Get Tree<ResourceChange>
+    // Get CausalityTree<ResourceChange>
     let changes = resource_states.map_option(|(resource, state)| resource.change(&state));
     debug!("Changes: {changes:?}");
 
@@ -88,8 +101,9 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
         info!("No changes to apply!");
         return Ok(());
     };
+    writeln_output(&changes, &mut stdout).await?;
 
-    // Get Tree<Operations>
+    // Get CausalityTree<Operations>
     let operations = changes.map_tree(|change| change.operations());
 
     debug!("Operations tree: {operations:?}");
@@ -116,5 +130,22 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
     }
 
     info!("Apply completed");
+    Ok(())
+}
+
+async fn writeln_output<Output>(output: &Output, stdout: &mut Stdout) -> Result<(), ApplyError>
+where
+    Output: Render,
+{
+    stdout
+        .write_all(&serde_json::to_vec(&output.render()).map_err(ApplyError::JsonOutput)?)
+        .await
+        .map_err(ApplyError::WriteStdout)?;
+
+    stdout
+        .write_all(b"\n")
+        .await
+        .map_err(ApplyError::WriteStdout)?;
+
     Ok(())
 }

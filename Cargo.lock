@@ -1900,6 +1900,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "comfy-table",
+ "lusid-apply-stdio",
  "lusid-cmd",
  "lusid-ctx",
  "lusid-machine",
@@ -1925,6 +1926,7 @@ name = "lusid-apply"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "lusid-apply-stdio",
  "lusid-causality",
  "lusid-ctx",
  "lusid-operation",
@@ -1933,6 +1935,7 @@ dependencies = [
  "lusid-resource",
  "lusid-store",
  "lusid-system",
+ "lusid-view",
  "rimu",
  "rimu-interop",
  "serde",
@@ -1944,7 +1947,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "lusid-apply-progress"
+name = "lusid-apply-stdio"
 version = "0.1.0"
 dependencies = [
  "lusid-view",

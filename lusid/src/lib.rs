@@ -8,7 +8,7 @@ use lusid_ctx::Context;
 use lusid_ssh::{Ssh, SshConnectOptions, SshError, SshVolume};
 use lusid_vm::{Vm, VmError, VmOptions};
 use thiserror::Error;
-use tokio::io::copy;
+use tokio::io::AsyncBufReadExt;
 use tracing::error;
 use which::which;
 
@@ -120,6 +120,15 @@ pub enum AppError {
 
     #[error("failed to convert params toml to json: {0}")]
     ParamsTomlToJson(#[from] serde_json::Error),
+
+    #[error("failed to read stdout from command")]
+    ReadCommandStdout(#[source] tokio::io::Error),
+
+    #[error("failed to parse stdout from command as json")]
+    ParseCommandStdoutJson(#[source] serde_json::Error),
+
+    #[error("failed to forward stderr from command")]
+    ForwardCommandStderr(#[source] tokio::io::Error),
 
     #[error("failed to join stdio streams")]
     JoinStdio(#[source] tokio::io::Error),
@@ -251,13 +260,31 @@ async fn cmd_dev_apply(config: Config, machine_id: String) -> Result<(), AppErro
     let mut handle = ssh.command(&command).await?;
 
     {
-        let mut stdout = tokio::io::stdout();
-        let mut stderr = tokio::io::stderr();
-        tokio::try_join!(
-            copy(&mut handle.stdout, &mut stdout),
-            copy(&mut handle.stderr, &mut stderr),
-        )
-        .map_err(AppError::JoinStdio)?;
+        let stdout_fut = async {
+            let reader = tokio::io::BufReader::new(&mut handle.stdout);
+            let mut lines = reader.lines();
+
+            while let Some(line) = lines
+                .next_line()
+                .await
+                .map_err(AppError::ReadCommandStdout)?
+            {
+                match serde_json::from_str::<serde_json::Value>(&line) {
+                    Ok(value) => println!("{}", value),
+                    Err(e) => eprintln!("Bad JSON: {e}"),
+                }
+            }
+
+            Ok::<_, AppError>(())
+        };
+        let stderr_fut = async {
+            tokio::io::copy(&mut handle.stderr, &mut tokio::io::stderr())
+                .await
+                .map(|_| ()) // drop the number of bytes written
+                .map_err(AppError::ForwardCommandStderr)
+        };
+
+        tokio::try_join!(stdout_fut, stderr_fut)?;
     }
 
     let _exit_code = handle.wait().await?;

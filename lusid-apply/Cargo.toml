@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+lusid-apply-stdio = { path = "../apply-stdio", version = "0.1" }
 lusid-causality = { path = "../causality", version = "0.1" }
 lusid-ctx = { path = "../ctx", version = "0.1" }
 lusid-params = { path = "../params", version = "0.1" }
@@ -12,6 +13,7 @@ lusid-operation = { path = "../operation", version = "0.1" }
 lusid-resource = { path = "../resource", version = "0.1" }
 lusid-store = { path = "../store", version = "0.1" }
 lusid-system = { path = "../system", version = "0.1" }
+lusid-view = { path = "../view", version = "0.1" }
 clap.workspace = true
 rimu.workspace = true
 rimu-interop = { path = "../rimu-interop", version = "0.1" }
