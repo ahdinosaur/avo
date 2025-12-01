@@ -1,6 +1,5 @@
 use comfy_table::Table;
 use lusid_machine::Machine;
-use lusid_plan::PlanId;
 use lusid_system::Hostname;
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -14,7 +13,7 @@ use crate::Cli;
 
 #[derive(Error, Debug)]
 pub enum ConfigError {
-    #[error("lusid config not found at: {0}")]
+    #[error("lusid config not found at: {path}")]
     ConfigNotFound { path: PathBuf },
 
     #[error("local machine not found: {hostname}")]
@@ -38,12 +37,6 @@ pub enum ConfigError {
         path: PathBuf,
         #[source]
         source: toml::de::Error,
-    },
-
-    #[error("failed to resolve plan path: {base_path} + {plan_path}")]
-    ResolvingPlanPath {
-        base_path: PathBuf,
-        plan_path: PathBuf,
     },
 
     #[error("failed to resolve plan path: {base_path} + {plan_path}")]
@@ -82,7 +75,7 @@ struct MachineConfigToml {
 #[derive(Debug, Clone)]
 pub struct MachineConfig {
     pub machine: Machine,
-    pub plan: PlanId,
+    pub plan: PathBuf,
     pub params: Option<Value>,
 }
 
@@ -159,7 +152,7 @@ impl Config {
             } = machine;
             table.add_row(vec![
                 machine_id,
-                &plan.to_string(),
+                &plan.to_string_lossy().to_string(),
                 &hostname.to_string(),
                 &arch.to_string(),
                 &os.to_string(),
@@ -204,7 +197,7 @@ impl Config {
                     name,
                     MachineConfig {
                         machine,
-                        plan: Self::resolve_plan_id(&plan_path, &plan)?,
+                        plan: Self::resolve_plan_path(&plan_path, &plan)?,
                         params,
                     },
                 ))
@@ -212,9 +205,9 @@ impl Config {
             .collect::<Result<_, _>>()
     }
 
-    fn resolve_plan_id(base_path: &Path, plan_path: &Path) -> Result<PlanId, ConfigError> {
-        let plan_path = if plan_path.is_absolute() {
-            plan_path.to_path_buf()
+    fn resolve_plan_path(base_path: &Path, plan_path: &Path) -> Result<PathBuf, ConfigError> {
+        if plan_path.is_absolute() {
+            Ok(plan_path.to_path_buf())
         } else {
             base_path
                 .parent()
@@ -222,8 +215,7 @@ impl Config {
                 .ok_or_else(|| ConfigError::ResolvingPlanPath {
                     base_path: base_path.to_owned(),
                     plan_path: plan_path.to_owned(),
-                })?
-        };
-        Ok(PlanId::Path(plan_path))
+                })
+        }
     }
 }

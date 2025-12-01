@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use cuid2::create_id;
 use indexmap::indexmap;
-use lusid_causality::{NodeId, Tree};
+use lusid_causality::{CausalityMeta, CausalityTree, NodeId};
 use lusid_cmd::{Command, CommandError};
 use lusid_operation::{operations::apt::AptOperation, Operation};
 use lusid_params::{ParamField, ParamType, ParamTypes};
@@ -74,13 +74,13 @@ impl ResourceType for Apt {
     type Params = AptParams;
     type Resource = AptResource;
 
-    fn resources(params: Self::Params) -> Vec<Tree<Self::Resource>> {
+    fn resources(params: Self::Params) -> Vec<CausalityTree<Self::Resource>> {
         match params {
-            AptParams::Package { package } => vec![Tree::leaf(AptResource { package })],
-            AptParams::Packages { packages } => vec![Tree::branch(
+            AptParams::Package { package } => vec![CausalityTree::leaf(AptResource { package })],
+            AptParams::Packages { packages } => vec![CausalityTree::branch(
                 packages
                     .into_iter()
-                    .map(|package| Tree::leaf(AptResource { package }))
+                    .map(|package| CausalityTree::leaf(AptResource { package }))
                     .collect(),
             )],
         }
@@ -133,24 +133,25 @@ impl ResourceType for Apt {
         }
     }
 
-    fn operations(change: Self::Change) -> Vec<Tree<Operation>> {
+    fn operations(change: Self::Change) -> Vec<CausalityTree<Operation>> {
         let update_id = create_id();
         match change {
             AptChange::Install { package } => {
                 vec![
-                    Tree::Leaf {
-                        id: Some(NodeId(update_id.clone())),
+                    CausalityTree::Leaf {
+                        id: Some(NodeId::new(update_id.clone())),
                         node: Operation::Apt(AptOperation::Update),
-                        before: vec![],
-                        after: vec![],
+                        meta: CausalityMeta::default(),
                     },
-                    Tree::Leaf {
+                    CausalityTree::Leaf {
                         id: None,
                         node: Operation::Apt(AptOperation::Install {
                             packages: vec![package],
                         }),
-                        before: vec![NodeId(update_id)],
-                        after: vec![],
+                        meta: CausalityMeta {
+                            before: vec![NodeId::new(update_id)],
+                            after: vec![],
+                        },
                     },
                 ]
             }

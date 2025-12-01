@@ -1,5 +1,5 @@
 use displaydoc::Display;
-use lusid_causality::{NodeId, Tree};
+use lusid_causality::{CausalityMeta, CausalityTree, NodeId};
 use lusid_params::{validate, ParamValues, ParamsValidationError};
 use lusid_resource::ResourceParams;
 use lusid_store::{Store, StoreError, StoreItemId};
@@ -49,19 +49,18 @@ pub enum PlanError {
 }
 
 /// Top-level planning routine: load plan, validate parameters, and evaluate to
-/// a Tree<Resource>.
+/// a CausalityTree<Resource>.
 #[tracing::instrument(skip_all)]
 pub async fn plan(
     plan_id: PlanId,
     param_values: Option<Spanned<ParamValues>>,
     store: &mut Store,
-) -> Result<Tree<ResourceParams>, PlanError> {
+) -> Result<CausalityTree<ResourceParams>, PlanError> {
     tracing::debug!("Plan {plan_id:?} with params {param_values:?}");
     let children = plan_recursive(plan_id, param_values.as_ref(), store).await?;
-    let tree = Tree::Branch {
+    let tree = CausalityTree::Branch {
         id: None,
-        before: vec![],
-        after: vec![],
+        meta: CausalityMeta::default(),
         children,
     };
     tracing::trace!("Planned resource tree: {:?}", tree);
@@ -72,7 +71,7 @@ async fn plan_recursive(
     plan_id: PlanId,
     param_values: Option<&Spanned<ParamValues>>,
     store: &mut Store,
-) -> Result<Vec<Tree<ResourceParams>>, PlanError> {
+) -> Result<Vec<CausalityTree<ResourceParams>>, PlanError> {
     let store_item_id: StoreItemId = plan_id.clone().into();
     let bytes = store
         .read(&store_item_id)
@@ -126,7 +125,7 @@ async fn plan_action_to_resource(
     plan_action: Spanned<crate::model::PlanAction>,
     current_plan_id: &PlanId,
     store: &mut Store,
-) -> Result<Tree<ResourceParams>, PlanActionToResourceError> {
+) -> Result<CausalityTree<ResourceParams>, PlanActionToResourceError> {
     let (plan_action, _span) = plan_action.take();
     let crate::model::PlanAction {
         id,
@@ -150,11 +149,10 @@ async fn plan_action_to_resource(
 
     if let Some(core_module_id) = is_core_module(module) {
         let params = core_module(core_module_id, param_values)?;
-        Ok(Tree::Leaf {
+        Ok(CausalityTree::Leaf {
             id,
             node: params,
-            before,
-            after,
+            meta: CausalityMeta { before, after },
         })
     } else {
         let path = PathBuf::from(module.inner());
@@ -162,11 +160,10 @@ async fn plan_action_to_resource(
         let children = plan_recursive(plan_id, param_values.as_ref(), store)
             .await
             .map_err(Box::new)?;
-        Ok(Tree::Branch {
+        Ok(CausalityTree::Branch {
             id,
             children,
-            before,
-            after,
+            meta: CausalityMeta { before, after },
         })
     }
 }

@@ -1,7 +1,7 @@
 pub use crate::resources::*;
 
 use async_trait::async_trait;
-use lusid_causality::Tree;
+use lusid_causality::CausalityTree;
 use lusid_operation::Operation;
 use lusid_params::ParamTypes;
 use rimu::Spanned;
@@ -33,7 +33,7 @@ pub trait ResourceType {
     type Resource: Clone;
 
     /// Create resource atom from params.
-    fn resources(params: Self::Params) -> Vec<Tree<Self::Resource>>;
+    fn resources(params: Self::Params) -> Vec<CausalityTree<Self::Resource>>;
 
     /// Current state of resource on machine.
     type State;
@@ -51,7 +51,7 @@ pub trait ResourceType {
     fn change(resource: &Self::Resource, state: &Self::State) -> Option<Self::Change>;
 
     // Convert atomic resource change into operations (mutations).
-    fn operations(change: Self::Change) -> Vec<Tree<Operation>>;
+    fn operations(change: Self::Change) -> Vec<CausalityTree<Operation>>;
 }
 
 #[derive(Debug, Clone)]
@@ -81,11 +81,11 @@ pub enum ResourceChange {
 }
 
 impl ResourceParams {
-    pub fn resources(self) -> Vec<Tree<Resource>> {
+    pub fn resources(self) -> Vec<CausalityTree<Resource>> {
         fn typed<R: ResourceType>(
             params: R::Params,
             map: impl Fn(R::Resource) -> Resource + Copy,
-        ) -> Vec<Tree<Resource>> {
+        ) -> Vec<CausalityTree<Resource>> {
             R::resources(params)
                 .into_iter()
                 .map(|tree| tree.map(map))
@@ -124,6 +124,8 @@ impl Resource {
             R::change(resource, state).map(map)
         }
 
+        // TODO (mw): remove #[allow(unreachable_patterns)] once we have more resources
+        #[allow(unreachable_patterns)]
         match (self, state) {
             (Resource::Apt(resource), ResourceState::Apt(state)) => {
                 typed::<Apt>(resource, state, ResourceChange::Apt)
@@ -137,7 +139,7 @@ impl Resource {
 }
 
 impl ResourceChange {
-    pub fn operations(self) -> Vec<Tree<Operation>> {
+    pub fn operations(self) -> Vec<CausalityTree<Operation>> {
         match self {
             ResourceChange::Apt(change) => Apt::operations(change),
         }

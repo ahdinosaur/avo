@@ -7,14 +7,13 @@ impl NodeId {
     pub fn new(id: String) -> Self {
         Self(id)
     }
-}
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct NodePath(Vec<String>);
+    pub fn inner(&self) -> &str {
+        &self.0
+    }
 
-impl NodePath {
-    pub fn new(path: Vec<String>) -> Self {
-        Self(path)
+    pub fn into_inner(self) -> String {
+        self.0
     }
 }
 
