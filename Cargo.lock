@@ -2101,10 +2101,16 @@ dependencies = [
 [[package]]
 name = "lusid-tree"
 version = "0.1.0"
+dependencies = [
+ "lusid-view",
+]
 
 [[package]]
 name = "lusid-view"
 version = "0.1.0"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "lusid-vm"

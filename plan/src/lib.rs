@@ -60,8 +60,8 @@ pub async fn plan(
     let children = plan_recursive(plan_id, param_values.as_ref(), store).await?;
     let tree = CausalityTree::Branch {
         id: None,
-        meta: CausalityMeta::default(),
         children,
+        meta: CausalityMeta::default(),
     };
     tracing::trace!("Planned resource tree: {:?}", tree);
     Ok(tree)

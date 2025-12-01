@@ -1,4 +1,6 @@
-#[derive(Debug, Clone)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Span {
     pub content: String,
     pub style: TextStyle,
@@ -49,14 +51,14 @@ impl From<String> for Span {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Alignment {
     Left,
     Center,
     Right,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TextStyle {
     pub foreground_color: Option<Color>,
     pub background_color: Option<Color>,
@@ -130,7 +132,7 @@ impl TextStyle {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Color {
     Black,
     Red,

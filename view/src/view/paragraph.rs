@@ -1,6 +1,8 @@
+use serde::{Deserialize, Serialize};
+
 use crate::{Alignment, Line, TextStyle, ViewNode};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Paragraph {
     pub lines: Vec<Line>,
     pub alignment: Option<Alignment>,

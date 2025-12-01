@@ -1,4 +1,6 @@
-use std::pin::Pin;
+use std::{fmt::Display, pin::Pin};
+
+use lusid_view::{Render, Tree as ViewTree, ViewNode};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct NodeId(String);
@@ -243,5 +245,45 @@ where
                 Ok(Tree::Branch { id, children, meta })
             }),
         }
+    }
+}
+
+impl<Node, Meta> Render for Tree<Node, Meta>
+where
+    Node: Display,
+{
+    fn render(&self) -> ViewNode {
+        fn render_tree<Node, Meta>(tree: &Tree<Node, Meta>) -> ViewTree
+        where
+            Node: Display,
+        {
+            match tree {
+                Tree::Branch {
+                    id,
+                    children,
+                    meta: _,
+                } => {
+                    let id = id
+                        .clone()
+                        .map(|id| id.into_inner())
+                        .unwrap_or("?".to_string());
+                    ViewTree::Branch {
+                        label: id,
+                        nodes: children.iter().map(|child| render_tree(child)).collect(),
+                    }
+                }
+                Tree::Leaf { id, node, meta: _ } => {
+                    let id = id
+                        .clone()
+                        .map(|id| id.into_inner())
+                        .unwrap_or("?".to_string());
+                    ViewTree::Leaf {
+                        label: format!("{id}: {node}"),
+                    }
+                }
+            }
+        }
+
+        render_tree(self).into()
     }
 }

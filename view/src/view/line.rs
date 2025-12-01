@@ -1,6 +1,8 @@
+use serde::{Deserialize, Serialize};
+
 use crate::{Alignment, Span, TextStyle, ViewNode};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Line {
     pub spans: Vec<Span>,
     pub style: TextStyle,
