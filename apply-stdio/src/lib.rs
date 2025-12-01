@@ -1,17 +1,36 @@
-use lusid_view::{Line, Tree};
+use lusid_view::{Line, Tree, ViewNode};
 use serde::{Deserialize, Serialize};
+use std::fmt::Display;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResourceParamsTree(pub Tree);
+#[serde(transparent)]
+pub struct ResourcesTree(pub ViewNode);
+
+impl Display for ResourcesTree {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResourcesTree(pub Tree);
+#[serde(transparent)]
+pub struct ResourceStatesTree(pub ViewNode);
+
+impl Display for ResourceStatesTree {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResourceStatesTree(pub Tree);
+#[serde(transparent)]
+pub struct ResourceChangesTree(pub ViewNode);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResourceChangesTree(pub Tree);
+impl Display for ResourceChangesTree {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OperationsTree(pub Tree);

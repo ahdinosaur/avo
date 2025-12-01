@@ -30,6 +30,9 @@ pub enum ApplyError {
     #[error("failed to write to stdout: {0}")]
     WriteStdout(#[source] tokio::io::Error),
 
+    #[error("failed to flush stdout: {0}")]
+    FlushStdout(#[source] tokio::io::Error),
+
     #[error("failed to convert parameters for Lusid: {0}")]
     ParamValuesFromType(#[from] ParamValuesFromTypeError),
 
@@ -146,6 +149,8 @@ where
         .write_all(b"\n")
         .await
         .map_err(ApplyError::WriteStdout)?;
+
+    stdout.flush().await.map_err(ApplyError::FlushStdout)?;
 
     Ok(())
 }

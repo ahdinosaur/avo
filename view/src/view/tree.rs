@@ -1,6 +1,6 @@
-// TODO use termtree to render the tree
-
 use serde::{Deserialize, Serialize};
+use std::fmt::Display;
+use termtree::Tree as DisplayTree;
 
 use crate::ViewNode;
 
@@ -8,6 +8,12 @@ use crate::ViewNode;
 pub enum Tree {
     Branch { label: String, nodes: Vec<Tree> },
     Leaf { label: String },
+}
+
+impl Display for Tree {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        DisplayTree::<String>::from(self.clone()).fmt(f)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -61,5 +67,14 @@ impl TreeBuilder<String, Vec<Tree>> {
 impl From<Tree> for ViewNode {
     fn from(value: Tree) -> Self {
         ViewNode::Tree(value)
+    }
+}
+
+impl From<Tree> for DisplayTree<String> {
+    fn from(value: Tree) -> Self {
+        match value {
+            Tree::Branch { label, nodes } => DisplayTree::new(label).with_leaves(nodes),
+            Tree::Leaf { label } => DisplayTree::new(label),
+        }
     }
 }

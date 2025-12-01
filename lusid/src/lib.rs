@@ -3,9 +3,11 @@ mod config;
 use std::{env, net::Ipv4Addr, path::PathBuf, sync::Arc, time::Duration};
 
 use clap::{Parser, Subcommand};
+use lusid_apply_stdio::{ResourceChangesTree, ResourceStatesTree, ResourcesTree};
 use lusid_cmd::{Command, CommandError};
 use lusid_ctx::Context;
 use lusid_ssh::{Ssh, SshConnectOptions, SshError, SshVolume};
+use lusid_view::ViewNode;
 use lusid_vm::{Vm, VmError, VmOptions};
 use thiserror::Error;
 use tokio::io::AsyncBufReadExt;
@@ -123,6 +125,9 @@ pub enum AppError {
 
     #[error("failed to read stdout from command")]
     ReadCommandStdout(#[source] tokio::io::Error),
+
+    #[error("expected stdout line from command")]
+    ExpectedCommandStdoutLine,
 
     #[error("failed to parse stdout from command as json")]
     ParseCommandStdoutJson(#[source] serde_json::Error),
@@ -264,18 +269,29 @@ async fn cmd_dev_apply(config: Config, machine_id: String) -> Result<(), AppErro
             let reader = tokio::io::BufReader::new(&mut handle.stdout);
             let mut lines = reader.lines();
 
-            while let Some(line) = lines
+            let Some(line) = lines
                 .next_line()
                 .await
                 .map_err(AppError::ReadCommandStdout)?
-            {
-                match serde_json::from_str::<serde_json::Value>(&line) {
-                    Ok(value) => println!("{}", value),
-                    Err(e) => eprintln!("Bad JSON: {e}"),
-                }
-            }
+            else {
+                return Err(AppError::ExpectedCommandStdoutLine);
+            };
+            let tree: ViewNode =
+                serde_json::from_str(&line).map_err(AppError::ParseCommandStdoutJson)?;
+            println!("{tree}");
 
-            Ok::<_, AppError>(())
+            let Some(line) = lines
+                .next_line()
+                .await
+                .map_err(AppError::ReadCommandStdout)?
+            else {
+                return Err(AppError::ExpectedCommandStdoutLine);
+            };
+            let tree: ViewNode =
+                serde_json::from_str(&line).map_err(AppError::ParseCommandStdoutJson)?;
+            println!("{tree}");
+
+            Ok(())
         };
         let stderr_fut = async {
             tokio::io::copy(&mut handle.stderr, &mut tokio::io::stderr())

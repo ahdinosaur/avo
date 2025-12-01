@@ -4,6 +4,9 @@ mod paragraph;
 mod text;
 mod tree;
 
+use std::fmt::Debug;
+use std::fmt::Display;
+
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -19,4 +22,15 @@ pub enum ViewNode {
     Line(Line),
     Paragraph(Paragraph),
     Tree(Tree),
+}
+
+impl Display for ViewNode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ViewNode::Fragment(fragment) => todo!(),
+            ViewNode::Line(line) => todo!(),
+            ViewNode::Paragraph(paragraph) => todo!(),
+            ViewNode::Tree(tree) => Display::fmt(tree, f),
+        }
+    }
 }
