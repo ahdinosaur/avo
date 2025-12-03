@@ -1,633 +1,780 @@
-use std::collections::HashMap;
-use std::fmt::Display;
+use std::collections::HashSet;
 use std::future::Future;
-use std::hash::Hash;
 use std::pin::Pin;
 
-use lusid_view::{Render, Tree as ViewTree, ViewNode};
 use thiserror::Error;
 
+/// A simple tree structure used for building and describing sub-trees.
+/// - Leaves carry `node` data and `meta`.
+/// - Branches carry `meta` and have `children` which are trees.
 #[derive(Debug, Clone)]
-pub enum TreeElement<NodeId, Node, Meta> {
+pub enum Tree<Node, Meta> {
     Branch {
-        id: NodeId,
-        children: Vec<TreeElement<NodeId, Node, Meta>>,
+        children: Vec<Tree<Node, Meta>>,
         meta: Meta,
     },
     Leaf {
-        id: NodeId,
         node: Node,
         meta: Meta,
     },
 }
 
-impl<NodeId, Node, Meta> TreeElement<NodeId, Node, Meta> {
-    pub fn branch(id: NodeId, children: Vec<TreeElement<NodeId, Node, Meta>>, meta: Meta) -> Self {
-        Self::Branch { id, children, meta }
+impl<Node, Meta> Tree<Node, Meta> {
+    pub fn branch_with_meta(meta: Meta, children: Vec<Tree<Node, Meta>>) -> Self {
+        Self::Branch { children, meta }
     }
 
-    pub fn leaf(id: NodeId, node: Node, meta: Meta) -> Self {
-        Self::Leaf { id, node, meta }
+    pub fn leaf_with_meta(node: Node, meta: Meta) -> Self {
+        Self::Leaf { node, meta }
     }
 
-    fn id(&self) -> &NodeId {
+    pub fn meta(&self) -> &Meta {
         match self {
-            TreeElement::Branch { id, .. } | TreeElement::Leaf { id, .. } => id,
+            Tree::Branch { meta, .. } => meta,
+            Tree::Leaf { meta, .. } => meta,
+        }
+    }
+
+    pub fn meta_mut(&mut self) -> &mut Meta {
+        match self {
+            Tree::Branch { meta, .. } => meta,
+            Tree::Leaf { meta, .. } => meta,
+        }
+    }
+
+    pub fn is_leaf(&self) -> bool {
+        matches!(self, Tree::Leaf { .. })
+    }
+
+    pub fn is_branch(&self) -> bool {
+        matches!(self, Tree::Branch { .. })
+    }
+
+    pub fn try_push_child(&mut self, child: Tree<Node, Meta>) -> Result<(), TreeBuildError> {
+        match self {
+            Tree::Branch { children, .. } => {
+                children.push(child);
+                Ok(())
+            }
+            Tree::Leaf { .. } => Err(TreeBuildError::CannotPushChildIntoLeaf),
         }
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum TreeNode<NodeId, Node, Meta> {
-    Branch { children: Vec<NodeId>, meta: Meta },
-    Leaf { node: Option<Node>, meta: Meta },
-}
-
-#[derive(Debug, Clone)]
-pub struct Tree<NodeId, Node, Meta> {
-    nodes: Vec<TreeNode<NodeId, Node, Meta>>,
-    index_by_id: HashMap<NodeId, usize>,
-    root_id: NodeId,
-}
-
-#[derive(Error, Debug)]
-pub enum TreeError<NodeId> {
-    #[error("duplicate node id: {0:?}")]
-    Duplicateid(NodeId),
-    #[error("missing node id: {0:?}")]
-    Missingid(NodeId),
-    #[error("node is not a branch: {0:?}")]
-    NotABranch(NodeId),
-}
-
-#[derive(Error, Debug)]
-pub enum TreeMapError<NodeId, UserError> {
-    #[error(transparent)]
-    Structural(#[from] TreeError<NodeId>),
-    #[error("user mapping error: {0}")]
-    User(UserError),
-}
-
-impl<NodeId, Node, Meta> Tree<NodeId, Node, Meta>
+/// Friendly default constructors when `Meta: Default`.
+impl<Node, Meta> Tree<Node, Meta>
 where
-    NodeId: Eq + Hash + Clone,
+    Meta: Default,
 {
-    pub fn from_tree_elements(
-        root: TreeElement<NodeId, Node, Meta>,
-    ) -> Result<Self, TreeError<NodeId>> {
-        let mut nodes = Vec::new();
-        let mut index_by_id = HashMap::new();
-        let root_id = root.id().clone();
-
-        append_element_flat(&mut nodes, &mut index_by_id, 0, root)?;
-
-        Ok(Self {
-            nodes,
-            index_by_id,
-            root_id,
-        })
-    }
-
-    pub fn new(root: TreeElement<NodeId, Node, Meta>) -> Result<Self, TreeError<NodeId>> {
-        Self::from_tree_elements(root)
-    }
-
-    pub fn root_id(&self) -> &NodeId {
-        &self.root_id
-    }
-
-    pub fn len(&self) -> usize {
-        self.nodes.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.nodes.is_empty()
-    }
-
-    pub fn contains(&self, id: &NodeId) -> bool {
-        self.index_by_id.contains_key(id)
-    }
-
-    pub fn get(&self, id: &NodeId) -> Option<&TreeNode<NodeId, Node, Meta>> {
-        self.index_by_id.get(id).map(|&index| &self.nodes[index])
-    }
-
-    pub fn get_mut(&mut self, id: &NodeId) -> Option<&mut TreeNode<NodeId, Node, Meta>> {
-        self.index_by_id
-            .get(id)
-            .map(|&index| &mut self.nodes[index])
-    }
-
-    pub fn add_children(
-        &mut self,
-        parent_id: &NodeId,
-        new_children: Vec<TreeElement<NodeId, Node, Meta>>,
-    ) -> Result<(), TreeError<NodeId>> {
-        let parent_index = *self
-            .index_by_id
-            .get(parent_id)
-            .ok_or_else(|| TreeError::Missingid(parent_id.clone()))?;
-
-        let is_branch = matches!(self.nodes[parent_index], TreeNode::Branch { .. });
-        if !is_branch {
-            return Err(TreeError::NotABranch(parent_id.clone()));
+    pub fn branch(children: Vec<Tree<Node, Meta>>) -> Self {
+        Self::Branch {
+            children,
+            meta: Meta::default(),
         }
+    }
 
-        let mut child_ids = Vec::new();
-        for element in new_children {
-            let child_root_id = element.id().clone();
-            append_element_flat(&mut self.nodes, &mut self.index_by_id, 0, element)?;
-            child_ids.push(child_root_id);
+    pub fn leaf(node: Node) -> Self {
+        Self::Leaf {
+            node,
+            meta: Meta::default(),
         }
+    }
+}
 
-        if let TreeNode::Branch { children, .. } = &mut self.nodes[parent_index] {
-            children.extend(child_ids);
+#[derive(Debug, Error)]
+pub enum TreeBuildError {
+    #[error("cannot push a child into a leaf")]
+    CannotPushChildIntoLeaf,
+}
+
+/// A flat-node for `FlatTree`.
+/// - Leaves carry `node` data and `meta`.
+/// - Branches carry `meta` and `children` which are indices into the `FlatTree.nodes` vec.
+#[derive(Debug, Clone)]
+pub enum FlatTreeNode<Node, Meta> {
+    Branch { children: Vec<usize>, meta: Meta },
+    Leaf { node: Node, meta: Meta },
+}
+
+/// A flat tree backed by a single contiguous vector.
+/// - `nodes` may contain `None` entries (e.g., after `map_option`).
+/// - `root_index` points to the root node of the tree.
+/// - Branch `children` are indices into `nodes`.
+#[derive(Debug, Clone)]
+pub struct FlatTree<Node, Meta> {
+    pub nodes: Vec<Option<FlatTreeNode<Node, Meta>>>,
+    pub root_index: usize,
+}
+
+#[derive(Debug, Error)]
+pub enum FlatTreeError {
+    #[error("root index {0} is out of bounds")]
+    InvalidRootIndex(usize),
+
+    #[error(
+        "child index {child_index} referenced by parent {parent_index} is out \
+         of bounds"
+    )]
+    ChildIndexOutOfBounds {
+        parent_index: usize,
+        child_index: usize,
+    },
+
+    #[error("node at index {0} is None")]
+    NodeMissing(usize),
+
+    #[error("cycle detected at index {0}")]
+    CycleDetected(usize),
+
+    #[error("index {0} is out of bounds")]
+    IndexOutOfBounds(usize),
+
+    #[error("expected a branch at index {0}, found a leaf")]
+    ExpectedBranch(usize),
+
+    #[error("expected a leaf at index {0}, found a branch")]
+    ExpectedLeaf(usize),
+}
+
+impl<Node, Meta> FlatTree<Node, Meta> {
+    /// Construct an empty flat tree (no nodes). You will need to set a root later.
+    pub fn new() -> Self {
+        Self {
+            nodes: Vec::new(),
+            root_index: 0,
         }
+    }
 
+    /// Construct a flat tree with a single leaf as the root.
+    pub fn single_leaf(node: Node, meta: Meta) -> Self {
+        Self {
+            nodes: vec![Some(FlatTreeNode::Leaf { node, meta })],
+            root_index: 0,
+        }
+    }
+
+    /// Construct a flat tree with a single branch as the root.
+    pub fn single_branch(meta: Meta) -> Self {
+        Self {
+            nodes: vec![Some(FlatTreeNode::Branch {
+                children: Vec::new(),
+                meta,
+            })],
+            root_index: 0,
+        }
+    }
+
+    /// Returns the root node if present.
+    pub fn root(&self) -> Option<&FlatTreeNode<Node, Meta>> {
+        self.nodes.get(self.root_index)?.as_ref()
+    }
+
+    /// Returns the mutable root node if present.
+    pub fn root_mut(&mut self) -> Option<&mut FlatTreeNode<Node, Meta>> {
+        self.nodes.get_mut(self.root_index)?.as_mut()
+    }
+
+    pub fn set_root_index(&mut self, root_index: usize) -> Result<(), FlatTreeError> {
+        if root_index >= self.nodes.len() {
+            return Err(FlatTreeError::InvalidRootIndex(root_index));
+        }
+        if self.nodes[root_index].is_none() {
+            return Err(FlatTreeError::NodeMissing(root_index));
+        }
+        self.root_index = root_index;
         Ok(())
     }
 
-    pub fn map<NextNode, MapFunction>(
-        self,
-        mut map_function: MapFunction,
-    ) -> Tree<NodeId, NextNode, Meta>
-    where
-        MapFunction: FnMut(Node) -> NextNode,
-    {
-        let Self {
-            nodes,
-            index_by_id,
-            root_id,
-        } = self;
+    pub fn get(&self, index: usize) -> Result<&FlatTreeNode<Node, Meta>, FlatTreeError> {
+        let node = self
+            .nodes
+            .get(index)
+            .ok_or(FlatTreeError::IndexOutOfBounds(index))?;
+        node.as_ref()
+            .ok_or_else(|| FlatTreeError::NodeMissing(index))
+    }
 
-        let nodes = nodes
+    pub fn get_mut(
+        &mut self,
+        index: usize,
+    ) -> Result<&mut FlatTreeNode<Node, Meta>, FlatTreeError> {
+        let node = self
+            .nodes
+            .get_mut(index)
+            .ok_or(FlatTreeError::IndexOutOfBounds(index))?;
+        node.as_mut()
+            .ok_or_else(|| FlatTreeError::NodeMissing(index))
+    }
+
+    /// Append a leaf node and return its index.
+    pub fn append_leaf(&mut self, node: Node, meta: Meta) -> usize {
+        let idx = self.nodes.len();
+        self.nodes.push(Some(FlatTreeNode::Leaf { node, meta }));
+        idx
+    }
+
+    /// Append a branch node (with currently no children) and return its index.
+    pub fn append_branch(&mut self, meta: Meta) -> usize {
+        let idx = self.nodes.len();
+        self.nodes.push(Some(FlatTreeNode::Branch {
+            children: vec![],
+            meta,
+        }));
+        idx
+    }
+
+    /// Add an existing node as a child of a branch.
+    pub fn add_child(
+        &mut self,
+        parent_index: usize,
+        child_index: usize,
+    ) -> Result<(), FlatTreeError> {
+        // Validate indices
+        self.get(child_index).map(|_| ())?;
+        // Mutably get the parent branch
+        let parent = self.get_mut(parent_index)?;
+        match parent {
+            FlatTreeNode::Branch { children, .. } => {
+                children.push(child_index);
+                Ok(())
+            }
+            FlatTreeNode::Leaf { .. } => Err(FlatTreeError::ExpectedBranch(parent_index)),
+        }
+    }
+
+    /// Validate the structure:
+    /// - root_index must be in-bounds and not None
+    /// - every child index of a reachable branch must be in-bounds
+    /// - cycles are reported
+    /// - None children are permitted (useful after map_option)
+    pub fn validate(&self) -> Result<(), FlatTreeError> {
+        if self.root_index >= self.nodes.len() {
+            return Err(FlatTreeError::InvalidRootIndex(self.root_index));
+        }
+        if self.nodes[self.root_index].is_none() {
+            return Err(FlatTreeError::NodeMissing(self.root_index));
+        }
+
+        // DFS from root to check bounds and cycles
+        let mut visiting = vec![false; self.nodes.len()];
+        let mut visited = vec![false; self.nodes.len()];
+
+        fn dfs<Node, Meta>(
+            index: usize,
+            nodes: &[Option<FlatTreeNode<Node, Meta>>],
+            visiting: &mut [bool],
+            visited: &mut [bool],
+        ) -> Result<(), FlatTreeError> {
+            if visited[index] {
+                return Ok(());
+            }
+            if visiting[index] {
+                return Err(FlatTreeError::CycleDetected(index));
+            }
+            visiting[index] = true;
+
+            let Some(node) = nodes[index].as_ref() else {
+                // Root or a reachable node must not be None.
+                return Err(FlatTreeError::NodeMissing(index));
+            };
+
+            if let FlatTreeNode::Branch { children, .. } = node {
+                for &child in children.iter() {
+                    if child >= nodes.len() {
+                        return Err(FlatTreeError::ChildIndexOutOfBounds {
+                            parent_index: index,
+                            child_index: child,
+                        });
+                    }
+                    // Allow None children (dangling) for leniency? The validator here
+                    // is "strict": reachable None is treated as error. If you want
+                    // lenient behavior, you can skip this error and return Ok(()).
+                    if nodes[child].is_none() {
+                        return Err(FlatTreeError::NodeMissing(child));
+                    }
+                    dfs(child, nodes, visiting, visited)?;
+                }
+            }
+
+            visiting[index] = false;
+            visited[index] = true;
+            Ok(())
+        }
+
+        dfs(self.root_index, &self.nodes, &mut visiting, &mut visited)
+    }
+
+    /// Efficient leaf-only map. Indices do not change.
+    pub fn map<NextNode, MapFn>(self, map: MapFn) -> FlatTree<NextNode, Meta>
+    where
+        MapFn: Fn(Node) -> NextNode + Copy,
+    {
+        let root_index = self.root_index;
+        let nodes = self
+            .nodes
             .into_iter()
-            .map(|node| match node {
-                TreeNode::Branch { children, meta } => TreeNode::Branch { children, meta },
-                TreeNode::Leaf { node, meta } => TreeNode::Leaf {
-                    node: node.map(|n| map_function(n)),
-                    meta,
-                },
+            .map(|maybe| {
+                maybe.map(|node| match node {
+                    FlatTreeNode::Leaf { node, meta } => FlatTreeNode::Leaf {
+                        node: map(node),
+                        meta,
+                    },
+                    FlatTreeNode::Branch { children, meta } => {
+                        FlatTreeNode::Branch { children, meta }
+                    }
+                })
             })
             .collect();
 
-        Tree {
-            nodes,
-            index_by_id,
-            root_id,
-        }
+        FlatTree { nodes, root_index }
     }
 
-    pub fn map_result<NextNode, Error, MapFunction>(
-        self,
-        mut map_function: MapFunction,
-    ) -> Result<Tree<NodeId, NextNode, Meta>, Error>
+    /// Map leaves with an Option. Do not compact; leave nodes as None.
+    /// Indices do not change.
+    pub fn map_option<NextNode, MapFn>(self, map: MapFn) -> FlatTree<NextNode, Meta>
     where
-        MapFunction: FnMut(Node) -> Result<NextNode, Error>,
+        MapFn: Fn(Node) -> Option<NextNode> + Copy,
     {
-        let Self {
-            nodes,
-            index_by_id,
-            root_id,
-        } = self;
+        let root_index = self.root_index;
+        let nodes = self
+            .nodes
+            .into_iter()
+            .map(|maybe| {
+                maybe.and_then(|node| match node {
+                    FlatTreeNode::Leaf { node, meta } => {
+                        map(node).map(|node| FlatTreeNode::Leaf { node, meta })
+                    }
+                    FlatTreeNode::Branch { children, meta } => {
+                        Some(FlatTreeNode::Branch { children, meta })
+                    }
+                })
+            })
+            .collect();
 
-        let mut out = Vec::with_capacity(nodes.len());
-        for node in nodes {
-            match node {
-                TreeNode::Branch { children, meta } => {
-                    out.push(TreeNode::Branch { children, meta })
+        FlatTree { nodes, root_index }
+    }
+
+    /// Map leaves with a Result. Indices do not change.
+    pub fn map_result<NextNode, Error, MapFn>(
+        self,
+        map: MapFn,
+    ) -> Result<FlatTree<NextNode, Meta>, Error>
+    where
+        MapFn: Fn(Node) -> Result<NextNode, Error> + Copy,
+    {
+        let root_index = self.root_index;
+        let mut nodes_out = Vec::with_capacity(self.nodes.len());
+
+        for maybe in self.nodes {
+            let mapped = match maybe {
+                None => None,
+                Some(FlatTreeNode::Leaf { node, meta }) => Some(FlatTreeNode::Leaf {
+                    node: map(node)?,
+                    meta,
+                }),
+                Some(FlatTreeNode::Branch { children, meta }) => {
+                    Some(FlatTreeNode::Branch { children, meta })
                 }
-                TreeNode::Leaf { node, meta } => {
-                    let mapped = match node {
-                        Some(n) => Some(map_function(n)?),
-                        None => None,
-                    };
-                    out.push(TreeNode::Leaf { node: mapped, meta });
-                }
-            }
+            };
+            nodes_out.push(mapped);
         }
 
-        Ok(Tree {
-            nodes: out,
-            index_by_id,
-            root_id,
+        Ok(FlatTree {
+            nodes: nodes_out,
+            root_index,
         })
     }
 
-    pub fn map_result_async<NextNode, Error, MapFunction, Fut>(
+    /// Async map on leaves with a Result. Indices do not change.
+    pub fn map_result_async<NextNode, Error, MapFn, Fut>(
         self,
-        mut map_function: MapFunction,
-    ) -> Pin<Box<dyn Future<Output = Result<Tree<NodeId, NextNode, Meta>, Error>> + Send + 'static>>
+        map: MapFn,
+    ) -> Pin<Box<dyn Future<Output = Result<FlatTree<NextNode, Meta>, Error>> + Send + 'static>>
     where
         Node: Send + 'static,
         NextNode: Send + 'static,
         Error: Send + 'static,
-        MapFunction: FnMut(Node) -> Fut + Send + 'static,
+        MapFn: Fn(Node) -> Fut + Copy + Send + 'static,
         Fut: Future<Output = Result<NextNode, Error>> + Send + 'static,
-        NodeId: Send + 'static,
-        Meta: Send + 'static,
     {
-        let Tree {
-            nodes,
-            index_by_id,
-            root_id,
-        } = self;
-
         Box::pin(async move {
-            let mut out = Vec::with_capacity(nodes.len());
-            for node in nodes {
-                match node {
-                    TreeNode::Branch { children, meta } => {
-                        out.push(TreeNode::Branch { children, meta })
+            let root_index = self.root_index;
+            let mut nodes_out = Vec::with_capacity(self.nodes.len());
+
+            // Prepare futures for leaves
+            let mut jobs: Vec<(
+                usize,
+                Meta,
+                Pin<Box<dyn Future<Output = Result<NextNode, Error>> + Send>>,
+            )> = Vec::new();
+
+            // First pass: keep branches, placeholder for leaves
+            for (i, maybe) in self.nodes.into_iter().enumerate() {
+                match maybe {
+                    None => nodes_out.push(None),
+                    Some(FlatTreeNode::Branch { children, meta }) => {
+                        nodes_out.push(Some(FlatTreeNode::Branch { children, meta }));
                     }
-                    TreeNode::Leaf { node, meta } => {
-                        let mapped = if let Some(n) = node {
-                            Some(map_function(n).await?)
-                        } else {
-                            None
-                        };
-                        out.push(TreeNode::Leaf { node: mapped, meta });
+                    Some(FlatTreeNode::Leaf { node, meta }) => {
+                        nodes_out.push(None); // will fill later
+                        let fut = map(node);
+                        jobs.push((i, meta, Box::pin(fut)));
                     }
                 }
             }
 
-            Ok(Tree {
-                nodes: out,
-                index_by_id,
-                root_id,
+            // Resolve leaves
+            for (i, meta, fut) in jobs {
+                let mapped_node = fut.await?;
+                nodes_out[i] = Some(FlatTreeNode::Leaf {
+                    node: mapped_node,
+                    meta,
+                });
+            }
+
+            Ok(FlatTree {
+                nodes: nodes_out,
+                root_index,
             })
         })
     }
 
-    pub fn map_option<NextNode, MapFunction>(
-        self,
-        mut map_function: MapFunction,
-    ) -> Tree<NodeId, NextNode, Meta>
+    /// Map leaves into sub-trees. Existing indices do not change; new nodes
+    /// are appended. Each leaf becomes a branch whose children are the roots
+    /// of the appended sub-trees.
+    pub fn map_tree<NextNode, MapFn>(self, map: MapFn) -> FlatTree<NextNode, Meta>
     where
-        MapFunction: FnMut(Node) -> Option<NextNode>,
+        MapFn: Fn(Node) -> Vec<Tree<NextNode, Meta>> + Copy,
     {
-        let Self {
-            nodes,
-            index_by_id,
-            root_id,
-        } = self;
+        let orig_len = self.nodes.len();
+        let mut nodes_out: Vec<Option<FlatTreeNode<NextNode, Meta>>> = Vec::with_capacity(orig_len);
+        nodes_out.resize_with(orig_len, || None);
 
-        let nodes = nodes
-            .into_iter()
-            .map(|node| match node {
-                TreeNode::Branch { children, meta } => TreeNode::Branch { children, meta },
-                TreeNode::Leaf { node, meta } => TreeNode::Leaf {
-                    node: node.and_then(|n| map_function(n)),
-                    meta,
-                },
-            })
-            .collect();
-
-        Tree {
-            nodes,
-            index_by_id,
-            root_id,
-        }
-    }
-
-    pub fn map_tree<NextNode, MapFunction>(
-        self,
-        mut map_function: MapFunction,
-    ) -> Result<Tree<NodeId, NextNode, Meta>, TreeError<NodeId>>
-    where
-        NextNode: Clone,
-        Meta: Clone,
-        MapFunction: FnMut(Node) -> Vec<TreeElement<NodeId, NextNode, Meta>>,
-    {
-        let Self {
-            nodes,
-            mut index_by_id,
-            root_id,
-        } = self;
-
-        let original_len = nodes.len();
-        let mut prefix: Vec<Option<TreeNode<NodeId, NextNode, Meta>>> = vec![None; original_len];
-        let mut tail_nodes: Vec<TreeNode<NodeId, NextNode, Meta>> = Vec::new();
-
-        for (index, tree_node) in nodes.into_iter().enumerate() {
-            match tree_node {
-                TreeNode::Branch { children, meta } => {
-                    prefix[index] = Some(TreeNode::Branch { children, meta });
+        // Helper to append a Tree<NextNode, Meta> into nodes_out and
+        // return its index.
+        fn append_tree<Node, Meta>(
+            tree: Tree<Node, Meta>,
+            nodes: &mut Vec<Option<FlatTreeNode<Node, Meta>>>,
+        ) -> usize {
+            match tree {
+                Tree::Leaf { node, meta } => {
+                    let idx = nodes.len();
+                    nodes.push(Some(FlatTreeNode::Leaf { node, meta }));
+                    idx
                 }
-                TreeNode::Leaf {
-                    node: Some(node_data),
-                    meta,
-                } => {
-                    let new_elements = map_function(node_data);
-                    let mut child_ids = Vec::with_capacity(new_elements.len());
-
-                    for element in new_elements {
-                        let child_id = element.id().clone();
-                        append_element_flat(
-                            &mut tail_nodes,
-                            &mut index_by_id,
-                            original_len,
-                            element,
-                        )?;
-                        child_ids.push(child_id);
-                    }
-
-                    prefix[index] = Some(TreeNode::Branch {
-                        children: child_ids,
+                Tree::Branch { mut children, meta } => {
+                    let idx = nodes.len();
+                    nodes.push(Some(FlatTreeNode::Branch {
+                        children: Vec::new(),
                         meta,
-                    });
-                }
-                TreeNode::Leaf { node: None, meta } => {
-                    prefix[index] = Some(TreeNode::Leaf { node: None, meta });
+                    }));
+                    // Collect all children indices recursively
+                    let mut child_indices = Vec::with_capacity(children.len());
+                    for child in children.drain(..) {
+                        let cidx = append_tree(child, nodes);
+                        child_indices.push(cidx);
+                    }
+                    if let Some(FlatTreeNode::Branch { children, .. }) = nodes[idx].as_mut() {
+                        *children = child_indices;
+                    }
+                    idx
                 }
             }
         }
 
-        let mut nodes_out = prefix.into_iter().map(|n| n.unwrap()).collect::<Vec<_>>();
-        nodes_out.extend(tail_nodes);
-
-        Ok(Tree {
-            nodes: nodes_out,
-            index_by_id,
-            root_id,
-        })
-    }
-
-    pub fn map_tree_result<NextNode, UserError, MapFunction>(
-        self,
-        mut map_function: MapFunction,
-    ) -> Result<Tree<NodeId, NextNode, Meta>, TreeMapError<NodeId, UserError>>
-    where
-        NextNode: Clone,
-        Meta: Clone,
-        MapFunction: FnMut(Node) -> Result<Vec<TreeElement<NodeId, NextNode, Meta>>, UserError>,
-    {
-        let Self {
-            nodes,
-            mut index_by_id,
-            root_id,
-        } = self;
-
-        let original_len = nodes.len();
-        let mut prefix: Vec<Option<TreeNode<NodeId, NextNode, Meta>>> = vec![None; original_len];
-        let mut tail_nodes: Vec<TreeNode<NodeId, NextNode, Meta>> = Vec::new();
-
-        for (index, tree_node) in nodes.into_iter().enumerate() {
-            match tree_node {
-                TreeNode::Branch { children, meta } => {
-                    prefix[index] = Some(TreeNode::Branch { children, meta });
+        // First pass: rewrite old nodes; leaves become branches with
+        // children appended at the end.
+        for i in 0..orig_len {
+            match self.nodes[i].clone() {
+                None => {
+                    nodes_out[i] = None;
                 }
-                TreeNode::Leaf {
-                    node: Some(node_data),
-                    meta,
-                } => {
-                    let new_elements = map_function(node_data).map_err(TreeMapError::User)?;
-                    let mut child_ids = Vec::with_capacity(new_elements.len());
-
-                    for element in new_elements {
-                        let child_id = element.id().clone();
-                        append_element_flat(
-                            &mut tail_nodes,
-                            &mut index_by_id,
-                            original_len,
-                            element,
-                        )?;
-                        child_ids.push(child_id);
-                    }
-
-                    prefix[index] = Some(TreeNode::Branch {
-                        children: child_ids,
-                        meta,
-                    });
+                Some(FlatTreeNode::Branch { children, meta }) => {
+                    nodes_out[i] = Some(FlatTreeNode::Branch { children, meta });
                 }
-                TreeNode::Leaf { node: None, meta } => {
-                    prefix[index] = Some(TreeNode::Leaf { node: None, meta });
-                }
-            }
-        }
-
-        let mut nodes_out = prefix.into_iter().map(|n| n.unwrap()).collect::<Vec<_>>();
-        nodes_out.extend(tail_nodes);
-
-        Ok(Tree {
-            nodes: nodes_out,
-            index_by_id,
-            root_id,
-        })
-    }
-
-    pub fn map_tree_result_async<NextNode, UserError, MapFunction, Fut>(
-        self,
-        mut map_function: MapFunction,
-    ) -> Pin<
-        Box<
-            dyn Future<
-                    Output = Result<Tree<NodeId, NextNode, Meta>, TreeMapError<NodeId, UserError>>,
-                > + Send
-                + 'static,
-        >,
-    >
-    where
-        Node: Send + 'static,
-        NextNode: Send + Clone + 'static,
-        UserError: Send + 'static,
-        MapFunction: FnMut(Node) -> Fut + Send + 'static,
-        Fut: Future<Output = Result<Vec<TreeElement<NodeId, NextNode, Meta>>, UserError>>
-            + Send
-            + 'static,
-        NodeId: Send + 'static,
-        Meta: Send + Clone + 'static,
-    {
-        let Tree {
-            nodes,
-            mut index_by_id,
-            root_id,
-        } = self;
-
-        Box::pin(async move {
-            let original_len = nodes.len();
-            let mut prefix: Vec<Option<TreeNode<NodeId, NextNode, Meta>>> =
-                vec![None; original_len];
-            let mut tail_nodes: Vec<TreeNode<NodeId, NextNode, Meta>> = Vec::new();
-
-            for (index, tree_node) in nodes.into_iter().enumerate() {
-                match tree_node {
-                    TreeNode::Branch { children, meta } => {
-                        prefix[index] = Some(TreeNode::Branch { children, meta });
-                    }
-                    TreeNode::Leaf {
-                        node: Some(node_data),
-                        meta,
-                    } => {
-                        let new_elements =
-                            map_function(node_data).await.map_err(TreeMapError::User)?;
-                        let mut child_ids = Vec::with_capacity(new_elements.len());
-
-                        for element in new_elements {
-                            let child_id = element.id().clone();
-                            append_element_flat(
-                                &mut tail_nodes,
-                                &mut index_by_id,
-                                original_len,
-                                element,
-                            )?;
-                            child_ids.push(child_id);
+                Some(FlatTreeNode::Leaf { .. }) => {
+                    // Move out of self.nodes by taking ownership via match below
+                    // (we borrowed above only to decide the variant).
+                    let maybe_owned = self.nodes[i].clone();
+                    if let Some(FlatTreeNode::Leaf { node, meta }) = maybe_owned {
+                        // Map this leaf to new sub-trees and append them.
+                        let trees = map(node);
+                        let mut child_indices = Vec::with_capacity(trees.len());
+                        for t in trees {
+                            let idx = append_tree(t, &mut nodes_out);
+                            child_indices.push(idx);
                         }
-
-                        prefix[index] = Some(TreeNode::Branch {
-                            children: child_ids,
+                        nodes_out[i] = Some(FlatTreeNode::Branch {
+                            children: child_indices,
                             meta,
                         });
-                    }
-                    TreeNode::Leaf { node: None, meta } => {
-                        prefix[index] = Some(TreeNode::Leaf { node: None, meta });
+                    } else {
+                        nodes_out[i] = None;
                     }
                 }
             }
+        }
 
-            let mut nodes_out = prefix.into_iter().map(|n| n.unwrap()).collect::<Vec<_>>();
-            nodes_out.extend(tail_nodes);
+        FlatTree {
+            nodes: nodes_out,
+            root_index: self.root_index,
+        }
+    }
 
-            Ok(Tree {
-                nodes: nodes_out,
-                index_by_id,
-                root_id,
-            })
+    /// Map leaves into sub-trees with Result.
+    pub fn map_tree_result<NextNode, Error, MapFn>(
+        self,
+        map: MapFn,
+    ) -> Result<FlatTree<NextNode, Meta>, Error>
+    where
+        MapFn: Fn(Node) -> Result<Vec<Tree<NextNode, Meta>>, Error> + Copy,
+    {
+        let orig_len = self.nodes.len();
+        let mut nodes_out: Vec<Option<FlatTreeNode<NextNode, Meta>>> = Vec::with_capacity(orig_len);
+        nodes_out.resize_with(orig_len, || None);
+
+        fn append_tree<Node, Meta>(
+            tree: Tree<Node, Meta>,
+            nodes: &mut Vec<Option<FlatTreeNode<Node, Meta>>>,
+        ) -> usize {
+            match tree {
+                Tree::Leaf { node, meta } => {
+                    let idx = nodes.len();
+                    nodes.push(Some(FlatTreeNode::Leaf { node, meta }));
+                    idx
+                }
+                Tree::Branch { mut children, meta } => {
+                    let idx = nodes.len();
+                    nodes.push(Some(FlatTreeNode::Branch {
+                        children: Vec::new(),
+                        meta,
+                    }));
+                    let mut child_indices = Vec::with_capacity(children.len());
+                    for child in children.drain(..) {
+                        let cidx = append_tree(child, nodes);
+                        child_indices.push(cidx);
+                    }
+                    if let Some(FlatTreeNode::Branch { children, .. }) = nodes[idx].as_mut() {
+                        *children = child_indices;
+                    }
+                    idx
+                }
+            }
+        }
+
+        for i in 0..orig_len {
+            match self.nodes[i].clone() {
+                None => nodes_out[i] = None,
+                Some(FlatTreeNode::Branch { children, meta }) => {
+                    nodes_out[i] = Some(FlatTreeNode::Branch { children, meta });
+                }
+                Some(FlatTreeNode::Leaf { node, meta }) => {
+                    let trees = map(node)?;
+                    let mut child_indices = Vec::with_capacity(trees.len());
+                    for t in trees {
+                        let idx = append_tree(t, &mut nodes_out);
+                        child_indices.push(idx);
+                    }
+                    nodes_out[i] = Some(FlatTreeNode::Branch {
+                        children: child_indices,
+                        meta,
+                    });
+                }
+            }
+        }
+
+        Ok(FlatTree {
+            nodes: nodes_out,
+            root_index: self.root_index,
         })
     }
 
-    pub fn to_tree_elements(&self) -> Option<TreeElement<NodeId, Node, Meta>>
+    /// Async map of leaves into sub-trees with Result.
+    pub fn map_tree_result_async<NextNode, Error, MapFn, Fut>(
+        self,
+        map: MapFn,
+    ) -> Pin<Box<dyn Future<Output = Result<FlatTree<NextNode, Meta>, Error>> + Send + 'static>>
     where
-        Node: Clone,
-        Meta: Clone,
+        Node: Send + 'static,
+        NextNode: Send + 'static,
+        Error: Send + 'static,
+        MapFn: Fn(Node) -> Fut + Copy + Send + 'static,
+        Fut: Future<Output = Result<Vec<Tree<NextNode, Meta>>, Error>> + Send + 'static,
     {
-        fn build<NodeId, Node, Meta>(
-            tree: &Tree<NodeId, Node, Meta>,
-            id: &NodeId,
-        ) -> Option<TreeElement<NodeId, Node, Meta>>
-        where
-            NodeId: Eq + Hash + Clone,
-            Node: Clone,
-            Meta: Clone,
-        {
-            let index = *tree.index_by_id.get(id)?;
-            match &tree.nodes[index] {
-                TreeNode::Leaf {
-                    node: Some(node),
+        Box::pin(async move {
+            let orig_len = self.nodes.len();
+            let mut nodes_out: Vec<Option<FlatTreeNode<NextNode, Meta>>> =
+                Vec::with_capacity(orig_len);
+            nodes_out.resize_with(orig_len, || None);
+
+            fn append_tree<Node, Meta>(
+                tree: Tree<Node, Meta>,
+                nodes: &mut Vec<Option<FlatTreeNode<Node, Meta>>>,
+            ) -> usize {
+                match tree {
+                    Tree::Leaf { node, meta } => {
+                        let idx = nodes.len();
+                        nodes.push(Some(FlatTreeNode::Leaf { node, meta }));
+                        idx
+                    }
+                    Tree::Branch { mut children, meta } => {
+                        let idx = nodes.len();
+                        nodes.push(Some(FlatTreeNode::Branch {
+                            children: Vec::new(),
+                            meta,
+                        }));
+                        let mut child_indices = Vec::with_capacity(children.len());
+                        for child in children.drain(..) {
+                            let cidx = append_tree(child, nodes);
+                            child_indices.push(cidx);
+                        }
+                        if let Some(FlatTreeNode::Branch { children, .. }) = nodes[idx].as_mut() {
+                            *children = child_indices;
+                        }
+                        idx
+                    }
+                }
+            }
+
+            // Prepare jobs for leaves; copy through branches.
+            let mut jobs: Vec<(
+                usize,
+                Meta,
+                Pin<Box<dyn Future<Output = Result<Vec<Tree<NextNode, Meta>>, Error>> + Send>>,
+            )> = Vec::new();
+
+            for (i, maybe) in self.nodes.into_iter().enumerate() {
+                match maybe {
+                    None => nodes_out[i] = None,
+                    Some(FlatTreeNode::Branch { children, meta }) => {
+                        nodes_out[i] = Some(FlatTreeNode::Branch { children, meta });
+                    }
+                    Some(FlatTreeNode::Leaf { node, meta }) => {
+                        nodes_out[i] = None; // to be filled
+                        let fut = map(node);
+                        jobs.push((i, meta, Box::pin(fut)));
+                    }
+                }
+            }
+
+            for (i, meta, fut) in jobs {
+                let trees = fut.await?;
+                let mut child_indices = Vec::with_capacity(trees.len());
+                for t in trees {
+                    let idx = append_tree(t, &mut nodes_out);
+                    child_indices.push(idx);
+                }
+                nodes_out[i] = Some(FlatTreeNode::Branch {
+                    children: child_indices,
                     meta,
-                } => Some(TreeElement::Leaf {
-                    id: id.clone(),
-                    node: node.clone(),
-                    meta: meta.clone(),
-                }),
-                TreeNode::Leaf { node: None, .. } => None,
-                TreeNode::Branch { children, meta } => {
-                    let mut kept_children = Vec::new();
-                    for child_id in children {
-                        if let Some(child_el) = build(tree, child_id) {
-                            kept_children.push(child_el);
+                });
+            }
+
+            Ok(FlatTree {
+                nodes: nodes_out,
+                root_index: self.root_index,
+            })
+        })
+    }
+}
+
+/// From<Tree> -> FlatTree: flatten a tree into a single vector.
+impl<Node, Meta> From<Tree<Node, Meta>> for FlatTree<Node, Meta> {
+    fn from(tree: Tree<Node, Meta>) -> Self {
+        fn append<Node, Meta>(
+            tree: Tree<Node, Meta>,
+            nodes: &mut Vec<Option<FlatTreeNode<Node, Meta>>>,
+        ) -> usize {
+            match tree {
+                Tree::Leaf { node, meta } => {
+                    let idx = nodes.len();
+                    nodes.push(Some(FlatTreeNode::Leaf { node, meta }));
+                    idx
+                }
+                Tree::Branch { mut children, meta } => {
+                    let idx = nodes.len();
+                    nodes.push(Some(FlatTreeNode::Branch {
+                        children: Vec::new(),
+                        meta,
+                    }));
+                    let mut child_indices = Vec::with_capacity(children.len());
+                    for child in children.drain(..) {
+                        let cidx = append(child, nodes);
+                        child_indices.push(cidx);
+                    }
+                    if let Some(FlatTreeNode::Branch { children, .. }) = nodes[idx].as_mut() {
+                        *children = child_indices;
+                    }
+                    idx
+                }
+            }
+        }
+
+        let mut nodes = Vec::new();
+        let root_index = append(tree, &mut nodes);
+        FlatTree { nodes, root_index }
+    }
+}
+
+/// From<FlatTree> -> Tree: reconstruct a nested tree. This is lenient:
+/// - Missing or invalid children are skipped.
+/// - If the root is missing, returns an empty Branch with default meta.
+///
+/// For strict validation and error reporting, use `TryFrom` via
+/// `flat.validate()?; let tree: Tree<_, _> = flat.into();`
+/// or `Tree::<_, _>::try_from(flat)`.
+impl<Node, Meta> From<FlatTree<Node, Meta>> for Tree<Node, Meta>
+where
+    Meta: Default,
+{
+    fn from(mut flat: FlatTree<Node, Meta>) -> Self {
+        fn build<Node, Meta>(
+            index: usize,
+            nodes: &mut [Option<FlatTreeNode<Node, Meta>>],
+        ) -> Option<Tree<Node, Meta>>
+        where
+            Meta: Default,
+        {
+            if index >= nodes.len() {
+                return None;
+            }
+            let Some(node) = nodes[index].take() else {
+                return None;
+            };
+
+            match node {
+                FlatTreeNode::Leaf { node, meta } => Some(Tree::Leaf { node, meta }),
+                FlatTreeNode::Branch { children, meta } => {
+                    let mut built_children = Vec::new();
+                    for child_idx in children {
+                        if let Some(child) = build(child_idx, nodes) {
+                            built_children.push(child);
                         }
                     }
-                    if kept_children.is_empty() {
-                        None
-                    } else {
-                        Some(TreeElement::Branch {
-                            id: id.clone(),
-                            children: kept_children,
-                            meta: meta.clone(),
-                        })
-                    }
+                    Some(Tree::Branch {
+                        children: built_children,
+                        meta,
+                    })
                 }
             }
         }
 
-        build(self, &self.root_id)
-    }
-
-    pub fn compact(&self) -> Option<Self>
-    where
-        Node: Clone,
-        Meta: Clone,
-    {
-        let elements = self.to_tree_elements()?;
-        Self::from_tree_elements(elements).ok()
+        build(flat.root_index, &mut flat.nodes).unwrap_or_else(|| Tree::Branch {
+            children: Vec::new(),
+            meta: Meta::default(),
+        })
     }
 }
 
-fn append_element_flat<NodeId, Node, Meta>(
-    nodes_out: &mut Vec<TreeNode<NodeId, Node, Meta>>,
-    index_by_id: &mut HashMap<NodeId, usize>,
-    base_index: usize,
-    element: TreeElement<NodeId, Node, Meta>,
-) -> Result<(), TreeError<NodeId>>
+/// TryFrom<FlatTree> -> Tree with strict validation using `thiserror`.
+impl<Node, Meta> TryFrom<FlatTree<Node, Meta>> for Tree<Node, Meta>
 where
-    NodeId: Eq + Hash + Clone,
+    Meta: Default,
 {
-    match element {
-        TreeElement::Leaf { id, node, meta } => {
-            if index_by_id.contains_key(&id) {
-                return Err(TreeError::Duplicateid(id));
-            }
-            let current_index = base_index + nodes_out.len();
-            nodes_out.push(TreeNode::Leaf {
-                node: Some(node),
-                meta,
-            });
-            index_by_id.insert(id, current_index);
-        }
-        TreeElement::Branch { id, children, meta } => {
-            if index_by_id.contains_key(&id) {
-                return Err(TreeError::Duplicateid(id));
-            }
-            let current_index = base_index + nodes_out.len();
+    type Error = FlatTreeError;
 
-            let child_ids = children.iter().map(|c| c.id().clone()).collect::<Vec<_>>();
-
-            nodes_out.push(TreeNode::Branch {
-                children: child_ids,
-                meta,
-            });
-            index_by_id.insert(id, current_index);
-
-            for child in children {
-                append_element_flat(nodes_out, index_by_id, base_index, child)?;
-            }
-        }
-    }
-    Ok(())
-}
-
-impl<NodeId, Node, Meta> Render for Tree<NodeId, Node, Meta>
-where
-    NodeId: Display + Clone + Eq + Hash,
-    Node: Display,
-{
-    fn render(&self) -> ViewNode {
-        fn render_from<NodeId, Node, Meta>(tree: &Tree<NodeId, Node, Meta>, id: &NodeId) -> ViewTree
-        where
-            NodeId: Display + Clone + Eq + Hash,
-            Node: Display,
-        {
-            let index = *tree.index_by_id.get(id).expect("invalid id in tree");
-
-            match &tree.nodes[index] {
-                TreeNode::Branch { children, .. } => ViewTree::Branch {
-                    label: id.to_string(),
-                    nodes: children
-                        .iter()
-                        .map(|child_id| render_from(tree, child_id))
-                        .collect(),
-                },
-                TreeNode::Leaf { node, .. } => {
-                    let label = match node {
-                        Some(n) => format!("{id}: {n}"),
-                        None => format!("{id}"),
-                    };
-                    ViewTree::Leaf { label }
-                }
-            }
-        }
-
-        render_from(self, &self.root_id).into()
+    fn try_from(flat: FlatTree<Node, Meta>) -> Result<Self, Self::Error> {
+        flat.validate()?;
+        Ok(Tree::from(flat))
     }
 }
