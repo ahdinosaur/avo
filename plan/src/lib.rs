@@ -13,9 +13,10 @@ mod id;
 mod load;
 mod model;
 
-pub use crate::id::PlanId;
+pub use crate::id::{NodeId, PlanId};
 use crate::{
     core::{core_module, is_core_module},
+    id::PlanItemId,
     model::Plan,
 };
 use crate::{
@@ -45,7 +46,7 @@ pub enum PlanError {
     Eval(#[from] EvalError),
 
     /// Failed to convert plan item to resource
-    PlanActionToResource(#[from] PlanActionToResourceError),
+    PlanItemToResource(#[from] PlanItemToResourceError),
 }
 
 /// Top-level planning routine: load plan, validate parameters, and evaluate to
@@ -92,11 +93,14 @@ async fn plan_recursive(
 
     validate(param_types.as_ref(), param_values)?;
 
-    let plan_actions = evaluate(setup, param_values.cloned())?;
+    let plan_items = evaluate(setup, param_values.cloned())?;
 
-    let mut resources = Vec::with_capacity(plan_actions.len());
-    for plan_action in plan_actions {
-        let node = Box::pin(plan_action_to_resource(plan_action, &plan_id, store)).await?;
+    let mut resources = Vec::with_capacity(plan_items.len());
+    for (item_index, plan_item) in plan_items.iter().enumerate() {
+        let node = Box::pin(plan_item_to_resource(
+            plan_item, item_index, &plan_id, store,
+        ))
+        .await?;
         resources.push(node);
     }
 
@@ -104,8 +108,8 @@ async fn plan_recursive(
 }
 
 #[derive(Debug, Error, Display)]
-pub enum PlanActionToResourceError {
-    /// Missing required parameters in plan action
+pub enum PlanItemToResourceError {
+    /// Missing required parameters in plan item
     MissingParams,
 
     /// Parameters validation for resource failed
@@ -121,30 +125,31 @@ pub enum PlanActionToResourceError {
     PlanSubtree(#[from] Box<PlanError>),
 }
 
-async fn plan_action_to_resource(
-    plan_action: Spanned<crate::model::PlanAction>,
+async fn plan_item_to_resource(
+    plan_item: Spanned<crate::model::PlanItem>,
+    item_index: usize,
     current_plan_id: &PlanId,
     store: &mut Store,
-) -> Result<CausalityTree<ResourceParams>, PlanActionToResourceError> {
-    let (plan_action, _span) = plan_action.take();
-    let crate::model::PlanAction {
-        id,
+) -> Result<CausalityTree<ResourceParams>, PlanItemToResourceError> {
+    let (plan_item, _span) = plan_item.take();
+    let crate::model::PlanItem {
+        id: item_id,
         ref module,
         params: param_values,
         before,
         after,
-    } = plan_action;
+    } = plan_item;
 
-    let id = id.map(|id| NodeId::new(id.into_inner()));
+    let id = NodeId::PlanItem(PlanItemId(item_id));
     let before = before
         .into_iter()
         .map(|v| v.into_inner())
-        .map(NodeId::new)
+        .map(|id| NodeId::PlanItem(PlanItem(id)))
         .collect();
     let after = after
         .into_iter()
         .map(|v| v.into_inner())
-        .map(NodeId::new)
+        .map(|id| NodeId::PlanItem(PlanItem(id)))
         .collect();
 
     if let Some(core_module_id) = is_core_module(module) {

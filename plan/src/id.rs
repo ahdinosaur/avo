@@ -40,8 +40,8 @@ fn relative<P: AsRef<Path>>(current_path: &Path, next_path: P) -> PathBuf {
 impl Display for PlanId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PlanId::Path(path) => write!(f, "path({})", path.display()),
-            PlanId::Git(url, path) => write!(f, "git({}, {})", url, path.display()),
+            PlanId::Path(path) => write!(f, "Path({})", path.display()),
+            PlanId::Git(url, path) => write!(f, "Git({}, {})", url, path.display()),
         }
     }
 }
@@ -66,4 +66,13 @@ impl From<PlanId> for SourceId {
             }
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct PlanItemId(Option<String>);
+
+#[derive(Debug, Clone)]
+pub enum NodeId {
+    Plan(PlanId),
+    PlanItem(PlanItemId),
 }

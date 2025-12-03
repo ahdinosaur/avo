@@ -1,24 +1,6 @@
 use std::{fmt::Display, pin::Pin};
 
 use lusid_view::{Render, Tree as ViewTree, ViewNode};
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct NodeId(String);
-
-impl NodeId {
-    pub fn new(id: String) -> Self {
-        Self(id)
-    }
-
-    pub fn inner(&self) -> &str {
-        &self.0
-    }
-
-    pub fn into_inner(self) -> String {
-        self.0
-    }
-}
-
 #[derive(Debug, Clone)]
 pub enum Tree<Node, Meta> {
     Branch {
