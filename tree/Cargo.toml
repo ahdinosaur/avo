@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 lusid-view = { path = "../view", version = "0.1" }
+thiserror.workspace = true

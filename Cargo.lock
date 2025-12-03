@@ -2111,6 +2111,7 @@ name = "lusid-tree"
 version = "0.1.0"
 dependencies = [
  "lusid-view",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
