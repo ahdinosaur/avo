@@ -1,11 +1,10 @@
 use lusid_tree::Tree;
 
-pub use lusid_tree::NodeId;
-
-pub type CausalityTree<Node> = Tree<Node, CausalityMeta>;
+pub type CausalityTree<Node, NodeId> = Tree<Node, CausalityMeta<NodeId>>;
 
 #[derive(Debug, Clone, Default)]
-pub struct CausalityMeta {
+pub struct CausalityMeta<NodeId> {
+    pub id: Option<NodeId>,
     pub before: Vec<NodeId>,
     pub after: Vec<NodeId>,
 }
