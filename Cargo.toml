@@ -19,7 +19,7 @@ members = [
   "store",
   "system",
   "vm",
-  "view", "tree",
+  "view", "tree", "flow",
 ]
 
 [workspace.dependencies]
