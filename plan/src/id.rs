@@ -69,10 +69,18 @@ impl From<PlanId> for SourceId {
 }
 
 #[derive(Debug, Clone)]
-pub struct PlanItemId(Option<String>);
-
-#[derive(Debug, Clone)]
-pub enum NodeId {
+pub enum PlanNodeId {
     Plan(PlanId),
-    PlanItem(PlanItemId),
+    PlanItem(String),
+    SubItem(String),
+}
+
+impl Display for PlanNodeId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PlanNodeId::Plan(id) => write!(f, "Plan({id})"),
+            PlanNodeId::PlanItem(id) => write!(f, "PlanItem({id})"),
+            PlanNodeId::SubItem(id) => write!(f, "SubItem({id})"),
+        }
+    }
 }

@@ -2,7 +2,7 @@ use lusid_causality::{compute_epochs, EpochError};
 use lusid_ctx::{Context, ContextError};
 use lusid_operation::{apply_operations, merge_operations, partition_by_type, OperationApplyError};
 use lusid_params::{ParamValues, ParamValuesFromTypeError};
-use lusid_plan::{self, plan, PlanError, PlanId};
+use lusid_plan::{self, plan, PlanError, PlanId, PlanNodeId};
 use lusid_resource::{Resource, ResourceState, ResourceStateError};
 use lusid_store::Store;
 use lusid_view::Render;
@@ -40,7 +40,7 @@ pub enum ApplyError {
     Plan(#[from] PlanError),
 
     #[error(transparent)]
-    Epoch(#[from] EpochError),
+    Epoch(#[from] EpochError<PlanNodeId>),
 
     #[error(transparent)]
     ResourceState(#[from] ResourceStateError),

@@ -1,5 +1,5 @@
 use displaydoc::Display;
-use lusid_causality::{CausalityMeta, CausalityTree, NodeId};
+use lusid_causality::{CausalityMeta, CausalityTree};
 use lusid_params::{validate, ParamValues, ParamsValidationError};
 use lusid_resource::ResourceParams;
 use lusid_store::{Store, StoreError, StoreItemId};
@@ -13,16 +13,16 @@ mod id;
 mod load;
 mod model;
 
-pub use crate::id::{NodeId, PlanId};
+pub use crate::id::{PlanId, PlanNodeId};
 use crate::{
     core::{core_module, is_core_module},
-    id::PlanItemId,
-    model::Plan,
-};
-use crate::{
     eval::{evaluate, EvalError},
     load::{load, LoadError},
+    model::Plan,
 };
+
+type PlanTree<Node> = CausalityTree<Node, PlanNodeId>;
+type PlanMeta = CausalityMeta<PlanNodeId>;
 
 #[derive(Debug, Error, Display)]
 pub enum PlanError {
@@ -56,13 +56,12 @@ pub async fn plan(
     plan_id: PlanId,
     param_values: Option<Spanned<ParamValues>>,
     store: &mut Store,
-) -> Result<CausalityTree<ResourceParams>, PlanError> {
+) -> Result<PlanTree<ResourceParams>, PlanError> {
     tracing::debug!("Plan {plan_id:?} with params {param_values:?}");
     let children = plan_recursive(plan_id, param_values.as_ref(), store).await?;
-    let tree = CausalityTree::Branch {
-        id: None,
+    let tree = PlanTree::Branch {
         children,
-        meta: CausalityMeta::default(),
+        meta: PlanMeta::default(),
     };
     tracing::trace!("Planned resource tree: {:?}", tree);
     Ok(tree)
@@ -72,7 +71,7 @@ async fn plan_recursive(
     plan_id: PlanId,
     param_values: Option<&Spanned<ParamValues>>,
     store: &mut Store,
-) -> Result<Vec<CausalityTree<ResourceParams>>, PlanError> {
+) -> Result<Vec<PlanTree<ResourceParams>>, PlanError> {
     let store_item_id: StoreItemId = plan_id.clone().into();
     let bytes = store
         .read(&store_item_id)
@@ -96,11 +95,8 @@ async fn plan_recursive(
     let plan_items = evaluate(setup, param_values.cloned())?;
 
     let mut resources = Vec::with_capacity(plan_items.len());
-    for (item_index, plan_item) in plan_items.iter().enumerate() {
-        let node = Box::pin(plan_item_to_resource(
-            plan_item, item_index, &plan_id, store,
-        ))
-        .await?;
+    for plan_item in plan_items {
+        let node = Box::pin(plan_item_to_resource(plan_item, &plan_id, store)).await?;
         resources.push(node);
     }
 
@@ -127,10 +123,9 @@ pub enum PlanItemToResourceError {
 
 async fn plan_item_to_resource(
     plan_item: Spanned<crate::model::PlanItem>,
-    item_index: usize,
     current_plan_id: &PlanId,
     store: &mut Store,
-) -> Result<CausalityTree<ResourceParams>, PlanItemToResourceError> {
+) -> Result<PlanTree<ResourceParams>, PlanItemToResourceError> {
     let (plan_item, _span) = plan_item.take();
     let crate::model::PlanItem {
         id: item_id,
@@ -140,24 +135,23 @@ async fn plan_item_to_resource(
         after,
     } = plan_item;
 
-    let id = NodeId::PlanItem(PlanItemId(item_id));
+    let id = item_id.map(|id| PlanNodeId::PlanItem(id.into_inner()));
     let before = before
         .into_iter()
         .map(|v| v.into_inner())
-        .map(|id| NodeId::PlanItem(PlanItem(id)))
+        .map(PlanNodeId::PlanItem)
         .collect();
     let after = after
         .into_iter()
         .map(|v| v.into_inner())
-        .map(|id| NodeId::PlanItem(PlanItem(id)))
+        .map(PlanNodeId::PlanItem)
         .collect();
 
     if let Some(core_module_id) = is_core_module(module) {
         let params = core_module(core_module_id, param_values)?;
-        Ok(CausalityTree::Leaf {
-            id,
+        Ok(PlanTree::Leaf {
+            meta: PlanMeta { id, before, after },
             node: params,
-            meta: CausalityMeta { before, after },
         })
     } else {
         let path = PathBuf::from(module.inner());
@@ -165,10 +159,9 @@ async fn plan_item_to_resource(
         let children = plan_recursive(plan_id, param_values.as_ref(), store)
             .await
             .map_err(Box::new)?;
-        Ok(CausalityTree::Branch {
-            id,
+        Ok(PlanTree::Branch {
+            meta: PlanMeta { id, before, after },
             children,
-            meta: CausalityMeta { before, after },
         })
     }
 }

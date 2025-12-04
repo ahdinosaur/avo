@@ -30,6 +30,25 @@ impl<Node, Meta> Tree<Node, Meta> {
     pub fn is_branch(&self) -> bool {
         matches!(self, Tree::Branch { .. })
     }
+
+    pub fn map<NextNode, MapFn>(self, map: MapFn) -> Tree<NextNode, Meta>
+    where
+        MapFn: Fn(Node) -> NextNode + Copy,
+    {
+        match self {
+            Tree::Branch { meta, children } => Tree::Branch {
+                meta,
+                children: children
+                    .into_iter()
+                    .map(|tree| Self::map(tree, map))
+                    .collect(),
+            },
+            Tree::Leaf { meta, node } => Tree::Leaf {
+                meta,
+                node: map(node),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
