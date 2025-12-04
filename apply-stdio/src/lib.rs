@@ -1,6 +1,29 @@
-use lusid_view::{Line, Tree, ViewNode};
+use lusid_view::{Line, ViewNode};
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum TreeNode {
+    Branch { label: String, children: Vec<Tree> },
+    Leaf { label: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Tree {
+    nodes: Vec<TreeNode>,
+}
+
+pub enum TreeUpdate {
+    StartNode {
+        index: usize,
+    },
+    UpdateNode {
+        index: usize,
+        field: String,
+        value: Option<Tree>,
+    },
+    Complete,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(transparent)]

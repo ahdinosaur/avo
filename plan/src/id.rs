@@ -6,7 +6,7 @@ use std::{
 };
 use url::Url;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PlanId {
     Path(PathBuf),
     Git(Url, PathBuf),
@@ -68,7 +68,7 @@ impl From<PlanId> for SourceId {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PlanNodeId {
     Plan(PlanId),
     PlanItem(String),
