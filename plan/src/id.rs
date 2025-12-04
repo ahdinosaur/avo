@@ -71,16 +71,20 @@ impl From<PlanId> for SourceId {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PlanNodeId {
     Plan(PlanId),
-    PlanItem(String),
-    SubItem(String),
+    PlanItem { plan_id: PlanId, item_id: String },
+    SubItem { scope_id: String, item_id: String },
 }
 
 impl Display for PlanNodeId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             PlanNodeId::Plan(id) => write!(f, "Plan({id})"),
-            PlanNodeId::PlanItem(id) => write!(f, "PlanItem({id})"),
-            PlanNodeId::SubItem(id) => write!(f, "SubItem({id})"),
+            PlanNodeId::PlanItem { plan_id, item_id } => {
+                write!(f, "PlanItem(plan = {plan_id}, item = {item_id})")
+            }
+            PlanNodeId::SubItem { scope_id, item_id } => {
+                write!(f, "SubItem(scope = {scope_id}, item = {item_id})")
+            }
         }
     }
 }

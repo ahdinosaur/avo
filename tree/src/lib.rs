@@ -49,12 +49,59 @@ impl<Node, Meta> Tree<Node, Meta> {
             },
         }
     }
+
+    pub fn map_meta<NextMeta, MapFn>(self, map: MapFn) -> Tree<Node, NextMeta>
+    where
+        MapFn: Fn(Meta) -> NextMeta + Copy,
+    {
+        match self {
+            Tree::Branch { meta, children } => Tree::Branch {
+                meta: map(meta),
+                children: children
+                    .into_iter()
+                    .map(|tree| Self::map_meta(tree, map))
+                    .collect(),
+            },
+            Tree::Leaf { meta, node } => Tree::Leaf {
+                meta: map(meta),
+                node,
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 pub enum FlatTreeNode<Node, Meta> {
     Branch { meta: Meta, children: Vec<usize> },
     Leaf { meta: Meta, node: Node },
+}
+
+#[derive(Debug, Clone)]
+pub enum FlatTreeMappedItem<Node, Meta> {
+    Node(Node),
+    SubTrees(Vec<Tree<Node, Meta>>),
+}
+
+impl<Node, Meta> FlatTreeNode<Node, Meta> {
+    pub fn map<F, NextNode>(self, map: F) -> FlatTreeMapItem<NextNode, Meta>
+    where
+        F: Fn(Node) -> FlatTreeMappedItem<NextNode, Meta>,
+    {
+        match self {
+            FlatTreeNode::Branch { meta, children } => {
+                FlatTreeMapItem::Node(FlatTreeNode::Branch { meta, children })
+            }
+            FlatTreeNode::Leaf { meta, node } => match map(node) {
+                FlatTreeMappedItem::Node(node) => {
+                    FlatTreeMapItem::Node(FlatTreeNode::Leaf { meta, node })
+                }
+                FlatTreeMappedItem::SubTrees(trees) => FlatTreeMapItem::SubTree(Tree::Branch {
+                    meta,
+                    children: trees,
+                }),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

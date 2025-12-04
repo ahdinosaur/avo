@@ -135,16 +135,25 @@ async fn plan_item_to_resource(
         after,
     } = plan_item;
 
-    let id = item_id.map(|id| PlanNodeId::PlanItem(id.into_inner()));
+    let id = item_id.map(|id| PlanNodeId::PlanItem {
+        plan_id: current_plan_id.clone(),
+        item_id: id.into_inner(),
+    });
     let before = before
         .into_iter()
         .map(|v| v.into_inner())
-        .map(PlanNodeId::PlanItem)
+        .map(|item_id| PlanNodeId::PlanItem {
+            plan_id: current_plan_id.clone(),
+            item_id,
+        })
         .collect();
     let after = after
         .into_iter()
         .map(|v| v.into_inner())
-        .map(PlanNodeId::PlanItem)
+        .map(|item_id| PlanNodeId::PlanItem {
+            plan_id: current_plan_id.clone(),
+            item_id,
+        })
         .collect();
 
     if let Some(core_module_id) = is_core_module(module) {

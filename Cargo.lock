@@ -1927,6 +1927,7 @@ name = "lusid-apply"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "cuid2",
  "lusid-apply-stdio",
  "lusid-causality",
  "lusid-ctx",
@@ -1936,6 +1937,7 @@ dependencies = [
  "lusid-resource",
  "lusid-store",
  "lusid-system",
+ "lusid-tree",
  "lusid-view",
  "rimu",
  "rimu-interop",
@@ -2054,7 +2056,6 @@ name = "lusid-resource"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "cuid2",
  "futures-util",
  "indexmap",
  "lusid-causality",

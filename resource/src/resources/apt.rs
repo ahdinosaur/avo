@@ -1,7 +1,6 @@
 use std::fmt::Display;
 
 use async_trait::async_trait;
-use cuid2::create_id;
 use indexmap::indexmap;
 use lusid_causality::{CausalityMeta, CausalityTree};
 use lusid_cmd::{Command, CommandError};
@@ -166,14 +165,13 @@ impl ResourceType for Apt {
     }
 
     fn operations(change: Self::Change) -> Vec<CausalityTree<Operation>> {
-        let update_id = create_id();
         match change {
             AptChange::Install { package } => {
                 vec![
                     CausalityTree::Leaf {
                         node: Operation::Apt(AptOperation::Update),
                         meta: CausalityMeta {
-                            id: Some(update_id.clone()),
+                            id: Some("update".into()),
                             ..Default::default()
                         },
                     },
@@ -183,7 +181,7 @@ impl ResourceType for Apt {
                         }),
                         meta: CausalityMeta {
                             id: None,
-                            before: vec![update_id],
+                            before: vec!["update".into()],
                             after: vec![],
                         },
                     },
