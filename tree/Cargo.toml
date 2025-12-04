@@ -1,8 +1,8 @@
 [package]
-name = "lusid-causality"
+name = "lusid-tree"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-lusid-tree = { path = "../tree", version = "0.1" }
+lusid-view = { path = "../view", version = "0.1" }
 thiserror.workspace = true

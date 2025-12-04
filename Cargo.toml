@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+  "apply-stdio",
   "causality",
   "cmd",
   "ctx",
@@ -18,11 +19,12 @@ members = [
   "store",
   "system",
   "vm",
+  "view", "tree",
 ]
 
 [workspace.dependencies]
 async-trait = "0.1.89"
-clap = { version = "4.5.52", features = ["derive"] }
+clap = { version = "4.5.52", features = ["derive", "env"] }
 displaydoc = "0.2.5"
 indexmap = "2.12.0"
 rimu = { version = "0.2.0", git = "https://github.com/ahdinosaur/rimu" }

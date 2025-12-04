@@ -1,7 +1,9 @@
+use std::fmt::Display;
+
 pub use crate::resources::*;
 
 use async_trait::async_trait;
-use lusid_causality::Tree;
+use lusid_causality::CausalityTree;
 use lusid_operation::Operation;
 use lusid_params::ParamTypes;
 use rimu::Spanned;
@@ -30,13 +32,13 @@ pub trait ResourceType {
     type Params: DeserializeOwned;
 
     /// Resource atom (indivisible system definition).
-    type Resource: Clone;
+    type Resource: Display;
 
     /// Create resource atom from params.
-    fn resources(params: Self::Params) -> Vec<Tree<Self::Resource>>;
+    fn resources(params: Self::Params) -> Vec<CausalityTree<Self::Resource>>;
 
     /// Current state of resource on machine.
-    type State;
+    type State: Display;
 
     /// Possible error when fetching current state of resource on machine.
     type StateError;
@@ -45,13 +47,13 @@ pub trait ResourceType {
     async fn state(resource: &Self::Resource) -> Result<Self::State, Self::StateError>;
 
     /// A change from current state.
-    type Change;
+    type Change: Display;
 
     /// Get change atomic resource from current state to intended state.
     fn change(resource: &Self::Resource, state: &Self::State) -> Option<Self::Change>;
 
     // Convert atomic resource change into operations (mutations).
-    fn operations(change: Self::Change) -> Vec<Tree<Operation>>;
+    fn operations(change: Self::Change) -> Vec<CausalityTree<Operation>>;
 }
 
 #[derive(Debug, Clone)]
@@ -64,9 +66,27 @@ pub enum Resource {
     Apt(AptResource),
 }
 
+impl Display for Resource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use Resource::*;
+        match self {
+            Apt(apt) => apt.fmt(f),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum ResourceState {
     Apt(AptState),
+}
+
+impl Display for ResourceState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use ResourceState::*;
+        match self {
+            Apt(apt) => apt.fmt(f),
+        }
+    }
 }
 
 #[derive(Error, Debug)]
@@ -80,12 +100,21 @@ pub enum ResourceChange {
     Apt(AptChange),
 }
 
+impl Display for ResourceChange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use ResourceChange::*;
+        match self {
+            Apt(apt) => apt.fmt(f),
+        }
+    }
+}
+
 impl ResourceParams {
-    pub fn resources(self) -> Vec<Tree<Resource>> {
+    pub fn resources(self) -> Vec<CausalityTree<Resource>> {
         fn typed<R: ResourceType>(
             params: R::Params,
             map: impl Fn(R::Resource) -> Resource + Copy,
-        ) -> Vec<Tree<Resource>> {
+        ) -> Vec<CausalityTree<Resource>> {
             R::resources(params)
                 .into_iter()
                 .map(|tree| tree.map(map))
@@ -124,6 +153,8 @@ impl Resource {
             R::change(resource, state).map(map)
         }
 
+        // TODO (mw): remove #[allow(unreachable_patterns)] once we have more resources
+        #[allow(unreachable_patterns)]
         match (self, state) {
             (Resource::Apt(resource), ResourceState::Apt(state)) => {
                 typed::<Apt>(resource, state, ResourceChange::Apt)
@@ -137,7 +168,7 @@ impl Resource {
 }
 
 impl ResourceChange {
-    pub fn operations(self) -> Vec<Tree<Operation>> {
+    pub fn operations(self) -> Vec<CausalityTree<Operation>> {
         match self {
             ResourceChange::Apt(change) => Apt::operations(change),
         }

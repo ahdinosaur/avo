@@ -1,18 +1,21 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    hash::Hash,
+};
 use thiserror::Error;
 
-use crate::tree::{NodeId, Tree};
+use crate::{tree::CausalityTree, CausalityMeta};
 
 #[derive(Debug, Error)]
-pub enum EpochError {
+pub enum EpochError<NodeId> {
     #[error("Duplicate id: {0}")]
-    DuplicateId(String),
+    DuplicateId(NodeId),
 
     #[error("Unknown id referenced in 'before': {0}")]
-    UnknownBeforeRef(String),
+    UnknownBeforeRef(NodeId),
 
     #[error("Unknown id referenced in 'after': {0}")]
-    UnknownAfterRef(String),
+    UnknownAfterRef(NodeId),
 
     #[error("Cycle detected in dependency graph (remaining nodes: {remaining})")]
     CycleDetected { remaining: usize },
@@ -20,37 +23,40 @@ pub enum EpochError {
 
 /// Compute dependency layers of resource specs (Kahn's algorithm).
 /// Returns a list of epochs (layers), each epoch is a Vec<Node>.
-pub fn compute_epochs<Node>(tree: Tree<Node>) -> Result<Vec<Vec<Node>>, EpochError>
+pub fn compute_epochs<Node, NodeId>(
+    tree: CausalityTree<Node, NodeId>,
+) -> Result<Vec<Vec<Node>>, EpochError<NodeId>>
 where
     Node: Clone,
+    NodeId: Clone + Eq + Hash,
 {
     #[derive(Debug)]
-    struct CollectedLeaf<Node> {
+    struct CollectedLeaf<Node, NodeId> {
         node: Node,
         before: Vec<NodeId>,
         after: Vec<NodeId>,
     }
 
-    let mut leaves: Vec<CollectedLeaf<Node>> = Vec::new();
+    let mut leaves: Vec<CollectedLeaf<Node, NodeId>> = Vec::new();
     let mut id_to_leaves: HashMap<NodeId, Vec<usize>> = HashMap::new();
     let mut seen_ids: HashSet<NodeId> = HashSet::new();
 
-    fn collect_recursive<Node>(
-        tree: Tree<Node>,
+    fn collect_recursive<Node, NodeId>(
+        tree: CausalityTree<Node, NodeId>,
         ancestor_before: &mut Vec<NodeId>,
         ancestor_after: &mut Vec<NodeId>,
         active_branch_ids: &mut Vec<NodeId>,
         seen_ids: &mut HashSet<NodeId>,
         id_to_leaves: &mut HashMap<NodeId, Vec<usize>>,
-        leaves: &mut Vec<CollectedLeaf<Node>>,
-    ) -> Result<(), EpochError> {
+        leaves: &mut Vec<CollectedLeaf<Node, NodeId>>,
+    ) -> Result<(), EpochError<NodeId>>
+    where
+        NodeId: Clone + Eq + Hash,
+    {
         match tree {
-            Tree::Branch {
-                id,
-                before,
-                after,
-                children,
-            } => {
+            CausalityTree::Branch { children, meta } => {
+                let CausalityMeta { id, before, after } = meta;
+
                 let before_len = ancestor_before.len();
                 ancestor_before.extend(before);
 
@@ -59,7 +65,7 @@ where
 
                 let pushed_branch_id = if let Some(branch_id) = id {
                     if !seen_ids.insert(branch_id.clone()) {
-                        return Err(EpochError::DuplicateId(branch_id.0));
+                        return Err(EpochError::DuplicateId(branch_id));
                     }
                     id_to_leaves.entry(branch_id.clone()).or_default();
                     active_branch_ids.push(branch_id);
@@ -87,12 +93,9 @@ where
                 }
                 Ok(())
             }
-            Tree::Leaf {
-                id,
-                node,
-                before,
-                after,
-            } => {
+            CausalityTree::Leaf { node, meta } => {
+                let CausalityMeta { id, before, after } = meta;
+
                 let mut effective_before: Vec<NodeId> = Vec::new();
                 effective_before.extend(ancestor_before.iter().cloned());
                 effective_before.extend(before);
@@ -116,7 +119,7 @@ where
 
                 if let Some(leaf_id) = id {
                     if !seen_ids.insert(leaf_id.clone()) {
-                        return Err(EpochError::DuplicateId(leaf_id.0));
+                        return Err(EpochError::DuplicateId(leaf_id));
                     }
                     id_to_leaves.insert(leaf_id, vec![index]);
                 }
@@ -147,7 +150,7 @@ where
     for (i, leaf) in leaves.iter().enumerate() {
         for id in &leaf.before {
             let Some(targets) = id_to_leaves.get(id) else {
-                return Err(EpochError::UnknownBeforeRef(id.0.clone()));
+                return Err(EpochError::UnknownBeforeRef(id.clone()));
             };
             for &j in targets {
                 outgoing[j].push(i);
@@ -156,7 +159,7 @@ where
         }
         for id in &leaf.after {
             let Some(targets) = id_to_leaves.get(id) else {
-                return Err(EpochError::UnknownAfterRef(id.0.clone()));
+                return Err(EpochError::UnknownAfterRef(id.clone()));
             };
             for &j in targets {
                 outgoing[i].push(j);
