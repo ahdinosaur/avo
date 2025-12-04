@@ -1,6 +1,6 @@
 use lusid_tree::Tree;
 
-pub type CausalityTree<Node, NodeId> = Tree<Node, CausalityMeta<NodeId>>;
+pub type CausalityTree<Node, NodeId = String> = Tree<Node, CausalityMeta<NodeId>>;
 
 #[derive(Debug, Clone, Default)]
 pub struct CausalityMeta<NodeId> {

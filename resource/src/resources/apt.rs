@@ -3,7 +3,7 @@ use std::fmt::Display;
 use async_trait::async_trait;
 use cuid2::create_id;
 use indexmap::indexmap;
-use lusid_causality::{CausalityMeta, CausalityTree, NodeId};
+use lusid_causality::{CausalityMeta, CausalityTree};
 use lusid_cmd::{Command, CommandError};
 use lusid_operation::{operations::apt::AptOperation, Operation};
 use lusid_params::{ParamField, ParamType, ParamTypes};
@@ -102,11 +102,17 @@ impl ResourceType for Apt {
 
     fn resources(params: Self::Params) -> Vec<CausalityTree<Self::Resource>> {
         match params {
-            AptParams::Package { package } => vec![CausalityTree::leaf(AptResource { package })],
+            AptParams::Package { package } => vec![CausalityTree::leaf(
+                CausalityMeta::default(),
+                AptResource { package },
+            )],
             AptParams::Packages { packages } => vec![CausalityTree::branch(
+                CausalityMeta::default(),
                 packages
                     .into_iter()
-                    .map(|package| CausalityTree::leaf(AptResource { package }))
+                    .map(|package| {
+                        CausalityTree::leaf(CausalityMeta::default(), AptResource { package })
+                    })
                     .collect(),
             )],
         }
@@ -165,17 +171,19 @@ impl ResourceType for Apt {
             AptChange::Install { package } => {
                 vec![
                     CausalityTree::Leaf {
-                        id: Some(NodeId::new(update_id.clone())),
                         node: Operation::Apt(AptOperation::Update),
-                        meta: CausalityMeta::default(),
+                        meta: CausalityMeta {
+                            id: Some(update_id.clone()),
+                            ..Default::default()
+                        },
                     },
                     CausalityTree::Leaf {
-                        id: None,
                         node: Operation::Apt(AptOperation::Install {
                             packages: vec![package],
                         }),
                         meta: CausalityMeta {
-                            before: vec![NodeId::new(update_id)],
+                            id: None,
+                            before: vec![update_id],
                             after: vec![],
                         },
                     },
