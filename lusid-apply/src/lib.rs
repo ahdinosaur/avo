@@ -1,9 +1,8 @@
-use cuid2::cuid;
 use lusid_causality::{compute_epochs, CausalityMeta, CausalityTree, EpochError};
 use lusid_ctx::{Context, ContextError};
 use lusid_operation::{apply_operations, merge_operations, partition_by_type, OperationApplyError};
 use lusid_params::{ParamValues, ParamValuesFromTypeError};
-use lusid_plan::{self, plan, PlanError, PlanId, PlanNodeId};
+use lusid_plan::{self, map_plan_subitems, plan, PlanError, PlanId, PlanNodeId};
 use lusid_resource::{Resource, ResourceState, ResourceStateError};
 use lusid_store::Store;
 use lusid_tree::{FlatTree, FlatTreeMappedItem};
@@ -84,34 +83,9 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
 
     let resource_params = FlatTree::from(resource_params);
     let resources = FlatTree::from_map_iter(
-        resource_params.into_iter().map(|node| {
-            let node = node?;
-            Some(node.map(|node| {
-                let subtrees = node.resources();
-                let scope_id = cuid();
-                let subtrees = subtrees
-                    .into_iter()
-                    .map(|tree| {
-                        tree.map_meta(|meta| CausalityMeta {
-                            id: meta
-                                .id
-                                .map(|item_id| PlanNodeId::SubItem { scope_id, item_id }),
-                            before: meta
-                                .before
-                                .into_iter()
-                                .map(|item_id| PlanNodeId::SubItem { scope_id, item_id })
-                                .collect(),
-                            after: meta
-                                .after
-                                .into_iter()
-                                .map(|item_id| PlanNodeId::SubItem { scope_id, item_id })
-                                .collect(),
-                        })
-                    })
-                    .collect();
-                FlatTreeMappedItem::SubTrees(subtrees)
-            }))
-        }),
+        resource_params
+            .into_iter()
+            .map(|node| map_plan_subitems(node, |node| node.resources())),
         0,
     );
 

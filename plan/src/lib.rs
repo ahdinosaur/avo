@@ -1,5 +1,4 @@
 use displaydoc::Display;
-use lusid_causality::{CausalityMeta, CausalityTree};
 use lusid_params::{validate, ParamValues, ParamsValidationError};
 use lusid_resource::ResourceParams;
 use lusid_store::{Store, StoreError, StoreItemId};
@@ -12,17 +11,16 @@ mod eval;
 mod id;
 mod load;
 mod model;
+mod tree;
 
 pub use crate::id::{PlanId, PlanNodeId};
+pub use crate::tree::*;
 use crate::{
     core::{core_module, is_core_module},
     eval::{evaluate, EvalError},
     load::{load, LoadError},
     model::Plan,
 };
-
-type PlanTree<Node> = CausalityTree<Node, PlanNodeId>;
-type PlanMeta = CausalityMeta<PlanNodeId>;
 
 #[derive(Debug, Error, Display)]
 pub enum PlanError {

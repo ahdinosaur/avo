@@ -1927,7 +1927,6 @@ name = "lusid-apply"
 version = "0.1.0"
 dependencies = [
  "clap",
- "cuid2",
  "lusid-apply-stdio",
  "lusid-causality",
  "lusid-ctx",
@@ -2038,12 +2037,14 @@ dependencies = [
 name = "lusid-plan"
 version = "0.1.0"
 dependencies = [
+ "cuid2",
  "displaydoc",
  "lusid-causality",
  "lusid-operation",
  "lusid-params",
  "lusid-resource",
  "lusid-store",
+ "lusid-tree",
  "rimu",
  "rimu-interop",
  "thiserror 2.0.17",
