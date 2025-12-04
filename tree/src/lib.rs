@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use thiserror::Error;
 
 #[derive(Debug, Clone)]
@@ -38,41 +40,24 @@ pub enum FlatTreeNode<Node, Meta> {
 
 #[derive(Debug, Clone)]
 pub struct FlatTree<Node, Meta> {
-    pub nodes: Vec<Option<FlatTreeNode<Node, Meta>>>,
-    pub root_index: usize,
+    nodes: Vec<Option<FlatTreeNode<Node, Meta>>>,
+    root_index: usize,
 }
 
 #[derive(Debug, Error)]
 pub enum FlatTreeError {
-    #[error("root index {0} is out of bounds")]
-    InvalidRootIndex(usize),
-
-    #[error(
-        "child index {child_index} referenced by parent {parent_index} is out \
-         of bounds"
-    )]
-    ChildIndexOutOfBounds {
-        parent_index: usize,
-        child_index: usize,
-    },
-
     #[error("node at index {0} is None")]
     NodeMissing(usize),
 
-    #[error("cycle detected at index {0}")]
-    CycleDetected(usize),
-
     #[error("index {0} is out of bounds")]
     IndexOutOfBounds(usize),
-
-    #[error("expected a branch at index {0}, found a leaf")]
-    ExpectedBranch(usize),
-
-    #[error("expected a leaf at index {0}, found a branch")]
-    ExpectedLeaf(usize),
 }
 
 impl<Node, Meta> FlatTree<Node, Meta> {
+    pub fn root_index(&self) -> usize {
+        self.root_index
+    }
+
     pub fn root(&self) -> Option<&FlatTreeNode<Node, Meta>> {
         self.nodes.get(self.root_index)?.as_ref()
     }
@@ -82,8 +67,7 @@ impl<Node, Meta> FlatTree<Node, Meta> {
             .nodes
             .get(index)
             .ok_or(FlatTreeError::IndexOutOfBounds(index))?;
-        node.as_ref()
-            .ok_or_else(|| FlatTreeError::NodeMissing(index))
+        node.as_ref().ok_or(FlatTreeError::NodeMissing(index))
     }
 
     pub fn get_mut(
@@ -94,15 +78,14 @@ impl<Node, Meta> FlatTree<Node, Meta> {
             .nodes
             .get_mut(index)
             .ok_or(FlatTreeError::IndexOutOfBounds(index))?;
-        node.as_mut()
-            .ok_or_else(|| FlatTreeError::NodeMissing(index))
+        node.as_mut().ok_or(FlatTreeError::NodeMissing(index))
     }
 
     pub fn append_tree(&mut self, tree: Tree<Node, Meta>) -> usize {
         append_tree_to_nodes(&mut self.nodes, tree)
     }
 
-    pub fn into_iter<I>(&self) -> impl Iterator<Item = &Option<FlatTreeNode<Node, Meta>>> {
+    pub fn iter(&self) -> impl Iterator<Item = &Option<FlatTreeNode<Node, Meta>>> {
         self.nodes.iter()
     }
 
@@ -117,17 +100,105 @@ impl<Node, Meta> FlatTree<Node, Meta> {
     }
 }
 
+impl<Node, Meta> IntoIterator for FlatTree<Node, Meta> {
+    type Item = <Vec<Option<FlatTreeNode<Node, Meta>>> as IntoIterator>::Item;
+    type IntoIter = <Vec<Option<FlatTreeNode<Node, Meta>>> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.nodes.into_iter()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum FlatTreeMapItem<Node, Meta> {
     Node(FlatTreeNode<Node, Meta>),
     SubTree(Tree<Node, Meta>),
 }
 
-impl<Node, Meta> FlatTree<Node, Meta> {
+impl<Node, Meta> FlatTree<Node, Meta>
+where
+    Node: Clone,
+    Meta: Clone,
+{
     pub fn from_map_iter<I>(iter: I, root_index: usize) -> Self
     where
         I: Iterator<Item = Option<FlatTreeMapItem<Node, Meta>>>,
     {
+        // Collect to determine the original number of indices so we can
+        // place mapped items at their original indices and append any
+        // additional nodes after that, keeping indices of original nodes
+        // stable.
+        let items: Vec<Option<FlatTreeMapItem<Node, Meta>>> = iter.collect();
+        let original_len = items.len();
+
+        // Pre-size with None so that original indices stay fixed.
+        let mut nodes: Vec<Option<FlatTreeNode<Node, Meta>>> = vec![None; original_len];
+
+        for (index, maybe_item) in items.into_iter().enumerate() {
+            match maybe_item {
+                None => {
+                    // Leave as None
+                }
+                Some(FlatTreeMapItem::Node(node)) => {
+                    nodes[index] = Some(node);
+                }
+                Some(FlatTreeMapItem::SubTree(tree)) => {
+                    // Flatten the subtree and splice it into `nodes`, placing
+                    // the root at `index`, and appending remaining nodes to
+                    // the end. Remap child indices accordingly.
+                    let sub_flat: FlatTree<Node, Meta> = tree.into();
+                    let sub_root = sub_flat.root_index();
+
+                    // Extract concrete nodes; `From<Tree>` guarantees `Some`.
+                    let mut sub_nodes: VecDeque<FlatTreeNode<Node, Meta>> = sub_flat
+                        .into_iter()
+                        .map(|o| {
+                            o.expect(
+                                "FlatTree::from(Tree) should not \
+                                     produce None nodes",
+                            )
+                        })
+                        .collect();
+
+                    let sub_len = sub_nodes.len();
+                    let mut remap: Vec<usize> = vec![usize::MAX; sub_len];
+
+                    // Root of the subtree is placed at the current index.
+                    remap[sub_root] = index;
+
+                    // Assign new indices for the remaining nodes by appending.
+                    for (index, mapped_index) in remap.iter_mut().enumerate().take(sub_len) {
+                        if index == sub_root {
+                            continue;
+                        }
+                        let new_index = nodes.len();
+                        nodes.push(None); // reserve slot
+                        *mapped_index = new_index;
+                    }
+
+                    // Now move nodes over with adjusted child indices.
+                    for mapped_index in remap.iter().take(sub_len) {
+                        let mapped_node = match sub_nodes
+                            .pop_front()
+                            .expect("sub_nodes should have len > 0")
+                        {
+                            FlatTreeNode::Branch { meta, mut children } => {
+                                let new_children: Vec<usize> =
+                                    children.drain(..).map(|old| remap[old]).collect();
+                                FlatTreeNode::Branch {
+                                    meta,
+                                    children: new_children,
+                                }
+                            }
+                            FlatTreeNode::Leaf { meta, node } => FlatTreeNode::Leaf { meta, node },
+                        };
+                        nodes[*mapped_index] = Some(mapped_node);
+                    }
+                }
+            }
+        }
+
+        FlatTree { nodes, root_index }
     }
 }
 
@@ -186,16 +257,14 @@ where
             if index >= nodes.len() {
                 return None;
             }
-            let Some(node) = nodes[index].take() else {
-                return None;
-            };
+            let node = nodes[index].take()?;
 
             match node {
                 FlatTreeNode::Leaf { node, meta } => Some(Tree::Leaf { node, meta }),
                 FlatTreeNode::Branch { children, meta } => {
                     let mut built_children = Vec::new();
-                    for child_idx in children {
-                        if let Some(child) = build(child_idx, nodes) {
+                    for child_index in children {
+                        if let Some(child) = build(child_index, nodes) {
                             built_children.push(child);
                         }
                     }
