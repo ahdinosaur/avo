@@ -3,11 +3,10 @@ mod config;
 use std::{env, net::Ipv4Addr, path::PathBuf, sync::Arc, time::Duration};
 
 use clap::{Parser, Subcommand};
-use lusid_apply_stdio::{ResourceChangesTree, ResourceStatesTree, ResourcesTree};
 use lusid_cmd::{Command, CommandError};
 use lusid_ctx::Context;
 use lusid_ssh::{Ssh, SshConnectOptions, SshError, SshVolume};
-use lusid_view::ViewNode;
+use lusid_view::View;
 use lusid_vm::{Vm, VmError, VmOptions};
 use thiserror::Error;
 use tokio::io::AsyncBufReadExt;
@@ -276,7 +275,7 @@ async fn cmd_dev_apply(config: Config, machine_id: String) -> Result<(), AppErro
             else {
                 return Err(AppError::ExpectedCommandStdoutLine);
             };
-            let tree: ViewNode =
+            let tree: View =
                 serde_json::from_str(&line).map_err(AppError::ParseCommandStdoutJson)?;
             println!("{tree}");
 
@@ -287,7 +286,7 @@ async fn cmd_dev_apply(config: Config, machine_id: String) -> Result<(), AppErro
             else {
                 return Err(AppError::ExpectedCommandStdoutLine);
             };
-            let tree: ViewNode =
+            let tree: View =
                 serde_json::from_str(&line).map_err(AppError::ParseCommandStdoutJson)?;
             println!("{tree}");
 

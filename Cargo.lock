@@ -2045,6 +2045,7 @@ dependencies = [
  "lusid-resource",
  "lusid-store",
  "lusid-tree",
+ "lusid-view",
  "rimu",
  "rimu-interop",
  "thiserror 2.0.17",
@@ -2063,6 +2064,7 @@ dependencies = [
  "lusid-cmd",
  "lusid-operation",
  "lusid-params",
+ "lusid-view",
  "rimu",
  "serde",
  "thiserror 2.0.17",
@@ -2112,7 +2114,6 @@ dependencies = [
 name = "lusid-tree"
 version = "0.1.0"
 dependencies = [
- "lusid-view",
  "thiserror 2.0.17",
 ]
 

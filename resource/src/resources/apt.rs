@@ -12,6 +12,24 @@ use thiserror::Error;
 
 use crate::ResourceType;
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum AptParams {
+    Package { package: String },
+    Packages { packages: Vec<String> },
+}
+
+impl Display for AptParams {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AptParams::Package { package } => write!(f, "Apt(package = {package})"),
+            AptParams::Packages { packages } => {
+                write!(f, "Apt(packages = [{}])", packages.join(", "))
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AptResource {
     pub package: String,
@@ -63,13 +81,6 @@ impl Display for AptChange {
 
 #[derive(Debug, Clone)]
 pub struct Apt;
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
-pub enum AptParams {
-    Package { package: String },
-    Packages { packages: Vec<String> },
-}
 
 #[async_trait]
 impl ResourceType for Apt {

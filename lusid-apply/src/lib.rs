@@ -1,3 +1,4 @@
+use lusid_apply_stdio::AppUpdate;
 use lusid_causality::{compute_epochs, CausalityMeta, CausalityTree, EpochError};
 use lusid_ctx::{Context, ContextError};
 use lusid_operation::{apply_operations, merge_operations, partition_by_type, OperationApplyError};
@@ -80,6 +81,7 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
     // Parse/evaluate to CausalityTree<ResourceParams>
     let resource_params = plan(plan_id, param_values, &mut store).await?;
     debug!("Resource params: {resource_params:?}");
+    writeln_update(&mut stdout, AppUpdate::ResourceParams { resource_params })
 
     let resource_params = FlatTree::from(resource_params);
     let resources = FlatTree::from_map_iter(
@@ -143,12 +145,9 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
     Ok(())
 }
 
-async fn writeln_output<Output>(output: &Output, stdout: &mut Stdout) -> Result<(), ApplyError>
-where
-    Output: Render,
-{
+async fn writeln_update(stdout: &mut Stdout, update: &AppUpdate) -> Result<(), ApplyError> {
     stdout
-        .write_all(&serde_json::to_vec(&output.render()).map_err(ApplyError::JsonOutput)?)
+        .write_all(&serde_json::to_vec(&update).map_err(ApplyError::JsonOutput)?)
         .await
         .map_err(ApplyError::WriteStdout)?;
 

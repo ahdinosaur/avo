@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use lusid_causality::CausalityTree;
 use lusid_operation::Operation;
 use lusid_params::ParamTypes;
+use lusid_view::Render;
 use rimu::Spanned;
 use serde::de::DeserializeOwned;
 use thiserror::Error;
@@ -29,16 +30,16 @@ pub trait ResourceType {
     fn param_types() -> Option<Spanned<ParamTypes>>;
 
     /// Resource params (friendly user definition).
-    type Params: DeserializeOwned;
+    type Params: Render + DeserializeOwned;
 
     /// Resource atom (indivisible system definition).
-    type Resource: Display;
+    type Resource: Render;
 
     /// Create resource atom from params.
     fn resources(params: Self::Params) -> Vec<CausalityTree<Self::Resource>>;
 
     /// Current state of resource on machine.
-    type State: Display;
+    type State: Render;
 
     /// Possible error when fetching current state of resource on machine.
     type StateError;
@@ -47,7 +48,7 @@ pub trait ResourceType {
     async fn state(resource: &Self::Resource) -> Result<Self::State, Self::StateError>;
 
     /// A change from current state.
-    type Change: Display;
+    type Change: Render;
 
     /// Get change atomic resource from current state to intended state.
     fn change(resource: &Self::Resource, state: &Self::State) -> Option<Self::Change>;

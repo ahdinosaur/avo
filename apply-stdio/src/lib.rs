@@ -1,19 +1,7 @@
-use lusid_view::{Line, View};
+#![allow(clippy::collapsible_if)]
+
+use lusid_view::{View, ViewNode, ViewTree};
 use serde::{Deserialize, Serialize};
-use std::fmt::Display;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ViewNode {
-    NotStarted,
-    Started,
-    Complete(View),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ViewTree {
-    Branch { view: View, children: Vec<ViewTree> },
-    Leaf { view: View },
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FlatViewTreeNode {
@@ -26,18 +14,14 @@ pub enum FlatViewTreeNode {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FlatViewTree {
     nodes: Vec<Option<FlatViewTreeNode>>,
 }
 
 impl FlatViewTree {
-    pub fn new() -> Self {
-        FlatViewTree { nodes: Vec::new() }
-    }
-
     pub fn from_view_tree_completed(view_tree: ViewTree) -> Self {
-        let mut flat_tree = FlatViewTree::new();
+        let mut flat_tree = FlatViewTree::default();
         flat_tree.insert_subtree_at_completed(0, view_tree);
         flat_tree
     }
@@ -189,7 +173,7 @@ pub struct OperationView {
     is_complete: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AppView {
     resource_params: Option<FlatViewTree>,
     resources: Option<FlatViewTree>,
@@ -199,23 +183,10 @@ pub struct AppView {
     operations_epochs: Vec<Vec<OperationView>>,
 }
 
-impl Default for AppView {
-    fn default() -> Self {
-        Self {
-            resource_params: None,
-            resources: None,
-            resource_states: None,
-            resource_changes: None,
-            operations_tree: None,
-            operations_epochs: Vec::new(),
-        }
-    }
-}
-
 impl AppView {
-    fn ensure_tree<'a>(option: &'a mut Option<FlatViewTree>) -> &'a mut FlatViewTree {
+    fn ensure_tree(option: &mut Option<FlatViewTree>) -> &mut FlatViewTree {
         if option.is_none() {
-            *option = Some(FlatViewTree::new());
+            *option = Some(FlatViewTree::default());
         }
         option.as_mut().unwrap()
     }
@@ -228,7 +199,7 @@ impl AppView {
             }
 
             AppUpdate::ResourcesStart => {
-                self.resources = Some(FlatViewTree::new());
+                self.resources = Some(FlatViewTree::default());
             }
             AppUpdate::ResourcesNode { index, value } => {
                 let tree = Self::ensure_tree(&mut self.resources);
@@ -237,7 +208,7 @@ impl AppView {
             AppUpdate::ResourcesComplete => {}
 
             AppUpdate::ResourceStatesStart => {
-                self.resource_states = Some(FlatViewTree::new());
+                self.resource_states = Some(FlatViewTree::default());
             }
             AppUpdate::ResourceStatesStartNode { index } => {
                 let tree = Self::ensure_tree(&mut self.resource_states);
@@ -257,7 +228,7 @@ impl AppView {
             AppUpdate::ResourceStatesComplete => {}
 
             AppUpdate::ResourceChangesStart => {
-                self.resource_changes = Some(FlatViewTree::new());
+                self.resource_changes = Some(FlatViewTree::default());
             }
             AppUpdate::ResourceChangesNode { index, value } => {
                 let tree = Self::ensure_tree(&mut self.resource_changes);
@@ -266,7 +237,7 @@ impl AppView {
             AppUpdate::ResourceChangesComplete => {}
 
             AppUpdate::OperationsStart => {
-                self.operations_tree = Some(FlatViewTree::new());
+                self.operations_tree = Some(FlatViewTree::default());
             }
             AppUpdate::OperationsNode { index, operations } => {
                 let tree = Self::ensure_tree(&mut self.operations_tree);
