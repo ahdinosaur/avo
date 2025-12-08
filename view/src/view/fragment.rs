@@ -1,32 +1,32 @@
 use serde::{Deserialize, Serialize};
 
-use crate::ViewNode;
+use crate::View;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Fragment {
-    pub children: Vec<ViewNode>,
+    pub children: Vec<View>,
 }
 
 impl Fragment {
-    fn new(children: Vec<ViewNode>) -> Self {
+    fn new(children: Vec<View>) -> Self {
         Self { children }
     }
 }
 
-impl From<Vec<ViewNode>> for Fragment {
-    fn from(value: Vec<ViewNode>) -> Self {
+impl From<Vec<View>> for Fragment {
+    fn from(value: Vec<View>) -> Self {
         Fragment::new(value)
     }
 }
 
-impl From<Fragment> for ViewNode {
+impl From<Fragment> for View {
     fn from(value: Fragment) -> Self {
-        ViewNode::Fragment(value)
+        View::Fragment(value)
     }
 }
 
-impl From<Vec<ViewNode>> for ViewNode {
-    fn from(value: Vec<ViewNode>) -> Self {
-        ViewNode::Fragment(value.into())
+impl From<Vec<View>> for View {
+    fn from(value: Vec<View>) -> Self {
+        View::Fragment(value.into())
     }
 }

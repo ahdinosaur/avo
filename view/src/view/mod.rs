@@ -2,7 +2,6 @@ mod fragment;
 mod line;
 mod paragraph;
 mod text;
-mod tree;
 
 use std::fmt::Debug;
 use std::fmt::Display;
@@ -14,23 +13,20 @@ pub use self::fragment::*;
 pub use self::line::*;
 pub use self::paragraph::*;
 pub use self::text::*;
-pub use self::tree::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ViewNode {
+pub enum View {
     Fragment(Fragment),
     Line(Line),
     Paragraph(Paragraph),
-    Tree(Tree),
 }
 
-impl Display for ViewNode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for View {
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ViewNode::Fragment(fragment) => todo!(),
-            ViewNode::Line(line) => todo!(),
-            ViewNode::Paragraph(paragraph) => todo!(),
-            ViewNode::Tree(tree) => Display::fmt(tree, f),
+            View::Fragment(_fragment) => todo!(),
+            View::Line(_line) => todo!(),
+            View::Paragraph(_paragraph) => todo!(),
         }
     }
 }

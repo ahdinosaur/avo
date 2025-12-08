@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{Alignment, Line, TextStyle, ViewNode};
+use crate::{Alignment, Line, TextStyle, View};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Paragraph {
@@ -60,8 +60,8 @@ impl From<Vec<&str>> for Paragraph {
     }
 }
 
-impl From<Paragraph> for ViewNode {
+impl From<Paragraph> for View {
     fn from(value: Paragraph) -> Self {
-        ViewNode::Paragraph(value)
+        View::Paragraph(value)
     }
 }

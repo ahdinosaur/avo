@@ -1,5 +1,3 @@
-use std::collections::VecDeque;
-
 use thiserror::Error;
 
 #[derive(Debug, Clone)]
@@ -148,7 +146,11 @@ impl<Node, Meta> FlatTree<Node, Meta> {
     }
 
     pub fn append_tree(&mut self, tree: Tree<Node, Meta>) -> usize {
-        append_tree_to_nodes(&mut self.nodes, tree)
+        append_tree_nodes(&mut self.nodes, tree)
+    }
+
+    pub fn replace_tree(&mut self, tree: Option<Tree<Node, Meta>>, root_index: usize) {
+        replace_tree_nodes(&mut self.nodes, tree, root_index)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &Option<FlatTreeNode<Node, Meta>>> {
@@ -190,85 +192,21 @@ where
     where
         I: Iterator<Item = Option<FlatTreeMapItem<Node, Meta>>>,
     {
-        // Collect to determine the original number of indices so we can
-        // place mapped items at their original indices and append any
-        // additional nodes after that, keeping indices of original nodes
-        // stable.
-        let items: Vec<Option<FlatTreeMapItem<Node, Meta>>> = iter.collect();
-        let original_len = items.len();
-
-        // Pre-size with None so that original indices stay fixed.
-        let mut nodes: Vec<Option<FlatTreeNode<Node, Meta>>> = vec![None; original_len];
-
-        for (index, maybe_item) in items.into_iter().enumerate() {
-            match maybe_item {
-                None => {
-                    // Leave as None
-                }
-                Some(FlatTreeMapItem::Node(node)) => {
-                    nodes[index] = Some(node);
-                }
+        let mut nodes: Vec<Option<FlatTreeNode<Node, Meta>>> = Vec::new();
+        for (index, item) in iter.enumerate() {
+            match item {
+                None => nodes.push(None),
+                Some(FlatTreeMapItem::Node(node)) => nodes.push(Some(node)),
                 Some(FlatTreeMapItem::SubTree(tree)) => {
-                    // Flatten the subtree and splice it into `nodes`, placing
-                    // the root at `index`, and appending remaining nodes to
-                    // the end. Remap child indices accordingly.
-                    let sub_flat: FlatTree<Node, Meta> = tree.into();
-                    let sub_root = sub_flat.root_index();
-
-                    // Extract concrete nodes; `From<Tree>` guarantees `Some`.
-                    let mut sub_nodes: VecDeque<FlatTreeNode<Node, Meta>> = sub_flat
-                        .into_iter()
-                        .map(|o| {
-                            o.expect(
-                                "FlatTree::from(Tree) should not \
-                                     produce None nodes",
-                            )
-                        })
-                        .collect();
-
-                    let sub_len = sub_nodes.len();
-                    let mut remap: Vec<usize> = vec![usize::MAX; sub_len];
-
-                    // Root of the subtree is placed at the current index.
-                    remap[sub_root] = index;
-
-                    // Assign new indices for the remaining nodes by appending.
-                    for (index, mapped_index) in remap.iter_mut().enumerate().take(sub_len) {
-                        if index == sub_root {
-                            continue;
-                        }
-                        let new_index = nodes.len();
-                        nodes.push(None); // reserve slot
-                        *mapped_index = new_index;
-                    }
-
-                    // Now move nodes over with adjusted child indices.
-                    for mapped_index in remap.iter().take(sub_len) {
-                        let mapped_node = match sub_nodes
-                            .pop_front()
-                            .expect("sub_nodes should have len > 0")
-                        {
-                            FlatTreeNode::Branch { meta, mut children } => {
-                                let new_children: Vec<usize> =
-                                    children.drain(..).map(|old| remap[old]).collect();
-                                FlatTreeNode::Branch {
-                                    meta,
-                                    children: new_children,
-                                }
-                            }
-                            FlatTreeNode::Leaf { meta, node } => FlatTreeNode::Leaf { meta, node },
-                        };
-                        nodes[*mapped_index] = Some(mapped_node);
-                    }
+                    replace_tree_nodes(&mut nodes, Some(tree), index);
                 }
             }
         }
-
         FlatTree { nodes, root_index }
     }
 }
 
-fn append_tree_to_nodes<Node, Meta>(
+fn append_tree_nodes<Node, Meta>(
     nodes: &mut Vec<Option<FlatTreeNode<Node, Meta>>>,
     tree: Tree<Node, Meta>,
 ) -> usize {
@@ -286,7 +224,7 @@ fn append_tree_to_nodes<Node, Meta>(
             }));
             let mut child_indices = Vec::with_capacity(children.len());
             for child in children.drain(..) {
-                let child_index = append_tree_to_nodes(nodes, child);
+                let child_index = append_tree_nodes(nodes, child);
                 child_indices.push(child_index);
             }
             if let Some(FlatTreeNode::Branch { children, .. }) = nodes[index].as_mut() {
@@ -297,10 +235,45 @@ fn append_tree_to_nodes<Node, Meta>(
     }
 }
 
+fn replace_tree_nodes<Node, Meta>(
+    nodes: &mut Vec<Option<FlatTreeNode<Node, Meta>>>,
+    tree: Option<Tree<Node, Meta>>,
+    root_index: usize,
+) {
+    // NOTE(mw): This removes all children. In the future, maybe we'd want to keep children
+    //   that exist in the new tree, however that's not what we need now. Also, how would we
+    //   check equality?
+    if let Some(Some(FlatTreeNode::Branch { meta: _, children })) = nodes.get(root_index) {
+        for child in children.clone() {
+            replace_tree_nodes(nodes, None, child);
+        }
+    }
+
+    match tree {
+        None => {
+            nodes[root_index] = None;
+        }
+        Some(Tree::Leaf { node, meta }) => {
+            nodes[root_index] = Some(FlatTreeNode::Leaf { node, meta });
+        }
+        Some(Tree::Branch { children, meta }) => {
+            let mut child_indices = Vec::with_capacity(children.len());
+            for child in children {
+                let child_index = append_tree_nodes(nodes, child);
+                child_indices.push(child_index);
+            }
+            nodes[root_index] = Some(FlatTreeNode::Branch {
+                children: child_indices,
+                meta,
+            });
+        }
+    }
+}
+
 impl<Node, Meta> From<Tree<Node, Meta>> for FlatTree<Node, Meta> {
     fn from(tree: Tree<Node, Meta>) -> Self {
         let mut nodes = Vec::new();
-        let root_index = append_tree_to_nodes(&mut nodes, tree);
+        let root_index = append_tree_nodes(&mut nodes, tree);
         FlatTree { nodes, root_index }
     }
 }

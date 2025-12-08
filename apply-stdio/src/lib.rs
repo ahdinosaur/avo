@@ -1,88 +1,119 @@
-use lusid_view::{Line, ViewNode};
+use lusid_view::{Line, View};
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum TreeNode {
-    Branch { label: String, children: Vec<Tree> },
-    Leaf { label: String },
+pub enum ViewNode {
+    NotStarted,
+    Started(Option<View>),
+    Complete(View),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Tree {
-    nodes: Vec<TreeNode>,
+pub enum ViewTree {
+    Branch { view: View, children: Vec<ViewTree> },
+    Leaf { view: View },
 }
 
-pub enum TreeUpdate {
-    StartNode {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum FlatViewTreeNode {
+    Branch {
+        view: ViewNode,
+        children: Vec<usize>,
+    },
+    Leaf {
+        view: ViewNode,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FlatViewTree {
+    nodes: Vec<Option<FlatViewTreeNode>>,
+}
+
+pub enum AppUpdate {
+    ResourceParams {
+        resource_params: ViewTree,
+    },
+    ResourcesStart,
+    ResourcesNode {
+        index: usize,
+        value: ViewTree,
+    },
+    ResourcesComplete,
+    ResourceStatesStart,
+    ResourceStatesStartNode {
         index: usize,
     },
-    UpdateNode {
+    ResourceStatesCompleteNode {
         index: usize,
-        field: String,
-        value: Option<Tree>,
+        value: Option<ViewTree>,
     },
-    Complete,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct ResourcesTree(pub ViewNode);
-
-impl Display for ResourcesTree {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct ResourceStatesTree(pub ViewNode);
-
-impl Display for ResourceStatesTree {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct ResourceChangesTree(pub ViewNode);
-
-impl Display for ResourceChangesTree {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OperationsTree(pub Tree);
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OperationsEpochs(pub Vec<Vec<Line>>);
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum OperationsApply {
-    Start,
-    OperationStart {
-        operation_id: String,
+    ResourceStatesComplete,
+    ResourceChangesStart,
+    ResourceChangesNode {
+        index: usize,
+        value: ViewTree,
     },
-    OperationStdout {
-        operation_id: String,
+    ResourceChangesComplete,
+    OperationsStart,
+    OperationsNode {
+        index: usize,
+        operations: ViewTree,
+    },
+    OperationsComplete,
+    OperationsApplyStart {
+        operations: Vec<Vec<View>>,
+    },
+    OperationApplyStart {
+        index: (usize, usize),
+    },
+    OperationApplyStdout {
+        index: (usize, usize),
         stdout: String,
     },
-    OperationStderr {
-        operation_id: String,
+    OperationApplyStderr {
+        index: (usize, usize),
         stderr: String,
     },
-    OperationComplete {
-        operation_id: String,
+    OperationApplyComplete {
+        index: (usize, usize),
     },
-    Complete,
+    OperationsApplyComplete,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Error {
-    debug: String,
-    display: String,
+pub struct AppView {
+    resource_params: Option<FlatViewTree>,
+    resources: Option<FlatViewTree>,
+    resource_states: Option<FlatViewTree>,
+    resource_changes: Option<FlatViewTree>,
+    operations_tree: Option<FlatViewTree>,
+    operations_epochs: Option<FlatViewTree>,
+}
+
+impl AppView {
+    pub fn update(&mut self, update: AppUpdate) {
+        match update {
+            AppUpdate::ResourceParams { resource_params } => todo!(),
+            AppUpdate::ResourcesStart => todo!(),
+            AppUpdate::ResourcesNode { index, value } => todo!(),
+            AppUpdate::ResourcesComplete => todo!(),
+            AppUpdate::ResourceStatesStart => todo!(),
+            AppUpdate::ResourceStatesStartNode { index } => todo!(),
+            AppUpdate::ResourceStatesCompleteNode { index, value } => todo!(),
+            AppUpdate::ResourceStatesComplete => todo!(),
+            AppUpdate::ResourceChangesStart => todo!(),
+            AppUpdate::ResourceChangesNode { index, value } => todo!(),
+            AppUpdate::ResourceChangesComplete => todo!(),
+            AppUpdate::OperationsStart => todo!(),
+            AppUpdate::OperationsNode { index, operations } => todo!(),
+            AppUpdate::OperationsComplete => todo!(),
+            AppUpdate::OperationsApplyStart { operations } => todo!(),
+            AppUpdate::OperationApplyStart { index } => todo!(),
+            AppUpdate::OperationApplyStdout { index, stdout } => todo!(),
+            AppUpdate::OperationApplyStderr { index, stderr } => todo!(),
+            AppUpdate::OperationApplyComplete { index } => todo!(),
+            AppUpdate::OperationsApplyComplete => todo!(),
+        }
+    }
 }

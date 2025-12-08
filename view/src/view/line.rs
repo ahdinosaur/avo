@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{Alignment, Span, TextStyle, ViewNode};
+use crate::{Alignment, Span, TextStyle, View};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Line {
@@ -71,8 +71,8 @@ impl From<String> for Line {
     }
 }
 
-impl From<Line> for ViewNode {
+impl From<Line> for View {
     fn from(value: Line) -> Self {
-        ViewNode::Line(value)
+        View::Line(value)
     }
 }
