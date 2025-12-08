@@ -140,15 +140,16 @@ where
     Node: Clone,
     Meta: Clone,
 {
-    pub fn map<NextNode, MapFn, WriteFn>(
+    pub async fn map<NextNode, Error, MapFn, WriteUpdateFn, WriteUpdateFut>(
         self,
         map: MapFn,
-        write: WriteFn,
-    ) -> FlatTree<NextNode, Meta>
+        write_update: WriteUpdateFn,
+    ) -> Result<FlatTree<NextNode, Meta>, Error>
     where
         NextNode: Clone,
         MapFn: Fn(Node) -> NextNode + Copy,
-        WriteFn: Fn(usize, NextNode),
+        WriteUpdateFn: Fn(usize, NextNode) -> WriteUpdateFut,
+        WriteUpdateFut: Future<Output = Result<(), Error>>,
     {
         let mut next_nodes = vec![None; self.nodes.len()];
 
@@ -166,26 +167,27 @@ where
                         }),
                         index,
                     );
-                    write(index, next_node);
+                    write_update(index, next_node).await?;
                 }
             }
         }
 
-        FlatTree {
+        Ok(FlatTree {
             nodes: next_nodes,
             root_index: self.root_index,
-        }
+        })
     }
 
-    pub fn map_option<NextNode, MapFn, WriteFn>(
+    pub async fn map_option<NextNode, Error, MapFn, WriteUpdateFn, WriteUpdateFut>(
         self,
         map: MapFn,
-        write: WriteFn,
-    ) -> FlatTree<NextNode, Meta>
+        write_update: WriteUpdateFn,
+    ) -> Result<FlatTree<NextNode, Meta>, Error>
     where
         NextNode: Clone,
         MapFn: Fn(Node) -> Option<NextNode> + Copy,
-        WriteFn: Fn(usize, Option<NextNode>),
+        WriteUpdateFn: Fn(usize, Option<NextNode>) -> WriteUpdateFut,
+        WriteUpdateFut: Future<Output = Result<(), Error>>,
     {
         let mut next_nodes = vec![None; self.nodes.len()];
 
@@ -200,73 +202,7 @@ where
                         next_node.clone().map(|node| Tree::Leaf { meta, node }),
                         index,
                     );
-                    write(index, next_node);
-                }
-            }
-        }
-
-        FlatTree {
-            nodes: next_nodes,
-            root_index: self.root_index,
-        }
-    }
-
-    pub fn map_tree<NextNode, MapFn, WriteFn>(
-        self,
-        map: MapFn,
-        write: WriteFn,
-    ) -> FlatTree<NextNode, Meta>
-    where
-        NextNode: Clone,
-        MapFn: Fn(Node, Meta) -> Tree<NextNode, Meta> + Copy,
-        WriteFn: Fn(usize, Tree<NextNode, Meta>),
-    {
-        let mut next_nodes = vec![None; self.nodes.len()];
-        for (index, node) in self.nodes.into_iter().enumerate() {
-            match node {
-                None => {}
-                Some(FlatTreeNode::Branch { .. }) => {}
-                Some(FlatTreeNode::Leaf { meta, node }) => {
-                    let next_tree = map(node, meta);
-                    replace_tree_nodes(&mut next_nodes, Some(next_tree.clone()), index);
-                    write(index, next_tree);
-                }
-            }
-        }
-        FlatTree {
-            nodes: next_nodes,
-            root_index: self.root_index,
-        }
-    }
-
-    pub async fn map_result_async<NextNode, Error, MapFn, Fut, WriteStartFn, WriteUpdateFn>(
-        self,
-        map: MapFn,
-        write_start: WriteStartFn,
-        write_update: WriteUpdateFn,
-    ) -> Result<FlatTree<NextNode, Meta>, Error>
-    where
-        NextNode: Clone,
-        MapFn: Fn(Node) -> Fut + Copy,
-        Fut: Future<Output = Result<NextNode, Error>>,
-        WriteStartFn: Fn(usize),
-        WriteUpdateFn: Fn(usize, Tree<NextNode, Meta>),
-    {
-        let mut next_nodes = vec![None; self.nodes.len()];
-
-        for (index, node) in self.nodes.into_iter().enumerate() {
-            match node {
-                None => {}
-                Some(FlatTreeNode::Branch { .. }) => {}
-                Some(FlatTreeNode::Leaf { meta, node }) => {
-                    write_start(index);
-                    let next_node = map(node).await?;
-                    let next_tree = Tree::Leaf {
-                        meta,
-                        node: next_node,
-                    };
-                    replace_tree_nodes(&mut next_nodes, Some(next_tree.clone()), index);
-                    write_update(index, next_tree);
+                    write_update(index, next_node).await?;
                 }
             }
         }
@@ -277,7 +213,96 @@ where
         })
     }
 
-    pub async fn map_tree_result_async<NextNode, Error, MapFn, Fut, WriteStartFn, WriteUpdateFn>(
+    pub async fn map_tree<NextNode, Error, MapFn, WriteFut, WriteUpdateFn>(
+        self,
+        map: MapFn,
+        write_update: WriteUpdateFn,
+    ) -> Result<FlatTree<NextNode, Meta>, Error>
+    where
+        NextNode: Clone,
+        MapFn: Fn(Node, Meta) -> Tree<NextNode, Meta> + Copy,
+        WriteFut: Future<Output = Result<(), Error>>,
+        WriteUpdateFn: Fn(usize, Tree<NextNode, Meta>) -> WriteFut,
+    {
+        let mut next_nodes = vec![None; self.nodes.len()];
+        for (index, node) in self.nodes.into_iter().enumerate() {
+            match node {
+                None => {}
+                Some(FlatTreeNode::Branch { .. }) => {}
+                Some(FlatTreeNode::Leaf { meta, node }) => {
+                    let next_tree = map(node, meta);
+                    replace_tree_nodes(&mut next_nodes, Some(next_tree.clone()), index);
+                    write_update(index, next_tree).await?;
+                }
+            }
+        }
+        Ok(FlatTree {
+            nodes: next_nodes,
+            root_index: self.root_index,
+        })
+    }
+
+    pub async fn map_result_async<
+        NextNode,
+        Error,
+        MapFn,
+        Fut,
+        WriteStartFn,
+        WriteStartFut,
+        WriteUpdateFn,
+        WriteUpdateFut,
+    >(
+        self,
+        map: MapFn,
+        write_start: WriteStartFn,
+        write_update: WriteUpdateFn,
+    ) -> Result<FlatTree<NextNode, Meta>, Error>
+    where
+        NextNode: Clone,
+        MapFn: Fn(Node) -> Fut + Copy,
+        Fut: Future<Output = Result<NextNode, Error>>,
+        WriteStartFn: Fn(usize) -> WriteStartFut,
+        WriteStartFut: Future<Output = Result<(), Error>>,
+        WriteUpdateFn: Fn(usize, NextNode) -> WriteUpdateFut,
+        WriteUpdateFut: Future<Output = Result<(), Error>>,
+    {
+        let mut next_nodes = vec![None; self.nodes.len()];
+
+        for (index, node) in self.nodes.into_iter().enumerate() {
+            match node {
+                None => {}
+                Some(FlatTreeNode::Branch { .. }) => {}
+                Some(FlatTreeNode::Leaf { meta, node }) => {
+                    write_start(index).await?;
+                    let next_node = map(node).await?;
+                    replace_tree_nodes(
+                        &mut next_nodes,
+                        Some(Tree::Leaf {
+                            meta,
+                            node: next_node.clone(),
+                        }),
+                        index,
+                    );
+                    write_update(index, next_node).await?;
+                }
+            }
+        }
+
+        Ok(FlatTree {
+            nodes: next_nodes,
+            root_index: self.root_index,
+        })
+    }
+
+    pub async fn map_tree_result_async<
+        NextNode,
+        Error,
+        MapFn,
+        Fut,
+        WriteFut,
+        WriteStartFn,
+        WriteUpdateFn,
+    >(
         self,
         map: MapFn,
         write_start: WriteStartFn,
@@ -287,8 +312,9 @@ where
         NextNode: Clone,
         MapFn: Fn(Node, Meta) -> Fut + Copy,
         Fut: Future<Output = Result<Tree<NextNode, Meta>, Error>>,
-        WriteStartFn: Fn(usize),
-        WriteUpdateFn: Fn(usize, Tree<NextNode, Meta>),
+        WriteFut: Future<Output = Result<(), Error>>,
+        WriteStartFn: Fn(usize) -> WriteFut,
+        WriteUpdateFn: Fn(usize, Tree<NextNode, Meta>) -> WriteFut,
     {
         let mut next_nodes = vec![None; self.nodes.len()];
 
@@ -297,10 +323,10 @@ where
                 None => {}
                 Some(FlatTreeNode::Branch { .. }) => {}
                 Some(FlatTreeNode::Leaf { meta, node }) => {
-                    write_start(index);
+                    write_start(index).await?;
                     let next_tree = map(node, meta).await?;
                     replace_tree_nodes(&mut next_nodes, Some(next_tree.clone()), index);
-                    write_update(index, next_tree);
+                    write_update(index, next_tree).await?;
                 }
             }
         }

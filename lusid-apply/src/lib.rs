@@ -92,18 +92,21 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
 
     // Get tree of atomic resources.
     writeln_update(&mut stdout, AppUpdate::ResourcesStart).await?;
-    let resources = resource_params.map_tree(
-        |node, meta| map_plan_subitems(node, meta, |node| node.resources()),
-        |index, tree| {
-            writeln_update(
-                &mut stdout,
-                AppUpdate::ResourcesNode {
-                    index,
-                    tree: plan_view_tree(tree),
-                },
-            )?
-        },
-    );
+    let resources = resource_params
+        .map_tree(
+            |node, meta| map_plan_subitems(node, meta, |node| node.resources()),
+            |index, tree| async move {
+                writeln_update(
+                    &mut stdout,
+                    AppUpdate::ResourcesNode {
+                        index,
+                        tree: plan_view_tree(tree),
+                    },
+                )
+                .await
+            },
+        )
+        .await?;
     debug!("Resources: {:?}", CausalityTree::from(resources));
     writeln_update(&mut stdout, AppUpdate::ResourcesComplete);
 
@@ -113,14 +116,20 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
         .map_result_async(
             |resource| async move {
                 let state = resource.state().await?;
-                Ok::<(Resource, ResourceState), ResourceStateError>((resource, state))
+                Ok::<(Resource, ResourceState), ApplyError>((resource, state))
             },
-            |index| writeln_update(&mut stdout, AppUpdate::ResourceStatesStartNode { index })?,
-            |index, tree| {
+            |index| async move {
+                writeln_update(&mut stdout, AppUpdate::ResourceStatesNodeStart { index }).await
+            },
+            |index, (_resource, resource_state)| async move {
                 writeln_update(
                     &mut stdout,
-                    AppUpdate::ResourceStatesCompleteNode { index, value: tree },
-                )?
+                    AppUpdate::ResourceStatesNodeComplete {
+                        index,
+                        node: resource_state.render(),
+                    },
+                )
+                .await
             },
         )
         .await?;
@@ -128,7 +137,7 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
         "Resource states: {:?}",
         CausalityTree::from(resource_states).map(|(_resource, state)| state)
     );
-    writeln_update(&mut stdout, AppUpdate::ResourceStatesComplete)?;
+    writeln_update(&mut stdout, AppUpdate::ResourceStatesComplete).await?;
 
     // Get tree of resource changes
     writeln_update(&mut stdout, AppUpdate::ResourceChangesStart)?;
