@@ -78,7 +78,7 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
         }
     };
 
-    // Parse/evaluate to CausalityTree<ResourceParams>
+    // Parse/evaluate to tree of resource params.
     let resource_params = plan(plan_id, param_values, &mut store).await?;
     debug!("Resource params: {resource_params:?}");
     writeln_update(
@@ -89,6 +89,7 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
     );
     let resource_params = FlatTree::from(resource_params);
 
+    // Get tree of atomic resources.
     writeln_update(&mut stdout, AppUpdate::ResourcesStart);
     let resources = resource_params.map_tree(
         |node| map_plan_subitems(node, |node| node.resources()),
@@ -102,12 +103,10 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
             )
         },
     );
+    debug!("Resources: {:?}", CausalityTree::from(resources));
     writeln_update(&mut stdout, AppUpdate::ResourcesComplete);
 
-    debug!("Resources: {:?}", CausalityTree::from(resources));
-    writeln_output(&resources, &mut stdout).await?;
-
-    // Get CausalityTree<(Resource, ResourceState)>
+    // Get tree of (resource, resource state)
     let resource_states = resources
         .map_result_async(|resource| async move {
             let state = resource.state().await?;
