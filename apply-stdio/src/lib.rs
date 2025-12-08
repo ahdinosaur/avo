@@ -121,22 +121,22 @@ pub enum AppUpdate {
     ResourcesStart,
     ResourcesNode {
         index: usize,
-        update: FlatTreeUpdate,
+        tree: ViewTree,
     },
     ResourcesComplete,
     ResourceStatesStart,
-    ResourceStatesStartNode {
+    ResourceStatesNodeStart {
         index: usize,
     },
-    ResourceStatesCompleteNode {
+    ResourceStatesNodeComplete {
         index: usize,
-        value: Option<ViewTree>,
+        node: View,
     },
     ResourceStatesComplete,
     ResourceChangesStart,
     ResourceChangesNode {
         index: usize,
-        value: ViewTree,
+        node: Option<View>,
     },
     ResourceChangesComplete,
     OperationsStart,
@@ -201,7 +201,7 @@ impl AppView {
             AppUpdate::ResourcesStart => {
                 self.resources = Some(FlatViewTree::default());
             }
-            AppUpdate::ResourcesNode { index, value } => {
+            AppUpdate::ResourcesNode { index, tree } => {
                 let tree = Self::ensure_tree(&mut self.resources);
                 tree.insert_subtree_at_completed(index, value);
             }
@@ -210,11 +210,11 @@ impl AppView {
             AppUpdate::ResourceStatesStart => {
                 self.resource_states = Some(FlatViewTree::default());
             }
-            AppUpdate::ResourceStatesStartNode { index } => {
+            AppUpdate::ResourceStatesNodeStart { index } => {
                 let tree = Self::ensure_tree(&mut self.resource_states);
                 tree.set_leaf_started(index);
             }
-            AppUpdate::ResourceStatesCompleteNode { index, value } => {
+            AppUpdate::ResourceStatesNodeComplete { index, value } => {
                 let tree = Self::ensure_tree(&mut self.resource_states);
                 match value {
                     Some(subtree) => {
