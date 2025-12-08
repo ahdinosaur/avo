@@ -218,7 +218,7 @@ where
     ) -> FlatTree<NextNode, Meta>
     where
         NextNode: Clone,
-        MapFn: Fn(Node) -> Tree<NextNode, Meta> + Copy,
+        MapFn: Fn(Node, Meta) -> Tree<NextNode, Meta> + Copy,
         WriteFn: Fn(usize, Tree<NextNode, Meta>),
     {
         let mut next_nodes = vec![None; self.nodes.len()];
@@ -226,8 +226,8 @@ where
             match node {
                 None => {}
                 Some(FlatTreeNode::Branch { .. }) => {}
-                Some(FlatTreeNode::Leaf { meta: _, node }) => {
-                    let next_tree = map(node);
+                Some(FlatTreeNode::Leaf { meta, node }) => {
+                    let next_tree = map(node, meta);
                     replace_tree_nodes(&mut next_nodes, Some(next_tree.clone()), index);
                     write(index, next_tree);
                 }
@@ -285,7 +285,7 @@ where
     ) -> Result<FlatTree<NextNode, Meta>, Error>
     where
         NextNode: Clone,
-        MapFn: Fn(Node) -> Fut + Copy,
+        MapFn: Fn(Node, Meta) -> Fut + Copy,
         Fut: Future<Output = Result<Tree<NextNode, Meta>, Error>>,
         WriteStartFn: Fn(usize),
         WriteUpdateFn: Fn(usize, Tree<NextNode, Meta>),
@@ -296,9 +296,9 @@ where
             match node {
                 None => {}
                 Some(FlatTreeNode::Branch { .. }) => {}
-                Some(FlatTreeNode::Leaf { meta: _, node }) => {
+                Some(FlatTreeNode::Leaf { meta, node }) => {
                     write_start(index);
-                    let next_tree = map(node).await?;
+                    let next_tree = map(node, meta).await?;
                     replace_tree_nodes(&mut next_nodes, Some(next_tree.clone()), index);
                     write_update(index, next_tree);
                 }

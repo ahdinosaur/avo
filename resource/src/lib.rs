@@ -62,6 +62,15 @@ pub enum ResourceParams {
     Apt(AptParams),
 }
 
+impl Display for ResourceParams {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use ResourceParams::*;
+        match self {
+            Apt(apt) => apt.fmt(f),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Resource {
     Apt(AptResource),

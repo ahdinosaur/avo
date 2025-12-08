@@ -10,46 +10,43 @@ pub type PlanMeta = CausalityMeta<PlanNodeId>;
 pub type PlanFlatTree<Node> = FlatTree<Node, PlanMeta>;
 pub type PlanFlatTreeNode<Node> = FlatTreeNode<Node, PlanMeta>;
 
-pub fn map_plan_subitems<Node, NextNode, F>(
-    node: Option<PlanFlatTreeNode<Node>>,
-    map: F,
-) -> Option<PlanFlatTreeUpdate<NextNode>>
+pub fn map_plan_subitems<Node, NextNode, MapFn>(
+    node: Node,
+    meta: PlanMeta,
+    map: MapFn,
+) -> PlanTree<NextNode>
 where
-    F: Fn(Node) -> Vec<Tree<NextNode, CausalityMeta<String>>>,
+    MapFn: Fn(Node) -> Vec<Tree<NextNode, CausalityMeta<String>>>,
 {
-    let node = node?;
-    Some(node.map(|node| {
-        let subtrees = map(node);
-        let scope_id = create_id();
-        let subtrees = subtrees
-            .into_iter()
-            .map(|tree| {
-                tree.map_meta(|meta| CausalityMeta {
-                    id: meta.id.map(|item_id| PlanNodeId::SubItem {
+    let scope_id = create_id();
+    let children = map(node)
+        .into_iter()
+        .map(|tree| {
+            tree.map_meta(|meta| CausalityMeta {
+                id: meta.id.map(|item_id| PlanNodeId::SubItem {
+                    scope_id: scope_id.clone(),
+                    item_id,
+                }),
+                before: meta
+                    .before
+                    .into_iter()
+                    .map(|item_id| PlanNodeId::SubItem {
                         scope_id: scope_id.clone(),
                         item_id,
-                    }),
-                    before: meta
-                        .before
-                        .into_iter()
-                        .map(|item_id| PlanNodeId::SubItem {
-                            scope_id: scope_id.clone(),
-                            item_id,
-                        })
-                        .collect(),
-                    after: meta
-                        .after
-                        .into_iter()
-                        .map(|item_id| PlanNodeId::SubItem {
-                            scope_id: scope_id.clone(),
-                            item_id,
-                        })
-                        .collect(),
-                })
+                    })
+                    .collect(),
+                after: meta
+                    .after
+                    .into_iter()
+                    .map(|item_id| PlanNodeId::SubItem {
+                        scope_id: scope_id.clone(),
+                        item_id,
+                    })
+                    .collect(),
             })
-            .collect();
-        FlatTreeMappedItem::SubTrees(subtrees)
-    }))
+        })
+        .collect();
+    Tree::Branch { meta, children }
 }
 
 pub fn plan_view_tree<Node>(tree: PlanTree<Node>) -> ViewTree

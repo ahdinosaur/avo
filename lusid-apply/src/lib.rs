@@ -86,13 +86,14 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
         AppUpdate::ResourceParams {
             resource_params: plan_view_tree(resource_params),
         },
-    )?;
+    )
+    .await?;
     let resource_params = FlatTree::from(resource_params);
 
     // Get tree of atomic resources.
-    writeln_update(&mut stdout, AppUpdate::ResourcesStart)?;
+    writeln_update(&mut stdout, AppUpdate::ResourcesStart).await?;
     let resources = resource_params.map_tree(
-        |node| map_plan_subitems(node, |node| node.resources()),
+        |node, meta| map_plan_subitems(node, meta, |node| node.resources()),
         |index, tree| {
             writeln_update(
                 &mut stdout,
@@ -178,7 +179,7 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
     Ok(())
 }
 
-async fn writeln_update(stdout: &mut Stdout, update: &AppUpdate) -> Result<(), ApplyError> {
+async fn writeln_update(stdout: &mut Stdout, update: AppUpdate) -> Result<(), ApplyError> {
     stdout
         .write_all(&serde_json::to_vec(&update).map_err(ApplyError::JsonOutput)?)
         .await
