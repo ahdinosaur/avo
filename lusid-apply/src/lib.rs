@@ -1,13 +1,13 @@
-use lusid_apply_stdio::{AppUpdate, FlatViewTreeNode};
-use lusid_causality::{compute_epochs, CausalityMeta, CausalityTree, EpochError};
+use lusid_apply_stdio::AppUpdate;
+use lusid_causality::{compute_epochs, CausalityTree, EpochError};
 use lusid_ctx::{Context, ContextError};
 use lusid_operation::{apply_operations, merge_operations, partition_by_type, OperationApplyError};
 use lusid_params::{ParamValues, ParamValuesFromTypeError};
-use lusid_plan::{self, map_plan_subitems, plan, plan_view_tree, PlanError, PlanId, PlanNodeId};
+use lusid_plan::{self, map_plan_subitems, plan, render_plan_tree, PlanError, PlanId, PlanNodeId};
 use lusid_resource::{Resource, ResourceState, ResourceStateError};
 use lusid_store::Store;
-use lusid_tree::{FlatTree, FlatTreeMapItem, FlatTreeMappedItem};
-use lusid_view::{Render, ViewTree};
+use lusid_tree::FlatTree;
+use lusid_view::Render;
 use rimu::SourceId;
 use thiserror::Error;
 use tokio::io::{AsyncWriteExt, Stdout};
@@ -84,7 +84,7 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
     writeln_update(
         &mut stdout,
         AppUpdate::ResourceParams {
-            resource_params: plan_view_tree(resource_params),
+            resource_params: render_plan_tree(resource_params.clone()),
         },
     )
     .await?;
@@ -95,19 +95,18 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
     let resources = resource_params
         .map_tree(
             |node, meta| map_plan_subitems(node, meta, |node| node.resources()),
-            |index, tree| async move {
+            |index, tree| {
                 writeln_update(
                     &mut stdout,
                     AppUpdate::ResourcesNode {
                         index,
-                        tree: plan_view_tree(tree),
+                        tree: render_plan_tree(tree),
                     },
                 )
-                .await
             },
         )
         .await?;
-    debug!("Resources: {:?}", CausalityTree::from(resources));
+    debug!("Resources: {:?}", CausalityTree::from(resources.clone()));
     writeln_update(&mut stdout, AppUpdate::ResourcesComplete);
 
     // Get tree of (resource, resource state)
@@ -118,10 +117,8 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
                 let state = resource.state().await?;
                 Ok::<(Resource, ResourceState), ApplyError>((resource, state))
             },
-            |index| async move {
-                writeln_update(&mut stdout, AppUpdate::ResourceStatesNodeStart { index }).await
-            },
-            |index, (_resource, resource_state)| async move {
+            |index| writeln_update(&mut stdout, AppUpdate::ResourceStatesNodeStart { index }),
+            |index, (_resource, resource_state)| {
                 writeln_update(
                     &mut stdout,
                     AppUpdate::ResourceStatesNodeComplete {
@@ -129,41 +126,65 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
                         node: resource_state.render(),
                     },
                 )
-                .await
             },
         )
         .await?;
     debug!(
         "Resource states: {:?}",
-        CausalityTree::from(resource_states).map(|(_resource, state)| state)
+        CausalityTree::from(resource_states.clone()).map(|(_resource, state)| state)
     );
     writeln_update(&mut stdout, AppUpdate::ResourceStatesComplete).await?;
 
     // Get tree of resource changes
-    writeln_update(&mut stdout, AppUpdate::ResourceChangesStart)?;
-    let resource_changes = resource_states.map_option(
-        |(resource, state)| resource.change(&state),
-        |index, node| AppUpdate::ResourceChangesNode { index, node },
-    );
-
+    writeln_update(&mut stdout, AppUpdate::ResourceChangesStart).await?;
+    let resource_changes = resource_states
+        .map_option(
+            |(resource, state)| resource.change(&state),
+            |index, node| {
+                writeln_update(
+                    &mut stdout,
+                    AppUpdate::ResourceChangesNode {
+                        index,
+                        node: node.map(|n| n.render()),
+                    },
+                )
+            },
+        )
+        .await?;
     debug!(
         "Resource changes: {:?}",
-        CausalityTree::from(resource_changes)
+        CausalityTree::from(resource_changes.clone())
     );
-    writeln_update(&mut stdout, AppUpdate::ResourceChangesComplete)?;
+    writeln_update(&mut stdout, AppUpdate::ResourceChangesComplete).await?;
 
-    let Some(changes) = changes else {
+    if resource_changes.is_empty() {
         info!("No changes to apply!");
         return Ok(());
     };
-    writeln_output(&changes, &mut stdout).await?;
 
     // Get CausalityTree<Operations>
-    let operations = changes.map_tree(|change| change.operations());
+    writeln_update(&mut stdout, AppUpdate::ResourcesStart).await?;
+    let operations = resource_changes
+        .map_tree(
+            |node, meta| map_plan_subitems(node, meta, |node| node.operations()),
+            |index, tree| {
+                writeln_update(
+                    &mut stdout,
+                    AppUpdate::OperationsNode {
+                        index,
+                        operations: render_plan_tree(tree),
+                    },
+                )
+            },
+        )
+        .await?;
+    debug!(
+        "Operations tree: {:?}",
+        CausalityTree::from(operations.clone())
+    );
+    writeln_update(&mut stdout, AppUpdate::ResourcesComplete).await?;
 
-    debug!("Operations tree: {operations:?}");
-
-    let operation_epochs = compute_epochs(operations)?;
+    let operation_epochs = compute_epochs(CausalityTree::from(operations))?;
     let epochs_count = operation_epochs.len();
     debug!("Operation epochs: {operation_epochs:?}");
 

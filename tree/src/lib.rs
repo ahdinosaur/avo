@@ -98,6 +98,10 @@ impl<Node, Meta> FlatTree<Node, Meta> {
         self.nodes.get(self.root_index)?.as_ref()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.root().is_none()
+    }
+
     pub fn get(&self, index: usize) -> Result<&FlatTreeNode<Node, Meta>, FlatTreeError> {
         let node = self
             .nodes
@@ -123,6 +127,44 @@ impl<Node, Meta> FlatTree<Node, Meta> {
 
     pub fn replace_tree(&mut self, tree: Option<Tree<Node, Meta>>, root_index: usize) {
         replace_tree_nodes(&mut self.nodes, tree, root_index)
+    }
+
+    /// Depth-first search from the root. Returns indices in post-order
+    /// (children before parent). Missing or out-of-bounds children are skipped.
+    pub fn depth_first_search(&self) -> Vec<usize> {
+        let mut order = Vec::new();
+        if self.root().is_none() {
+            return order;
+        }
+
+        let mut stack: Vec<(usize, bool)> = Vec::new();
+        stack.push((self.root_index, false));
+
+        while let Some((index, visited)) = stack.pop() {
+            let node = match self.nodes.get(index) {
+                Some(Some(node)) => node,
+                _ => continue,
+            };
+            match node {
+                FlatTreeNode::Leaf { .. } => order.push(index),
+                FlatTreeNode::Branch { children, .. } => {
+                    if visited {
+                        order.push(index);
+                    } else {
+                        stack.push((index, true));
+                        for &child in children.iter().rev() {
+                            if child < self.nodes.len()
+                                && self.nodes.get(child).and_then(|n| n.as_ref()).is_some()
+                            {
+                                stack.push((child, false));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        order
     }
 }
 
@@ -156,17 +198,15 @@ where
         for (index, node) in self.nodes.into_iter().enumerate() {
             match node {
                 None => {}
-                Some(FlatTreeNode::Branch { .. }) => {}
+                Some(FlatTreeNode::Branch { meta, children }) => {
+                    next_nodes[index] = Some(FlatTreeNode::Branch { meta, children })
+                }
                 Some(FlatTreeNode::Leaf { meta, node }) => {
                     let next_node = map(node);
-                    replace_tree_nodes(
-                        &mut next_nodes,
-                        Some(Tree::Leaf {
-                            meta,
-                            node: next_node.clone(),
-                        }),
-                        index,
-                    );
+                    next_nodes[index] = Some(FlatTreeNode::Leaf {
+                        meta,
+                        node: next_node.clone(),
+                    });
                     write_update(index, next_node).await?;
                 }
             }
@@ -194,23 +234,46 @@ where
         for (index, node) in self.nodes.into_iter().enumerate() {
             match node {
                 None => {}
-                Some(FlatTreeNode::Branch { .. }) => {}
+                Some(FlatTreeNode::Branch { meta, children }) => {
+                    next_nodes[index] = Some(FlatTreeNode::Branch { meta, children })
+                }
                 Some(FlatTreeNode::Leaf { meta, node }) => {
                     let next_node = map(node);
-                    replace_tree_nodes(
-                        &mut next_nodes,
-                        next_node.clone().map(|node| Tree::Leaf { meta, node }),
-                        index,
-                    );
+                    next_nodes[index] = next_node
+                        .clone()
+                        .map(|node| FlatTreeNode::Leaf { meta, node });
                     write_update(index, next_node).await?;
                 }
             }
         }
 
-        Ok(FlatTree {
+        // Prune empty branches: any Branch that ends up with no present
+        // children becomes None. We process in depth-first post-order so
+        // children are considered before parents.
+        let mut result = FlatTree {
             nodes: next_nodes,
             root_index: self.root_index,
-        })
+        };
+
+        for index in result.depth_first_search() {
+            let is_empty_branch = match result.nodes.get(index).and_then(|node| node.as_ref()) {
+                Some(FlatTreeNode::Branch { children, .. }) => !children.iter().any(|&child| {
+                    child < result.nodes.len()
+                        && result
+                            .nodes
+                            .get(child)
+                            .and_then(|node| node.as_ref())
+                            .is_some()
+                }),
+                _ => false,
+            };
+
+            if is_empty_branch {
+                result.nodes[index] = None;
+            }
+        }
+
+        Ok(result)
     }
 
     pub async fn map_tree<NextNode, Error, MapFn, WriteFut, WriteUpdateFn>(
@@ -228,7 +291,9 @@ where
         for (index, node) in self.nodes.into_iter().enumerate() {
             match node {
                 None => {}
-                Some(FlatTreeNode::Branch { .. }) => {}
+                Some(FlatTreeNode::Branch { meta, children }) => {
+                    next_nodes[index] = Some(FlatTreeNode::Branch { meta, children })
+                }
                 Some(FlatTreeNode::Leaf { meta, node }) => {
                     let next_tree = map(node, meta);
                     replace_tree_nodes(&mut next_nodes, Some(next_tree.clone()), index);
@@ -271,18 +336,16 @@ where
         for (index, node) in self.nodes.into_iter().enumerate() {
             match node {
                 None => {}
-                Some(FlatTreeNode::Branch { .. }) => {}
+                Some(FlatTreeNode::Branch { meta, children }) => {
+                    next_nodes[index] = Some(FlatTreeNode::Branch { meta, children })
+                }
                 Some(FlatTreeNode::Leaf { meta, node }) => {
                     write_start(index).await?;
                     let next_node = map(node).await?;
-                    replace_tree_nodes(
-                        &mut next_nodes,
-                        Some(Tree::Leaf {
-                            meta,
-                            node: next_node.clone(),
-                        }),
-                        index,
-                    );
+                    next_nodes[index] = Some(FlatTreeNode::Leaf {
+                        meta,
+                        node: next_node.clone(),
+                    });
                     write_update(index, next_node).await?;
                 }
             }
@@ -321,7 +384,9 @@ where
         for (index, node) in self.nodes.into_iter().enumerate() {
             match node {
                 None => {}
-                Some(FlatTreeNode::Branch { .. }) => {}
+                Some(FlatTreeNode::Branch { meta, children }) => {
+                    next_nodes[index] = Some(FlatTreeNode::Branch { meta, children })
+                }
                 Some(FlatTreeNode::Leaf { meta, node }) => {
                     write_start(index).await?;
                     let next_tree = map(node, meta).await?;

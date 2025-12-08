@@ -49,14 +49,14 @@ where
     Tree::Branch { meta, children }
 }
 
-pub fn plan_view_tree<Node>(tree: PlanTree<Node>) -> ViewTree
+pub fn render_plan_tree<Node>(tree: PlanTree<Node>) -> ViewTree
 where
     Node: Render,
 {
     match tree {
         Tree::Branch { meta, children } => ViewTree::Branch {
             view: meta.id.map(|id| id.render()).unwrap_or("?".render()),
-            children: children.into_iter().map(plan_view_tree).collect(),
+            children: children.into_iter().map(render_plan_tree).collect(),
         },
         Tree::Leaf { meta: _, node } => ViewTree::Leaf {
             view: node.render(),

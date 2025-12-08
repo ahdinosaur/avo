@@ -1,5 +1,6 @@
 use async_trait::async_trait;
-use std::fmt::Debug;
+use lusid_view::Render;
+use std::fmt::{Debug, Display};
 use thiserror::Error;
 
 pub mod operations;
@@ -12,12 +13,13 @@ use crate::operations::apt::{Apt, AptOperation};
 /// Each type decides how to merge same-type operations and how to apply them.
 #[async_trait]
 pub trait OperationType {
-    type Operation: Debug + Clone + Send + 'static;
-    type ApplyError: Debug + Send + 'static;
+    type Operation: Render;
 
     /// Merge a set of operations of this type within the same epoch.
     /// Implementations should coalesce operations to a minimal set.
     fn merge(operations: Vec<Self::Operation>) -> Vec<Self::Operation>;
+
+    type ApplyError;
 
     /// Apply the merged operations of this type for an epoch.
     async fn apply(operations: Vec<Self::Operation>) -> Result<(), Self::ApplyError>;
@@ -26,6 +28,15 @@ pub trait OperationType {
 #[derive(Debug, Clone)]
 pub enum Operation {
     Apt(AptOperation),
+}
+
+impl Display for Operation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use Operation::*;
+        match self {
+            Apt(apt) => Display::fmt(apt, f),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

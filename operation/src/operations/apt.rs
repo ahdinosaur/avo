@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use lusid_cmd::{Command, CommandError};
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, fmt::Display};
 use thiserror::Error;
 use tracing::{debug, info};
 
@@ -10,6 +10,17 @@ use crate::OperationType;
 pub enum AptOperation {
     Update,
     Install { packages: Vec<String> },
+}
+
+impl Display for AptOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AptOperation::Update => write!(f, "Apt::Update"),
+            AptOperation::Install { packages } => {
+                write!(f, "Apt::Install(packages = [{}])", packages.join(", "))
+            }
+        }
+    }
 }
 
 #[derive(Error, Debug)]
