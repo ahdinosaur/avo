@@ -90,22 +90,18 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
     let resource_params = FlatTree::from(resource_params);
 
     writeln_update(&mut stdout, AppUpdate::ResourcesStart);
-    let resource_map_items = resource_params
-        .into_iter()
-        .map(|node| map_plan_subitems(node, |node| node.resources()));
-    for (index, resource_map_item) in resource_map_items.enumerate() {
-        writeln_update(
-            &mut stdout,
-            AppUpdate::ResourcesNode {
-                index,
-                value: resource_map_item.map(|item| match item {
-                    FlatTreeMapItem::Node(node) => match node {},
-                    FlatTreeMapItem::SubTree(tree) => todo!(),
-                }),
-            },
-        )
-    }
-    let resources = FlatTree::from_map_iter(resource_map_items, 0);
+    let resources = resource_params.map_tree(
+        |node| map_plan_subitems(node, |node| node.resources()),
+        |update| {
+            writeln_update(
+                &mut stdout,
+                AppUpdate::ResourcesNode {
+                    index: update.index,
+                    update: plan_view_tree(update.tree),
+                },
+            )
+        },
+    );
     writeln_update(&mut stdout, AppUpdate::ResourcesComplete);
 
     debug!("Resources: {:?}", CausalityTree::from(resources));

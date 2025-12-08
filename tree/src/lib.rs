@@ -156,22 +156,19 @@ where
         MapFn: Fn(Node) -> Tree<NextNode, Meta> + Copy,
         WriteFn: Fn(FlatTreeUpdate<NextNode, Meta>),
     {
-        let mut next_nodes = Vec::with_capacity(self.nodes.len());
-        next_nodes.fill(None);
+        let mut next_nodes = vec![None; self.nodes.len()];
         for (index, node) in self.nodes.into_iter().enumerate() {
             match node {
                 None => {}
-                Some(node) => match node {
-                    FlatTreeNode::Branch { .. } => {}
-                    FlatTreeNode::Leaf { meta: _, node } => {
-                        let next_tree = map(node);
-                        replace_tree_nodes(&mut next_nodes, Some(next_tree.clone()), index);
-                        write(FlatTreeUpdate {
-                            index,
-                            tree: next_tree,
-                        });
-                    }
-                },
+                Some(FlatTreeNode::Branch { .. }) => {}
+                Some(FlatTreeNode::Leaf { meta: _, node }) => {
+                    let next_tree = map(node);
+                    replace_tree_nodes(&mut next_nodes, Some(next_tree.clone()), index);
+                    write(FlatTreeUpdate {
+                        index,
+                        tree: next_tree,
+                    });
+                }
             }
         }
         FlatTree {
