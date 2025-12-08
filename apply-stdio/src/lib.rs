@@ -14,6 +14,12 @@ pub enum FlatViewTreeNode {
     },
 }
 
+#[derive(Debug, Clone)]
+pub enum FlatTreeUpdate<Node, Meta> {
+    Node(FlatViewTreeNode),
+    SubTree(ViewTree),
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FlatViewTree {
     nodes: Vec<Option<FlatViewTreeNode>>,
@@ -121,7 +127,7 @@ pub enum AppUpdate {
     ResourcesStart,
     ResourcesNode {
         index: usize,
-        value: ViewTree,
+        update: FlatTreeUpdate,
     },
     ResourcesComplete,
     ResourceStatesStart,

@@ -81,19 +81,19 @@ pub enum FlatTreeMappedItem<Node, Meta> {
 }
 
 impl<Node, Meta> FlatTreeNode<Node, Meta> {
-    pub fn map<F, NextNode>(self, map: F) -> FlatTreeMapItem<NextNode, Meta>
+    pub fn update<F, NextNode>(self, map: F) -> FlatTreeUpdate<NextNode, Meta>
     where
         F: Fn(Node) -> FlatTreeMappedItem<NextNode, Meta>,
     {
         match self {
             FlatTreeNode::Branch { meta, children } => {
-                FlatTreeMapItem::Node(FlatTreeNode::Branch { meta, children })
+                FlatTreeUpdate::Node(FlatTreeNode::Branch { meta, children })
             }
             FlatTreeNode::Leaf { meta, node } => match map(node) {
                 FlatTreeMappedItem::Node(node) => {
-                    FlatTreeMapItem::Node(FlatTreeNode::Leaf { meta, node })
+                    FlatTreeUpdate::Node(FlatTreeNode::Leaf { meta, node })
                 }
-                FlatTreeMappedItem::SubTrees(trees) => FlatTreeMapItem::SubTree(Tree::Branch {
+                FlatTreeMappedItem::SubTrees(trees) => FlatTreeUpdate::SubTree(Tree::Branch {
                     meta,
                     children: trees,
                 }),
@@ -178,7 +178,7 @@ impl<Node, Meta> IntoIterator for FlatTree<Node, Meta> {
 }
 
 #[derive(Debug, Clone)]
-pub enum FlatTreeMapItem<Node, Meta> {
+pub enum FlatTreeUpdate<Node, Meta> {
     Node(FlatTreeNode<Node, Meta>),
     SubTree(Tree<Node, Meta>),
 }
@@ -188,16 +188,16 @@ where
     Node: Clone,
     Meta: Clone,
 {
-    pub fn from_map_iter<I>(iter: I, root_index: usize) -> Self
+    pub fn from_updates<I>(iter: I, root_index: usize) -> Self
     where
-        I: Iterator<Item = Option<FlatTreeMapItem<Node, Meta>>>,
+        I: Iterator<Item = Option<FlatTreeUpdate<Node, Meta>>>,
     {
         let mut nodes: Vec<Option<FlatTreeNode<Node, Meta>>> = Vec::new();
         for (index, item) in iter.enumerate() {
             match item {
                 None => nodes.push(None),
-                Some(FlatTreeMapItem::Node(node)) => nodes.push(Some(node)),
-                Some(FlatTreeMapItem::SubTree(tree)) => {
+                Some(FlatTreeUpdate::Node(node)) => nodes.push(Some(node)),
+                Some(FlatTreeUpdate::SubTree(tree)) => {
                     replace_tree_nodes(&mut nodes, Some(tree), index);
                 }
             }

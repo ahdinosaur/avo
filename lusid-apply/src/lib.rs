@@ -1,13 +1,13 @@
-use lusid_apply_stdio::AppUpdate;
+use lusid_apply_stdio::{AppUpdate, FlatViewTreeNode};
 use lusid_causality::{compute_epochs, CausalityMeta, CausalityTree, EpochError};
 use lusid_ctx::{Context, ContextError};
 use lusid_operation::{apply_operations, merge_operations, partition_by_type, OperationApplyError};
 use lusid_params::{ParamValues, ParamValuesFromTypeError};
-use lusid_plan::{self, map_plan_subitems, plan, PlanError, PlanId, PlanNodeId};
+use lusid_plan::{self, map_plan_subitems, plan, plan_view_tree, PlanError, PlanId, PlanNodeId};
 use lusid_resource::{Resource, ResourceState, ResourceStateError};
 use lusid_store::Store;
-use lusid_tree::{FlatTree, FlatTreeMappedItem};
-use lusid_view::Render;
+use lusid_tree::{FlatTree, FlatTreeMapItem, FlatTreeMappedItem};
+use lusid_view::{Render, ViewTree};
 use rimu::SourceId;
 use thiserror::Error;
 use tokio::io::{AsyncWriteExt, Stdout};
@@ -81,15 +81,32 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
     // Parse/evaluate to CausalityTree<ResourceParams>
     let resource_params = plan(plan_id, param_values, &mut store).await?;
     debug!("Resource params: {resource_params:?}");
-    writeln_update(&mut stdout, AppUpdate::ResourceParams { resource_params })
-
-    let resource_params = FlatTree::from(resource_params);
-    let resources = FlatTree::from_map_iter(
-        resource_params
-            .into_iter()
-            .map(|node| map_plan_subitems(node, |node| node.resources())),
-        0,
+    writeln_update(
+        &mut stdout,
+        AppUpdate::ResourceParams {
+            resource_params: plan_view_tree(resource_params),
+        },
     );
+    let resource_params = FlatTree::from(resource_params);
+
+    writeln_update(&mut stdout, AppUpdate::ResourcesStart);
+    let resource_map_items = resource_params
+        .into_iter()
+        .map(|node| map_plan_subitems(node, |node| node.resources()));
+    for (index, resource_map_item) in resource_map_items.enumerate() {
+        writeln_update(
+            &mut stdout,
+            AppUpdate::ResourcesNode {
+                index,
+                value: resource_map_item.map(|item| match item {
+                    FlatTreeMapItem::Node(node) => match node {},
+                    FlatTreeMapItem::SubTree(tree) => todo!(),
+                }),
+            },
+        )
+    }
+    let resources = FlatTree::from_map_iter(resource_map_items, 0);
+    writeln_update(&mut stdout, AppUpdate::ResourcesComplete);
 
     debug!("Resources: {:?}", CausalityTree::from(resources));
     writeln_output(&resources, &mut stdout).await?;
