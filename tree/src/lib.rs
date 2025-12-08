@@ -75,34 +75,6 @@ pub enum FlatTreeNode<Node, Meta> {
 }
 
 #[derive(Debug, Clone)]
-pub enum FlatTreeMappedItem<Node, Meta> {
-    Node(Node),
-    SubTrees(Vec<Tree<Node, Meta>>),
-}
-
-impl<Node, Meta> FlatTreeNode<Node, Meta> {
-    pub fn update<F, NextNode>(self, map: F) -> FlatTreeUpdate<NextNode, Meta>
-    where
-        F: Fn(Node) -> FlatTreeMappedItem<NextNode, Meta>,
-    {
-        match self {
-            FlatTreeNode::Branch { meta, children } => {
-                FlatTreeUpdate::Node(FlatTreeNode::Branch { meta, children })
-            }
-            FlatTreeNode::Leaf { meta, node } => match map(node) {
-                FlatTreeMappedItem::Node(node) => {
-                    FlatTreeUpdate::Node(FlatTreeNode::Leaf { meta, node })
-                }
-                FlatTreeMappedItem::SubTrees(trees) => FlatTreeUpdate::SubTree(Tree::Branch {
-                    meta,
-                    children: trees,
-                }),
-            },
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
 pub struct FlatTree<Node, Meta> {
     nodes: Vec<Option<FlatTreeNode<Node, Meta>>>,
     root_index: usize,
@@ -152,20 +124,6 @@ impl<Node, Meta> FlatTree<Node, Meta> {
     pub fn replace_tree(&mut self, tree: Option<Tree<Node, Meta>>, root_index: usize) {
         replace_tree_nodes(&mut self.nodes, tree, root_index)
     }
-
-    pub fn iter(&self) -> impl Iterator<Item = &Option<FlatTreeNode<Node, Meta>>> {
-        self.nodes.iter()
-    }
-
-    pub fn from_iter<I>(iter: I, root_index: usize) -> Self
-    where
-        I: Iterator<Item = Option<FlatTreeNode<Node, Meta>>>,
-    {
-        Self {
-            nodes: iter.collect(),
-            root_index,
-        }
-    }
 }
 
 impl<Node, Meta> IntoIterator for FlatTree<Node, Meta> {
@@ -178,9 +136,9 @@ impl<Node, Meta> IntoIterator for FlatTree<Node, Meta> {
 }
 
 #[derive(Debug, Clone)]
-pub enum FlatTreeUpdate<Node, Meta> {
-    Node(FlatTreeNode<Node, Meta>),
-    SubTree(Tree<Node, Meta>),
+pub struct FlatTreeUpdate<Node, Meta> {
+    pub index: usize,
+    pub tree: Tree<Node, Meta>,
 }
 
 impl<Node, Meta> FlatTree<Node, Meta>
@@ -188,21 +146,38 @@ where
     Node: Clone,
     Meta: Clone,
 {
-    pub fn from_updates<I>(iter: I, root_index: usize) -> Self
+    pub fn map_tree<NextNode, MapFn, WriteFn>(
+        self,
+        map: MapFn,
+        write: WriteFn,
+    ) -> FlatTree<NextNode, Meta>
     where
-        I: Iterator<Item = Option<FlatTreeUpdate<Node, Meta>>>,
+        NextNode: Clone,
+        MapFn: Fn(Node) -> Tree<NextNode, Meta> + Copy,
+        WriteFn: Fn(FlatTreeUpdate<NextNode, Meta>),
     {
-        let mut nodes: Vec<Option<FlatTreeNode<Node, Meta>>> = Vec::new();
-        for (index, item) in iter.enumerate() {
-            match item {
-                None => nodes.push(None),
-                Some(FlatTreeUpdate::Node(node)) => nodes.push(Some(node)),
-                Some(FlatTreeUpdate::SubTree(tree)) => {
-                    replace_tree_nodes(&mut nodes, Some(tree), index);
-                }
+        let mut next_nodes = Vec::with_capacity(self.nodes.len());
+        next_nodes.fill(None);
+        for (index, node) in self.nodes.into_iter().enumerate() {
+            match node {
+                None => {}
+                Some(node) => match node {
+                    FlatTreeNode::Branch { .. } => {}
+                    FlatTreeNode::Leaf { meta: _, node } => {
+                        let next_tree = map(node);
+                        replace_tree_nodes(&mut next_nodes, Some(next_tree.clone()), index);
+                        write(FlatTreeUpdate {
+                            index,
+                            tree: next_tree,
+                        });
+                    }
+                },
             }
         }
-        FlatTree { nodes, root_index }
+        FlatTree {
+            nodes: next_nodes,
+            root_index: self.root_index,
+        }
     }
 }
 
