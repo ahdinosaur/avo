@@ -1,6 +1,6 @@
 use cuid2::create_id;
 use lusid_causality::CausalityMeta;
-use lusid_tree::{FlatTree, FlatTreeMappedItem, FlatTreeNode, FlatTreeUpdate, Tree};
+use lusid_tree::{FlatTree, FlatTreeNode, Tree};
 use lusid_view::{Render, ViewTree};
 
 use crate::PlanNodeId;
@@ -9,8 +9,6 @@ pub type PlanTree<Node> = Tree<Node, PlanMeta>;
 pub type PlanMeta = CausalityMeta<PlanNodeId>;
 pub type PlanFlatTree<Node> = FlatTree<Node, PlanMeta>;
 pub type PlanFlatTreeNode<Node> = FlatTreeNode<Node, PlanMeta>;
-pub type PlanFlatTreeMappedItem<Node> = FlatTreeMappedItem<Node, PlanMeta>;
-pub type PlanFlatTreeUpdate<Node> = FlatTreeUpdate<Node, PlanMeta>;
 
 pub fn map_plan_subitems<Node, NextNode, F>(
     node: Option<PlanFlatTreeNode<Node>>,
@@ -20,7 +18,7 @@ where
     F: Fn(Node) -> Vec<Tree<NextNode, CausalityMeta<String>>>,
 {
     let node = node?;
-    Some(node.update(|node| {
+    Some(node.map(|node| {
         let subtrees = map(node);
         let scope_id = create_id();
         let subtrees = subtrees

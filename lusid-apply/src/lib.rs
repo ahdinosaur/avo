@@ -98,7 +98,7 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
                 &mut stdout,
                 AppUpdate::ResourcesNode {
                     index,
-                    update: plan_view_tree(tree),
+                    tree: plan_view_tree(tree),
                 },
             )?
         },

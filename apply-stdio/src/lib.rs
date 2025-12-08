@@ -114,6 +114,7 @@ impl FlatViewTree {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AppUpdate {
     ResourceParams {
         resource_params: ViewTree,
@@ -202,8 +203,8 @@ impl AppView {
                 self.resources = Some(FlatViewTree::default());
             }
             AppUpdate::ResourcesNode { index, tree } => {
-                let tree = Self::ensure_tree(&mut self.resources);
-                tree.insert_subtree_at_completed(index, value);
+                let resources_tree = Self::ensure_tree(&mut self.resources);
+                resources_tree.insert_subtree_at_completed(index, tree);
             }
             AppUpdate::ResourcesComplete => {}
 
@@ -211,28 +212,28 @@ impl AppView {
                 self.resource_states = Some(FlatViewTree::default());
             }
             AppUpdate::ResourceStatesNodeStart { index } => {
-                let tree = Self::ensure_tree(&mut self.resource_states);
-                tree.set_leaf_started(index);
+                let states_tree = Self::ensure_tree(&mut self.resource_states);
+                states_tree.set_leaf_started(index);
             }
-            AppUpdate::ResourceStatesNodeComplete { index, value } => {
-                let tree = Self::ensure_tree(&mut self.resource_states);
-                match value {
-                    Some(subtree) => {
-                        tree.insert_subtree_at_completed(index, subtree);
-                    }
-                    None => {
-                        tree.set_node_none(index);
-                    }
-                }
+            AppUpdate::ResourceStatesNodeComplete { index, node } => {
+                let states_tree = Self::ensure_tree(&mut self.resource_states);
+                states_tree.set_node_view(index, ViewNode::Complete(node));
             }
             AppUpdate::ResourceStatesComplete => {}
 
             AppUpdate::ResourceChangesStart => {
                 self.resource_changes = Some(FlatViewTree::default());
             }
-            AppUpdate::ResourceChangesNode { index, value } => {
-                let tree = Self::ensure_tree(&mut self.resource_changes);
-                tree.insert_subtree_at_completed(index, value);
+            AppUpdate::ResourceChangesNode { index, node } => {
+                let changes_tree = Self::ensure_tree(&mut self.resource_changes);
+                match node {
+                    Some(view) => {
+                        changes_tree.set_node_view(index, ViewNode::Complete(view));
+                    }
+                    None => {
+                        changes_tree.set_node_none(index);
+                    }
+                }
             }
             AppUpdate::ResourceChangesComplete => {}
 
@@ -240,8 +241,8 @@ impl AppView {
                 self.operations_tree = Some(FlatViewTree::default());
             }
             AppUpdate::OperationsNode { index, operations } => {
-                let tree = Self::ensure_tree(&mut self.operations_tree);
-                tree.insert_subtree_at_completed(index, operations);
+                let operations_tree = Self::ensure_tree(&mut self.operations_tree);
+                operations_tree.insert_subtree_at_completed(index, operations);
             }
             AppUpdate::OperationsComplete => {}
 
@@ -252,10 +253,9 @@ impl AppView {
                         epoch
                             .into_iter()
                             .map(|view| OperationView {
-                                // Keep the descriptive label available from the start.
                                 label: ViewNode::Complete(view),
-                                stdout: String::new(),
-                                stderr: String::new(),
+                                stdout: String::default(),
+                                stderr: String::default(),
                                 is_complete: false,
                             })
                             .collect::<Vec<OperationView>>()
