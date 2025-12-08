@@ -5,7 +5,7 @@ use std::fmt::Display;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ViewNode {
     NotStarted,
-    Started(Option<View>),
+    Started,
     Complete(View),
 }
 
@@ -29,6 +29,14 @@ pub enum FlatViewTreeNode {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FlatViewTree {
     nodes: Vec<Option<FlatViewTreeNode>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OperationView {
+    label: ViewNode,
+    stdout: String,
+    stderr: String,
+    is_complete: bool,
 }
 
 pub enum AppUpdate {
@@ -88,7 +96,7 @@ pub struct AppView {
     resource_states: Option<FlatViewTree>,
     resource_changes: Option<FlatViewTree>,
     operations_tree: Option<FlatViewTree>,
-    operations_epochs: Option<FlatViewTree>,
+    operations_epochs: Vec<Vec<OperationView>>,
 }
 
 impl AppView {
