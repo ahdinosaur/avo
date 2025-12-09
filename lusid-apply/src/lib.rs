@@ -1,7 +1,7 @@
 use lusid_apply_stdio::AppUpdate;
 use lusid_causality::{compute_epochs, CausalityTree, EpochError};
 use lusid_ctx::{Context, ContextError};
-use lusid_operation::{partition_by_type, Operation, OperationApplyError};
+use lusid_operation::{Operation, OperationApplyError};
 use lusid_params::{ParamValues, ParamValuesFromTypeError};
 use lusid_plan::{self, map_plan_subitems, plan, render_plan_tree, PlanError, PlanId, PlanNodeId};
 use lusid_resource::{Resource, ResourceState, ResourceStateError};
@@ -10,7 +10,7 @@ use lusid_tree::FlatTree;
 use lusid_view::Render;
 use rimu::SourceId;
 use thiserror::Error;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tracing::{debug, error, info};
 
 pub struct ApplyOptions {
@@ -28,6 +28,9 @@ pub enum ApplyError {
 
     #[error("failed to output JSON: {0}")]
     JsonOutput(#[source] serde_json::Error),
+
+    #[error("failed to read operation stdio: {0}")]
+    ReadOperationStdio(#[source] tokio::io::Error),
 
     #[error("failed to write to stdout: {0}")]
     WriteStdout(#[source] tokio::io::Error),
@@ -196,7 +199,30 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
             })
             .await?;
 
-            operation.apply().await?;
+            let (mut output, stdout, stderr) = operation.apply().await?;
+
+            let mut stdout_lines = BufReader::new(stdout).lines();
+            let mut stderr_lines = BufReader::new(stderr).lines();
+
+            let index = (epoch_index, operation_index);
+            loop {
+                tokio::select! {
+                    line = stdout_lines.next_line() => {
+                        if let Some(line) = line.map_err(ApplyError::ReadOperationStdio)? {
+                            emit(AppUpdate::OperationApplyStdout { index, stdout: line }).await?;
+                        }
+                    }
+                    line = stderr_lines.next_line() => {
+                        if let Some(line) = line.map_err(ApplyError::ReadOperationStdio)? {
+                            emit(AppUpdate::OperationApplyStderr { index, stderr: line }).await?;
+                        }
+                    }
+                    result = &mut output => {
+                        result?; // operation complete
+                        break;
+                    }
+                }
+            }
 
             emit(AppUpdate::OperationApplyComplete {
                 index: (epoch_index, operation_index),
