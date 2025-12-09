@@ -21,13 +21,41 @@ pub trait OperationType {
 
     type ApplyError;
 
-    /// Apply the merged operations of this type for an epoch.
-    async fn apply(operations: Vec<Self::Operation>) -> Result<(), Self::ApplyError>;
+    /// Apply an operation of this type.
+    async fn apply(operation: &Self::Operation) -> Result<(), Self::ApplyError>;
 }
 
 #[derive(Debug, Clone)]
 pub enum Operation {
     Apt(AptOperation),
+}
+
+impl Operation {
+    /// Merge a set of operations by type.
+    pub fn merge(operations: Vec<Operation>) -> Vec<Operation> {
+        let OperationsByType { apt } = partition_by_type(operations);
+
+        let mut result = Vec::new();
+
+        result.extend(Apt::merge(apt).into_iter().map(Operation::Apt));
+
+        result
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum OperationApplyError {
+    #[error("apt operation failed: {0:?}")]
+    Apt(<Apt as OperationType>::ApplyError),
+}
+
+impl Operation {
+    /// Apply a set of operations by type
+    pub async fn apply(&self) -> Result<(), OperationApplyError> {
+        match self {
+            Operation::Apt(op) => Apt::apply(op).await.map_err(OperationApplyError::Apt),
+        }
+    }
 }
 
 impl Display for Operation {
@@ -45,7 +73,7 @@ pub struct OperationsByType {
 }
 
 /// Merge a set of operations by type.
-pub fn partition_by_type(operations: Vec<Operation>) -> OperationsByType {
+fn partition_by_type(operations: Vec<Operation>) -> OperationsByType {
     let mut apt: Vec<AptOperation> = Vec::new();
     for operation in operations {
         match operation {
@@ -53,28 +81,4 @@ pub fn partition_by_type(operations: Vec<Operation>) -> OperationsByType {
         }
     }
     OperationsByType { apt }
-}
-
-/// Merge a set of operations by type.
-pub fn merge_operations(operations: OperationsByType) -> OperationsByType {
-    let OperationsByType { apt } = operations;
-
-    let apt = Apt::merge(apt);
-
-    OperationsByType { apt }
-}
-
-#[derive(Error, Debug)]
-pub enum OperationApplyError {
-    #[error("apt operation failed: {0:?}")]
-    Apt(<Apt as OperationType>::ApplyError),
-}
-
-/// Apply a set of operations by type
-pub async fn apply_operations(operations: OperationsByType) -> Result<(), OperationApplyError> {
-    let OperationsByType { apt } = operations;
-
-    Apt::apply(apt).await.map_err(OperationApplyError::Apt)?;
-
-    Ok(())
 }

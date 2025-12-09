@@ -35,7 +35,6 @@ pub struct Apt;
 #[async_trait]
 impl OperationType for Apt {
     type Operation = AptOperation;
-    type ApplyError = AptApplyError;
 
     fn merge(operations: Vec<Self::Operation>) -> Vec<Self::Operation> {
         let mut update = false;
@@ -66,34 +65,34 @@ impl OperationType for Apt {
         operations
     }
 
-    async fn apply(operations: Vec<Self::Operation>) -> Result<(), Self::ApplyError> {
-        for operation in operations {
-            match operation {
-                AptOperation::Update => {
-                    info!("[apt] update");
-                    let mut cmd = Command::new("apt-get");
-                    cmd.env("DEBIAN_FRONTEND", "noninteractive")
-                        .arg("update")
-                        .stdout(true)
-                        .stderr(true);
-                    cmd.sudo().run().await?;
-                }
-                AptOperation::Install { packages } => {
-                    if packages.is_empty() {
-                        debug!("[apt] nothing to install");
-                        continue;
-                    }
+    type ApplyError = AptApplyError;
 
-                    info!("[apt] install: {}", packages.join(", "));
-                    let mut cmd = Command::new("apt-get");
-                    cmd.env("DEBIAN_FRONTEND", "noninteractive")
-                        .arg("install")
-                        .arg("-y")
-                        .args(packages)
-                        .stdout(true)
-                        .stderr(true);
-                    cmd.sudo().run().await?;
+    async fn apply(operation: &Self::Operation) -> Result<(), Self::ApplyError> {
+        match operation {
+            AptOperation::Update => {
+                info!("[apt] update");
+                let mut cmd = Command::new("apt-get");
+                cmd.env("DEBIAN_FRONTEND", "noninteractive")
+                    .arg("update")
+                    .stdout(true)
+                    .stderr(true);
+                cmd.sudo().run().await?;
+            }
+            AptOperation::Install { packages } => {
+                if packages.is_empty() {
+                    debug!("[apt] nothing to install");
+                    return Ok(());
                 }
+
+                info!("[apt] install: {}", packages.join(", "));
+                let mut cmd = Command::new("apt-get");
+                cmd.env("DEBIAN_FRONTEND", "noninteractive")
+                    .arg("install")
+                    .arg("-y")
+                    .args(packages)
+                    .stdout(true)
+                    .stderr(true);
+                cmd.sudo().run().await?;
             }
         }
         Ok(())

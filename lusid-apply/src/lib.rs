@@ -1,7 +1,7 @@
 use lusid_apply_stdio::AppUpdate;
 use lusid_causality::{compute_epochs, CausalityTree, EpochError};
 use lusid_ctx::{Context, ContextError};
-use lusid_operation::{apply_operations, merge_operations, partition_by_type, OperationApplyError};
+use lusid_operation::{partition_by_type, Operation, OperationApplyError};
 use lusid_params::{ParamValues, ParamValuesFromTypeError};
 use lusid_plan::{self, map_plan_subitems, plan, render_plan_tree, PlanError, PlanId, PlanNodeId};
 use lusid_resource::{Resource, ResourceState, ResourceStateError};
@@ -150,7 +150,7 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
     };
 
     // Get CausalityTree<Operations>
-    emit(AppUpdate::ResourcesStart).await?;
+    emit(AppUpdate::OperationsStart).await?;
     let operations = resource_changes
         .map_tree(
             |node, meta| map_plan_subitems(node, meta, |node| node.operations()),
@@ -166,12 +166,19 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
         "Operations tree: {:?}",
         CausalityTree::from(operations.clone())
     );
-    emit(AppUpdate::ResourcesComplete).await?;
+    emit(AppUpdate::OperationsComplete).await?;
 
     let operation_epochs = compute_epochs(CausalityTree::from(operations))?;
-    let epochs_count = operation_epochs.len();
     debug!("Operation epochs: {operation_epochs:?}");
+    emit(AppUpdate::OperationsApplyStart {
+        operations: operation_epochs
+            .iter()
+            .map(|epoch| epoch.iter().map(Render::render).collect())
+            .collect(),
+    })
+    .await?;
 
+    let epochs_count = operation_epochs.len();
     for (epoch_index, operations) in operation_epochs.into_iter().enumerate() {
         info!(
             epoch = epoch_index,
@@ -180,13 +187,17 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
         );
         debug!("Operations: {operations:?}");
 
-        let operations = partition_by_type(operations);
-        debug!("Operations by type: {operations:?}");
+        let operations = Operation::merge(operations);
+        debug!("Merged operations: {operations:?}");
 
-        let merged = merge_operations(operations);
-        debug!("Merged operations: {merged:?}");
+        for (operation_index, operation) in operations.iter().enumerate() {
+            emit(AppUpdate::OperationApplyStart {
+                index: (epoch_index, operation_index),
+            })
+            .await?;
 
-        apply_operations(merged).await?;
+            operation.apply().await?
+        }
     }
 
     info!("Apply completed");
