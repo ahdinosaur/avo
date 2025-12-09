@@ -1,8 +1,8 @@
+use std::ffi::OsStr;
 use std::fmt::Display;
 use std::path::Path;
 use std::pin::Pin;
 use std::process::{ExitStatus, Stdio};
-use std::{ffi::OsStr, process::Output};
 use tokio::io::AsyncReadExt;
 use tokio::process::{Child, ChildStderr, ChildStdout, Command as BaseCommand};
 
@@ -30,8 +30,14 @@ pub enum CommandError {
     #[error("unable to capture stdout")]
     NoStdout,
 
+    #[error("failed to read stdout")]
+    ReadStdout(#[source] tokio::io::Error),
+
     #[error("unable to capture stderr")]
     NoStderr,
+
+    #[error("failed to read stderr")]
+    ReadStderr(#[source] tokio::io::Error),
 }
 
 #[derive(Debug)]
@@ -214,7 +220,11 @@ impl Command {
             Ok(status)
         } else {
             let mut stderr = String::new();
-            output.stderr.read_to_string(&mut stderr);
+            output
+                .stderr
+                .read_to_string(&mut stderr)
+                .await
+                .map_err(CommandError::ReadStderr)?;
             Err(CommandError::Failure {
                 command: self.to_string(),
                 stderr,
@@ -235,12 +245,20 @@ impl Command {
         let status = output.status.await?;
         if status.success() {
             let mut stdout = Vec::new();
-            output.stdout.read_to_end(&mut stdout);
+            output
+                .stdout
+                .read_to_end(&mut stdout)
+                .await
+                .map_err(CommandError::ReadStdout)?;
             return Ok(stdout_handler(&stdout));
         }
 
         let mut stderr = Vec::new();
-        output.stderr.read_to_end(&mut stderr);
+        output
+            .stderr
+            .read_to_end(&mut stderr)
+            .await
+            .map_err(CommandError::ReadStderr)?;
 
         match stderr_handler(&stderr) {
             Err(error) => Ok(Err(error)),

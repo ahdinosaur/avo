@@ -1,11 +1,14 @@
 use async_trait::async_trait;
+use core::task;
 use lusid_view::Render;
-use std::fmt::{Debug, Display};
-use thiserror::Error;
-use tokio::{
-    io::AsyncRead,
-    process::{Child, ChildStderr, ChildStdout},
+use pin_project::pin_project;
+use std::{
+    fmt::{Debug, Display},
+    pin::{pin, Pin},
+    task::Poll,
 };
+use thiserror::Error;
+use tokio::io::AsyncRead;
 
 pub mod operations;
 
@@ -24,35 +27,14 @@ pub trait OperationType {
     fn merge(operations: Vec<Self::Operation>) -> Vec<Self::Operation>;
 
     type ApplyError;
-    type ApplyOutput: OperationOutput;
+    type ApplyStdout: AsyncRead;
+    type ApplyStderr: AsyncRead;
+    type ApplyOutput: Future<Output = Result<(), Self::ApplyError>>;
 
     /// Apply an operation of this type.
-    async fn apply(operation: &Self::Operation) -> Result<Self::ApplyOutput, Self::ApplyError>;
-}
-
-#[async_trait]
-pub trait OperationOutput {
-    type Stdout: AsyncRead;
-    type Stderr: AsyncRead;
-    type Error: Send;
-
-    async fn split(&mut self) -> Result<(), Self::Error>;
-}
-
-pub struct CommandOutput {
-    child: Child,
-}
-
-#[async_trait]
-impl OperationOutput for CommandOutput {
-    type Stdout = ChildStdout;
-    type Stderr = ChildStderr;
-    type Error = tokio::io::Error;
-
-    async fn wait(&mut self) -> Result<(), Self::Error> {
-        self.child.wait().await.map_err(Self::Error::from)?;
-        Ok(())
-    }
+    async fn apply(
+        operation: &Self::Operation,
+    ) -> Result<(Self::ApplyOutput, Self::ApplyStdout, Self::ApplyStderr), Self::ApplyError>;
 }
 
 #[derive(Debug, Clone)]
@@ -79,11 +61,82 @@ pub enum OperationApplyError {
     Apt(<Apt as OperationType>::ApplyError),
 }
 
+#[pin_project(project = OperationApplyOutputProject)]
+pub enum OperationApplyOutput {
+    Apt(#[pin] <Apt as OperationType>::ApplyOutput),
+}
+
+impl Future for OperationApplyOutput {
+    type Output = Result<(), OperationApplyError>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
+        use OperationApplyOutputProject::*;
+        match self.project() {
+            Apt(fut) => fut.poll(cx).map_err(OperationApplyError::Apt),
+        }
+    }
+}
+
+#[derive(Debug)]
+#[pin_project(project = OperationApplyStdoutProject)]
+pub enum OperationApplyStdout {
+    Apt(#[pin] <Apt as OperationType>::ApplyStdout),
+}
+
+impl AsyncRead for OperationApplyStdout {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        use OperationApplyStdoutProject::*;
+        match self.project() {
+            Apt(stream) => stream.poll_read(cx, buf),
+        }
+    }
+}
+
+#[derive(Debug)]
+#[pin_project(project = OperationApplyStderrProject)]
+pub enum OperationApplyStderr {
+    Apt(#[pin] <Apt as OperationType>::ApplyStderr),
+}
+
+impl AsyncRead for OperationApplyStderr {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        use OperationApplyStderrProject::*;
+        match self.project() {
+            Apt(stream) => stream.poll_read(cx, buf),
+        }
+    }
+}
+
 impl Operation {
     /// Apply a set of operations by type
-    pub async fn apply(&self) -> Result<(), OperationApplyError> {
+    pub async fn apply(
+        &self,
+    ) -> Result<
+        (
+            OperationApplyOutput,
+            OperationApplyStdout,
+            OperationApplyStderr,
+        ),
+        OperationApplyError,
+    > {
         match self {
-            Operation::Apt(op) => Apt::apply(op).await.map_err(OperationApplyError::Apt),
+            Operation::Apt(op) => {
+                let (output, stdout, stderr) =
+                    Apt::apply(op).await.map_err(OperationApplyError::Apt)?;
+                Ok((
+                    OperationApplyOutput::Apt(output),
+                    OperationApplyStdout::Apt(stdout),
+                    OperationApplyStderr::Apt(stderr),
+                ))
+            }
         }
     }
 }

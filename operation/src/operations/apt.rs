@@ -1,10 +1,11 @@
 use async_trait::async_trait;
 use lusid_cmd::{Command, CommandError};
-use std::{collections::BTreeSet, fmt::Display};
+use std::{collections::BTreeSet, fmt::Display, pin::Pin};
 use thiserror::Error;
-use tracing::{debug, info};
+use tokio::process::{ChildStderr, ChildStdout};
+use tracing::info;
 
-use crate::{CommandOutput, OperationType};
+use crate::OperationType;
 
 #[derive(Debug, Clone)]
 pub enum AptOperation {
@@ -65,10 +66,14 @@ impl OperationType for Apt {
         operations
     }
 
-    type ApplyOutput = CommandOutput;
+    type ApplyOutput = Pin<Box<dyn Future<Output = Result<(), Self::ApplyError>> + Send + 'static>>;
     type ApplyError = AptApplyError;
+    type ApplyStdout = ChildStdout;
+    type ApplyStderr = ChildStderr;
 
-    async fn apply(operation: &Self::Operation) -> Result<CommandOutput, Self::ApplyError> {
+    async fn apply(
+        operation: &Self::Operation,
+    ) -> Result<(Self::ApplyOutput, Self::ApplyStdout, Self::ApplyStderr), Self::ApplyError> {
         match operation {
             AptOperation::Update => {
                 info!("[apt] update");
@@ -77,14 +82,17 @@ impl OperationType for Apt {
                     .arg("update")
                     .stdout(true)
                     .stderr(true);
-                cmd.sudo().run().await?;
+                let output = cmd.sudo().output().await?;
+                Ok((
+                    Box::pin(async move {
+                        output.status.await?;
+                        Ok(())
+                    }),
+                    output.stdout,
+                    output.stderr,
+                ))
             }
             AptOperation::Install { packages } => {
-                if packages.is_empty() {
-                    debug!("[apt] nothing to install");
-                    return Ok(());
-                }
-
                 info!("[apt] install: {}", packages.join(", "));
                 let mut cmd = Command::new("apt-get");
                 cmd.env("DEBIAN_FRONTEND", "noninteractive")
@@ -93,9 +101,16 @@ impl OperationType for Apt {
                     .args(packages)
                     .stdout(true)
                     .stderr(true);
-                cmd.sudo().run().await?;
+                let output = cmd.sudo().output().await?;
+                Ok((
+                    Box::pin(async move {
+                        output.status.await?;
+                        Ok(())
+                    }),
+                    output.stdout,
+                    output.stderr,
+                ))
             }
         }
-        Ok(())
     }
 }
