@@ -4,7 +4,7 @@ use std::{collections::BTreeSet, fmt::Display};
 use thiserror::Error;
 use tracing::{debug, info};
 
-use crate::OperationType;
+use crate::{CommandOutput, OperationType};
 
 #[derive(Debug, Clone)]
 pub enum AptOperation {
@@ -65,9 +65,10 @@ impl OperationType for Apt {
         operations
     }
 
+    type ApplyOutput = CommandOutput;
     type ApplyError = AptApplyError;
 
-    async fn apply(operation: &Self::Operation) -> Result<(), Self::ApplyError> {
+    async fn apply(operation: &Self::Operation) -> Result<CommandOutput, Self::ApplyError> {
         match operation {
             AptOperation::Update => {
                 info!("[apt] update");

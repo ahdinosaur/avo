@@ -2018,6 +2018,7 @@ dependencies = [
  "lusid-cmd",
  "lusid-view",
  "thiserror 2.0.17",
+ "tokio",
  "tracing",
 ]
 

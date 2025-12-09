@@ -2,6 +2,10 @@ use async_trait::async_trait;
 use lusid_view::Render;
 use std::fmt::{Debug, Display};
 use thiserror::Error;
+use tokio::{
+    io::AsyncRead,
+    process::{Child, ChildStderr, ChildStdout},
+};
 
 pub mod operations;
 
@@ -20,9 +24,35 @@ pub trait OperationType {
     fn merge(operations: Vec<Self::Operation>) -> Vec<Self::Operation>;
 
     type ApplyError;
+    type ApplyOutput: OperationOutput;
 
     /// Apply an operation of this type.
-    async fn apply(operation: &Self::Operation) -> Result<(), Self::ApplyError>;
+    async fn apply(operation: &Self::Operation) -> Result<Self::ApplyOutput, Self::ApplyError>;
+}
+
+#[async_trait]
+pub trait OperationOutput {
+    type Stdout: AsyncRead;
+    type Stderr: AsyncRead;
+    type Error: Send;
+
+    async fn wait(&mut self) -> Result<(), Self::Error>;
+}
+
+pub struct CommandOutput {
+    child: Child,
+}
+
+#[async_trait]
+impl OperationOutput for CommandOutput {
+    type Stdout = ChildStdout;
+    type Stderr = ChildStderr;
+    type Error = tokio::io::Error;
+
+    async fn wait(&mut self) -> Result<(), Self::Error> {
+        self.child.wait().await.map_err(Self::Error::from)?;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone)]

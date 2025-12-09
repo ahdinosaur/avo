@@ -196,7 +196,12 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
             })
             .await?;
 
-            operation.apply().await?
+            operation.apply().await?;
+
+            emit(AppUpdate::OperationApplyComplete {
+                index: (epoch_index, operation_index),
+            })
+            .await?;
         }
     }
 
