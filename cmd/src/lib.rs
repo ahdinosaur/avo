@@ -1,8 +1,10 @@
 use std::fmt::Display;
 use std::path::Path;
-use std::process::Stdio;
+use std::pin::Pin;
+use std::process::{ExitStatus, Stdio};
 use std::{ffi::OsStr, process::Output};
-use tokio::process::{Child, Command as BaseCommand};
+use tokio::io::AsyncReadExt;
+use tokio::process::{Child, ChildStderr, ChildStdout, Command as BaseCommand};
 
 use thiserror::Error;
 
@@ -24,6 +26,12 @@ pub enum CommandError {
 
     #[error("command failed: {command}\n{stderr}")]
     Failure { command: String, stderr: String },
+
+    #[error("unable to capture stdout")]
+    NoStdout,
+
+    #[error("unable to capture stderr")]
+    NoStderr,
 }
 
 #[derive(Debug)]
@@ -160,8 +168,16 @@ impl Command {
                 error,
             })
     }
+}
 
-    pub async fn output(&mut self) -> Result<Output, CommandError> {
+pub struct CommandOutput {
+    pub stdout: ChildStdout,
+    pub stderr: ChildStderr,
+    pub status: Pin<Box<dyn Future<Output = Result<ExitStatus, CommandError>> + Send + 'static>>,
+}
+
+impl Command {
+    pub async fn output(&mut self) -> Result<CommandOutput, CommandError> {
         // NOTE (mw): we use spawn() because output() doesn't work
         //   with stdout or stderr as we expect.
         //
@@ -171,23 +187,37 @@ impl Command {
         // > the stdout/stderr handles to be pipes, even if they have been previously configured.
         // > If this is not desired then the `spawn` method should be used in combination with the
         // > `wait_with_output` method on child.
-        self.spawn()?
-            .wait_with_output()
-            .await
-            .map_err(|error| CommandError::Output {
-                command: self.to_string(),
+        let mut child = self.spawn()?;
+
+        let stdout = child.stdout.take().ok_or(CommandError::NoStdout)?;
+        let stderr = child.stderr.take().ok_or(CommandError::NoStderr)?;
+
+        let command_str = self.to_string();
+        let status = Box::pin(async move {
+            child.wait().await.map_err(|error| CommandError::Output {
+                command: command_str,
                 error,
             })
+        });
+
+        Ok(CommandOutput {
+            stdout,
+            stderr,
+            status,
+        })
     }
 
-    pub async fn run(&mut self) -> Result<Output, CommandError> {
-        let output = self.output().await?;
-        if output.status.success() {
-            Ok(output)
+    pub async fn run(&mut self) -> Result<ExitStatus, CommandError> {
+        let mut output = self.output().await?;
+        let status = output.status.await?;
+        if status.success() {
+            Ok(status)
         } else {
+            let mut stderr = String::new();
+            output.stderr.read_to_string(&mut stderr);
             Err(CommandError::Failure {
                 command: self.to_string(),
-                stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+                stderr,
             })
         }
     }
@@ -201,20 +231,25 @@ impl Command {
         ErrHandler: Fn(&Vec<u8>) -> Result<Option<HandlerValue>, HandlerError>,
         OutHandler: Fn(&Vec<u8>) -> Result<HandlerValue, HandlerError>,
     {
-        self.output().await.and_then(|output| {
-            if output.status.success() {
-                return Ok(stdout_handler(&output.stdout));
-            }
+        let mut output = self.output().await?;
+        let status = output.status.await?;
+        if status.success() {
+            let mut stdout = Vec::new();
+            output.stdout.read_to_end(&mut stdout);
+            return Ok(stdout_handler(&stdout));
+        }
 
-            match stderr_handler(&output.stderr) {
-                Err(error) => Ok(Err(error)),
-                Ok(Some(value)) => Ok(Ok(value)),
-                Ok(None) => Err(CommandError::Failure {
-                    command: self.to_string(),
-                    stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-                }),
-            }
-        })
+        let mut stderr = Vec::new();
+        output.stderr.read_to_end(&mut stderr);
+
+        match stderr_handler(&stderr) {
+            Err(error) => Ok(Err(error)),
+            Ok(Some(value)) => Ok(Ok(value)),
+            Ok(None) => Err(CommandError::Failure {
+                command: self.to_string(),
+                stderr: String::from_utf8_lossy(&stderr).to_string(),
+            }),
+        }
     }
 }
 

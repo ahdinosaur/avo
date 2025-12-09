@@ -36,7 +36,7 @@ pub trait OperationOutput {
     type Stderr: AsyncRead;
     type Error: Send;
 
-    async fn wait(&mut self) -> Result<(), Self::Error>;
+    async fn split(&mut self) -> Result<(), Self::Error>;
 }
 
 pub struct CommandOutput {

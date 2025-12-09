@@ -1968,6 +1968,7 @@ dependencies = [
 name = "lusid-cmd"
 version = "0.1.0"
 dependencies = [
+ "async-promise",
  "thiserror 2.0.17",
  "tokio",
 ]
