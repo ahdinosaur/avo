@@ -201,6 +201,7 @@ pub struct OperationView {
     pub is_complete: bool,
 }
 
+// TODO: change this so it's an enum for each "phase", adding new data each time.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AppView {
     pub resource_params: Option<FlatViewTree>,
