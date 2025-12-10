@@ -12,16 +12,14 @@ pub enum ViewTree {
 
 impl Display for ViewTree {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        TermTree::from(self).fmt(f)
+        TermTree::<View>::from(self.clone()).fmt(f)
     }
 }
 
 impl From<ViewTree> for TermTree<View> {
     fn from(value: ViewTree) -> Self {
         match value {
-            ViewTree::Branch { view, children } => {
-                TermTree::new(view).with_leaves(children.into_iter().map(TermTree::from))
-            }
+            ViewTree::Branch { view, children } => TermTree::new(view).with_leaves(children),
             ViewTree::Leaf { view } => TermTree::new(view),
         }
     }

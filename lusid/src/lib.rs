@@ -269,7 +269,6 @@ async fn cmd_dev_apply(config: Config, machine_id: String) -> Result<(), AppErro
                 };
                 let update: AppUpdate =
                     serde_json::from_str(&line).map_err(AppError::ParseApplyStdoutJson)?;
-                println!("update: {update:?}");
                 view.update(update.clone());
 
                 match update {
@@ -278,13 +277,13 @@ async fn cmd_dev_apply(config: Config, machine_id: String) -> Result<(), AppErro
                             "resource params: {}",
                             view.resource_params
                                 .clone()
-                                .expect("resource params to exist")
+                                .expect("expected resource params to exist")
                         );
                     }
                     AppUpdate::ResourcesComplete => {
                         println!(
                             "resources: {}",
-                            view.resources.clone().expect("resources to exist")
+                            view.resources.clone().expect("expected resources to exist")
                         );
                     }
                     AppUpdate::ResourceStatesComplete => {
@@ -292,7 +291,7 @@ async fn cmd_dev_apply(config: Config, machine_id: String) -> Result<(), AppErro
                             "resource states: {}",
                             view.resource_states
                                 .clone()
-                                .expect("resource states to exist")
+                                .expect("expected resource states to exist")
                         );
                     }
                     AppUpdate::ResourceChangesComplete { has_changes } => {
@@ -300,7 +299,7 @@ async fn cmd_dev_apply(config: Config, machine_id: String) -> Result<(), AppErro
                             "resource changes: {}",
                             view.resource_changes
                                 .clone()
-                                .expect("resource changes to exist")
+                                .expect("expected resource changes to exist")
                         );
                         if !has_changes {
                             println!("no changes!")
@@ -311,7 +310,7 @@ async fn cmd_dev_apply(config: Config, machine_id: String) -> Result<(), AppErro
                             "operations: {}",
                             view.operations_tree
                                 .clone()
-                                .expect("operations tree to exist")
+                                .expect("expected operations tree to exist")
                         );
                     }
                     AppUpdate::OperationsApplyStart { operations: epochs } => {
@@ -327,13 +326,13 @@ async fn cmd_dev_apply(config: Config, machine_id: String) -> Result<(), AppErro
                         let epochs = view
                             .operations_epochs
                             .clone()
-                            .expect("operation by epochs to exist");
-                        let epoch = epochs
-                            .get(index.0)
-                            .unwrap_or_else(|| panic!("operation epoch {} to exist", index.0));
-                        let operation = epoch
-                            .get(index.1)
-                            .unwrap_or_else(|| panic!("operation {} in epoch to exist", index.1));
+                            .expect("expected operation by epochs to exist");
+                        let epoch = epochs.get(index.0).unwrap_or_else(|| {
+                            panic!("expected operation epoch {} to exist", index.0)
+                        });
+                        let operation = epoch.get(index.1).unwrap_or_else(|| {
+                            panic!("expected operation {} in epoch to exist", index.1)
+                        });
                         println!(
                             "starting operation ({}, {}): {}",
                             index.0, index.1, operation.label

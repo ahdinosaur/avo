@@ -26,13 +26,8 @@ impl Render for ViewNode {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FlatViewTreeNode {
-    Branch {
-        view: ViewNode,
-        children: Vec<usize>,
-    },
-    Leaf {
-        view: ViewNode,
-    },
+    Branch { view: View, children: Vec<usize> },
+    Leaf { view: ViewNode },
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -41,6 +36,15 @@ pub struct FlatViewTree {
 }
 
 impl FlatViewTree {
+    pub fn from_nodes<I>(nodes: I) -> Self
+    where
+        I: Iterator<Item = Option<FlatViewTreeNode>>,
+    {
+        FlatViewTree {
+            nodes: nodes.collect(),
+        }
+    }
+
     pub fn from_view_tree_completed(view_tree: ViewTree) -> Self {
         let mut flat_tree = FlatViewTree::default();
         flat_tree.insert_subtree_at_completed(0, view_tree);
@@ -76,7 +80,7 @@ impl FlatViewTree {
                     flat_tree.set_node(
                         index,
                         FlatViewTreeNode::Branch {
-                            view: ViewNode::Complete(view),
+                            view,
                             children: child_indices,
                         },
                     );
@@ -104,14 +108,14 @@ impl FlatViewTree {
         self.nodes[index] = None;
     }
 
-    pub fn set_node_view(&mut self, index: usize, new_view: ViewNode) {
+    pub fn set_leaf_view(&mut self, index: usize, new_view: ViewNode) {
         self.ensure_index_exists(index);
         match self.nodes[index].as_mut() {
             Some(FlatViewTreeNode::Leaf { view }) => {
                 *view = new_view;
             }
-            Some(FlatViewTreeNode::Branch { view, .. }) => {
-                *view = new_view;
+            Some(FlatViewTreeNode::Branch { .. }) => {
+                panic!("expected node to be leaf, not branch")
             }
             None => {
                 self.nodes[index] = Some(FlatViewTreeNode::Leaf { view: new_view });
@@ -209,9 +213,31 @@ pub struct AppView {
 }
 
 impl AppView {
-    fn ensure_tree(option: &mut Option<FlatViewTree>) -> &mut FlatViewTree {
+    fn ensure_tree<'a>(
+        option: &'a mut Option<FlatViewTree>,
+        template: &Option<FlatViewTree>,
+    ) -> &'a mut FlatViewTree {
         if option.is_none() {
-            *option = Some(FlatViewTree::default());
+            match template {
+                Some(template) => {
+                    *option = Some(FlatViewTree::from_nodes(
+                        template.clone().nodes.into_iter().map(|node| match node {
+                            None => None,
+                            Some(FlatViewTreeNode::Leaf { view: _ }) => {
+                                Some(FlatViewTreeNode::Leaf {
+                                    view: ViewNode::NotStarted,
+                                })
+                            }
+                            Some(FlatViewTreeNode::Branch { view, children }) => {
+                                Some(FlatViewTreeNode::Branch { view, children })
+                            }
+                        }),
+                    ))
+                }
+                None => {
+                    *option = Some(FlatViewTree::default());
+                }
+            }
         }
         option.as_mut().unwrap()
     }
@@ -227,7 +253,7 @@ impl AppView {
                 self.resources = Some(FlatViewTree::default());
             }
             AppUpdate::ResourcesNode { index, tree } => {
-                let resources_tree = Self::ensure_tree(&mut self.resources);
+                let resources_tree = Self::ensure_tree(&mut self.resources, &self.resource_params);
                 resources_tree.insert_subtree_at_completed(index, tree);
             }
             AppUpdate::ResourcesComplete => {}
@@ -236,12 +262,12 @@ impl AppView {
                 self.resource_states = Some(FlatViewTree::default());
             }
             AppUpdate::ResourceStatesNodeStart { index } => {
-                let states_tree = Self::ensure_tree(&mut self.resource_states);
+                let states_tree = Self::ensure_tree(&mut self.resource_states, &self.resources);
                 states_tree.set_leaf_started(index);
             }
             AppUpdate::ResourceStatesNodeComplete { index, node } => {
-                let states_tree = Self::ensure_tree(&mut self.resource_states);
-                states_tree.set_node_view(index, ViewNode::Complete(node));
+                let states_tree = Self::ensure_tree(&mut self.resource_states, &self.resources);
+                states_tree.set_leaf_view(index, ViewNode::Complete(node));
             }
             AppUpdate::ResourceStatesComplete => {}
 
@@ -249,10 +275,11 @@ impl AppView {
                 self.resource_changes = Some(FlatViewTree::default());
             }
             AppUpdate::ResourceChangesNode { index, node } => {
-                let changes_tree = Self::ensure_tree(&mut self.resource_changes);
+                let changes_tree =
+                    Self::ensure_tree(&mut self.resource_changes, &self.resource_states);
                 match node {
                     Some(view) => {
-                        changes_tree.set_node_view(index, ViewNode::Complete(view));
+                        changes_tree.set_leaf_view(index, ViewNode::Complete(view));
                     }
                     None => {
                         changes_tree.set_node_none(index);
@@ -267,7 +294,8 @@ impl AppView {
                 self.operations_tree = Some(FlatViewTree::default());
             }
             AppUpdate::OperationsNode { index, operations } => {
-                let operations_tree = Self::ensure_tree(&mut self.operations_tree);
+                let operations_tree =
+                    Self::ensure_tree(&mut self.operations_tree, &self.resource_states);
                 operations_tree.insert_subtree_at_completed(index, operations);
             }
             AppUpdate::OperationsComplete => {}
@@ -350,7 +378,7 @@ impl From<FlatViewTree> for ViewTree {
                 },
             })
         }
-        build(&value, 0).expect("root node to exist")
+        build(&value, 0).expect("expected root node to exist")
     }
 }
 
