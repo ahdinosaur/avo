@@ -1,4 +1,4 @@
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::fmt::Display;
 use std::path::Path;
 use std::pin::Pin;
@@ -138,7 +138,11 @@ impl Command {
 
         for env in cmd.get_envs() {
             if let (key, Some(value)) = env {
-                privileged_cmd.env(key, value);
+                let mut env_arg = OsString::new();
+                env_arg.push(key);
+                env_arg.push("=");
+                env_arg.push(value);
+                privileged_cmd.arg(env_arg);
             }
         }
 

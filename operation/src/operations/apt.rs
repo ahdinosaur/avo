@@ -78,10 +78,7 @@ impl OperationType for Apt {
             AptOperation::Update => {
                 info!("[apt] update");
                 let mut cmd = Command::new("apt-get");
-                cmd.env("DEBIAN_FRONTEND", "noninteractive")
-                    .arg("update")
-                    .stdout(true)
-                    .stderr(true);
+                cmd.env("DEBIAN_FRONTEND", "noninteractive").arg("update");
                 let output = cmd.sudo().output().await?;
                 Ok((
                     Box::pin(async move {
@@ -98,9 +95,7 @@ impl OperationType for Apt {
                 cmd.env("DEBIAN_FRONTEND", "noninteractive")
                     .arg("install")
                     .arg("-y")
-                    .args(packages)
-                    .stdout(true)
-                    .stderr(true);
+                    .args(packages);
                 let output = cmd.sudo().output().await?;
                 Ok((
                     Box::pin(async move {
