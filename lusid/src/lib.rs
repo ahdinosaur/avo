@@ -3,6 +3,7 @@ mod config;
 use std::{env, net::Ipv4Addr, path::PathBuf, sync::Arc, time::Duration};
 
 use clap::{Parser, Subcommand};
+use lusid_apply_stdio::AppUpdate;
 use lusid_cmd::{Command, CommandError};
 use lusid_ctx::Context;
 use lusid_ssh::{Ssh, SshConnectOptions, SshError, SshVolume};
@@ -122,17 +123,14 @@ pub enum AppError {
     #[error("failed to convert params toml to json: {0}")]
     ParamsTomlToJson(#[from] serde_json::Error),
 
-    #[error("failed to read stdout from command")]
-    ReadCommandStdout(#[source] tokio::io::Error),
+    #[error("failed to read stdout from apply")]
+    ReadApplyStdout(#[source] tokio::io::Error),
 
-    #[error("expected stdout line from command")]
-    ExpectedCommandStdoutLine,
+    #[error("failed to parse stdout from lusid-apply as json")]
+    ParseApplyStdoutJson(#[source] serde_json::Error),
 
-    #[error("failed to parse stdout from command as json")]
-    ParseCommandStdoutJson(#[source] serde_json::Error),
-
-    #[error("failed to forward stderr from command")]
-    ForwardCommandStderr(#[source] tokio::io::Error),
+    #[error("failed to forward stderr from lusid-apply")]
+    ForwardApplyStderr(#[source] tokio::io::Error),
 
     #[error("failed to join stdio streams")]
     JoinStdio(#[source] tokio::io::Error),
@@ -268,27 +266,14 @@ async fn cmd_dev_apply(config: Config, machine_id: String) -> Result<(), AppErro
             let reader = tokio::io::BufReader::new(&mut handle.stdout);
             let mut lines = reader.lines();
 
-            let Some(line) = lines
-                .next_line()
-                .await
-                .map_err(AppError::ReadCommandStdout)?
-            else {
-                return Err(AppError::ExpectedCommandStdoutLine);
-            };
-            let tree: View =
-                serde_json::from_str(&line).map_err(AppError::ParseCommandStdoutJson)?;
-            println!("{tree}");
-
-            let Some(line) = lines
-                .next_line()
-                .await
-                .map_err(AppError::ReadCommandStdout)?
-            else {
-                return Err(AppError::ExpectedCommandStdoutLine);
-            };
-            let tree: View =
-                serde_json::from_str(&line).map_err(AppError::ParseCommandStdoutJson)?;
-            println!("{tree}");
+            loop {
+                let Some(line) = lines.next_line().await.map_err(AppError::ReadApplyStdout)? else {
+                    break;
+                };
+                let update: AppUpdate =
+                    serde_json::from_str(&line).map_err(AppError::ParseApplyStdoutJson)?;
+                println!("{update:?}");
+            }
 
             Ok(())
         };
@@ -296,7 +281,7 @@ async fn cmd_dev_apply(config: Config, machine_id: String) -> Result<(), AppErro
             tokio::io::copy(&mut handle.stderr, &mut tokio::io::stderr())
                 .await
                 .map(|_| ()) // drop the number of bytes written
-                .map_err(AppError::ForwardCommandStderr)
+                .map_err(AppError::ForwardApplyStderr)
         };
 
         tokio::try_join!(stdout_fut, stderr_fut)?;
