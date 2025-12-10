@@ -197,35 +197,54 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
         debug!("Merged operations: {operations:?}");
 
         for (operation_index, operation) in operations.iter().enumerate() {
-            emit(AppUpdate::OperationApplyStart {
-                index: (epoch_index, operation_index),
-            })
-            .await?;
-
-            let (mut output, stdout, stderr) = operation.apply().await?;
-
-            let mut stdout_lines = BufReader::new(stdout).lines();
-            let mut stderr_lines = BufReader::new(stderr).lines();
-
             let index = (epoch_index, operation_index);
-            loop {
-                tokio::select! {
-                    line = stdout_lines.next_line() => {
-                        if let Some(line) = line.map_err(ApplyError::ReadOperationStdio)? {
-                            emit(AppUpdate::OperationApplyStdout { index, stdout: line }).await?;
-                        }
+
+            emit(AppUpdate::OperationApplyStart { index }).await?;
+
+            let (output, stdout, stderr) = operation.apply().await?;
+
+            let output_task = async {
+                output.await?;
+                Ok::<(), ApplyError>(())
+            };
+
+            let stdout_task = {
+                let mut lines = BufReader::new(stdout).lines();
+                async move {
+                    while let Some(line) = lines
+                        .next_line()
+                        .await
+                        .map_err(ApplyError::ReadOperationStdio)?
+                    {
+                        emit(AppUpdate::OperationApplyStdout {
+                            index,
+                            stdout: line,
+                        })
+                        .await?;
                     }
-                    line = stderr_lines.next_line() => {
-                        if let Some(line) = line.map_err(ApplyError::ReadOperationStdio)? {
-                            emit(AppUpdate::OperationApplyStderr { index, stderr: line }).await?;
-                        }
-                    }
-                    result = &mut output => {
-                        result?; // operation complete
-                        break;
-                    }
+                    Ok::<(), ApplyError>(())
                 }
-            }
+            };
+
+            let stderr_task = {
+                let mut lines = BufReader::new(stderr).lines();
+                async move {
+                    while let Some(line) = lines
+                        .next_line()
+                        .await
+                        .map_err(ApplyError::ReadOperationStdio)?
+                    {
+                        emit(AppUpdate::OperationApplyStderr {
+                            index,
+                            stderr: line,
+                        })
+                        .await?;
+                    }
+                    Ok::<(), ApplyError>(())
+                }
+            };
+
+            tokio::try_join!(output_task, stdout_task, stderr_task)?;
 
             emit(AppUpdate::OperationApplyComplete {
                 index: (epoch_index, operation_index),

@@ -131,9 +131,6 @@ pub enum AppError {
     #[error("failed to forward stderr from lusid-apply")]
     ForwardApplyStderr(#[source] tokio::io::Error),
 
-    #[error("failed to join stdio streams")]
-    JoinStdio(#[source] tokio::io::Error),
-
     #[error(transparent)]
     Which(#[from] which::Error),
 }
