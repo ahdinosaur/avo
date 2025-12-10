@@ -213,33 +213,19 @@ pub struct AppView {
 }
 
 impl AppView {
-    fn ensure_tree<'a>(
-        option: &'a mut Option<FlatViewTree>,
-        template: &Option<FlatViewTree>,
-    ) -> &'a mut FlatViewTree {
-        if option.is_none() {
-            match template {
-                Some(template) => {
-                    *option = Some(FlatViewTree::from_nodes(
-                        template.clone().nodes.into_iter().map(|node| match node {
-                            None => None,
-                            Some(FlatViewTreeNode::Leaf { view: _ }) => {
-                                Some(FlatViewTreeNode::Leaf {
-                                    view: ViewNode::NotStarted,
-                                })
-                            }
-                            Some(FlatViewTreeNode::Branch { view, children }) => {
-                                Some(FlatViewTreeNode::Branch { view, children })
-                            }
-                        }),
-                    ))
-                }
-                None => {
-                    *option = Some(FlatViewTree::default());
-                }
+    fn template_tree(template: &Option<FlatViewTree>) -> FlatViewTree {
+        let Some(template) = template else {
+            panic!("template is None")
+        };
+        FlatViewTree::from_nodes(template.clone().nodes.into_iter().map(|node| match node {
+            None => None,
+            Some(FlatViewTreeNode::Leaf { view: _ }) => Some(FlatViewTreeNode::Leaf {
+                view: ViewNode::NotStarted,
+            }),
+            Some(FlatViewTreeNode::Branch { view, children }) => {
+                Some(FlatViewTreeNode::Branch { view, children })
             }
-        }
-        option.as_mut().unwrap()
+        }))
     }
 
     pub fn update(&mut self, update: AppUpdate) {
@@ -250,53 +236,59 @@ impl AppView {
             }
 
             AppUpdate::ResourcesStart => {
-                self.resources = Some(FlatViewTree::default());
+                self.resources = Some(Self::template_tree(&self.resource_params));
             }
             AppUpdate::ResourcesNode { index, tree } => {
-                let resources_tree = Self::ensure_tree(&mut self.resources, &self.resource_params);
-                resources_tree.insert_subtree_at_completed(index, tree);
+                self.resources
+                    .as_mut()
+                    .unwrap()
+                    .insert_subtree_at_completed(index, tree);
             }
             AppUpdate::ResourcesComplete => {}
 
             AppUpdate::ResourceStatesStart => {
-                self.resource_states = Some(FlatViewTree::default());
+                self.resource_states = Some(Self::template_tree(&self.resources));
             }
             AppUpdate::ResourceStatesNodeStart { index } => {
-                let states_tree = Self::ensure_tree(&mut self.resource_states, &self.resources);
-                states_tree.set_leaf_started(index);
+                self.resource_states
+                    .as_mut()
+                    .unwrap()
+                    .set_leaf_started(index);
             }
             AppUpdate::ResourceStatesNodeComplete { index, node } => {
-                let states_tree = Self::ensure_tree(&mut self.resource_states, &self.resources);
-                states_tree.set_leaf_view(index, ViewNode::Complete(node));
+                self.resource_states
+                    .as_mut()
+                    .unwrap()
+                    .set_leaf_view(index, ViewNode::Complete(node));
             }
             AppUpdate::ResourceStatesComplete => {}
 
             AppUpdate::ResourceChangesStart => {
-                self.resource_changes = Some(FlatViewTree::default());
+                self.resource_changes = Some(Self::template_tree(&self.resource_states));
             }
-            AppUpdate::ResourceChangesNode { index, node } => {
-                let changes_tree =
-                    Self::ensure_tree(&mut self.resource_changes, &self.resource_states);
-                match node {
-                    Some(view) => {
-                        changes_tree.set_leaf_view(index, ViewNode::Complete(view));
-                    }
-                    None => {
-                        changes_tree.set_node_none(index);
-                    }
+            AppUpdate::ResourceChangesNode { index, node } => match node {
+                Some(view) => {
+                    self.resource_changes
+                        .as_mut()
+                        .unwrap()
+                        .set_leaf_view(index, ViewNode::Complete(view));
                 }
-            }
+                None => {
+                    self.resource_changes.as_mut().unwrap().set_node_none(index);
+                }
+            },
             AppUpdate::ResourceChangesComplete { has_changes } => {
                 self.has_changes = Some(has_changes);
             }
 
             AppUpdate::OperationsStart => {
-                self.operations_tree = Some(FlatViewTree::default());
+                self.operations_tree = Some(Self::template_tree(&self.resource_changes));
             }
             AppUpdate::OperationsNode { index, operations } => {
-                let operations_tree =
-                    Self::ensure_tree(&mut self.operations_tree, &self.resource_states);
-                operations_tree.insert_subtree_at_completed(index, operations);
+                self.operations_tree
+                    .as_mut()
+                    .unwrap()
+                    .insert_subtree_at_completed(index, operations);
             }
             AppUpdate::OperationsComplete => {}
 
