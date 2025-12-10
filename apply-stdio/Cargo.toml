@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 lusid-view = { path = "../view", version = "0.1" }
 serde.workspace = true
+thiserror.workspace = true

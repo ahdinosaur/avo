@@ -1,3 +1,19 @@
+//! Generic nested and flat tree representations with mapping helpers.
+//!
+//! Assumptions for FlatTree:
+//! - Root index is always 0.
+//! - Nodes are stored in a Vec<Option<Node>>; missing children (None) or
+//!   out-of-bounds indices are tolerated by lenient reconstruction.
+//! - When replacing a subtree at an index, existing descendants are removed
+//!   (recursively set to None), and new children are appended at the end.
+//! - Depth-first traversal uses post-order (children before parent).
+//!
+//! Conversions:
+//! - From<Tree> to FlatTree always creates the root at index 0.
+//! - From<FlatTree> to Tree is lenient: missing children are skipped; if the
+//!   root is missing, returns an empty Branch with default Meta.
+
+use std::future::Future;
 use thiserror::Error;
 
 #[derive(Debug, Clone)]
@@ -77,25 +93,28 @@ pub enum FlatTreeNode<Node, Meta> {
 #[derive(Debug, Clone)]
 pub struct FlatTree<Node, Meta> {
     nodes: Vec<Option<FlatTreeNode<Node, Meta>>>,
-    root_index: usize,
 }
 
 #[derive(Debug, Error)]
 pub enum FlatTreeError {
     #[error("node at index {0} is None")]
     NodeMissing(usize),
-
     #[error("index {0} is out of bounds")]
     IndexOutOfBounds(usize),
 }
 
-impl<Node, Meta> FlatTree<Node, Meta> {
-    pub fn root_index(&self) -> usize {
-        self.root_index
+impl<Node, Meta> FlatTree<Node, Meta>
+where
+    Node: Clone,
+    Meta: Clone,
+{
+    /// Root index is always 0.
+    pub const fn root_index() -> usize {
+        0
     }
 
     pub fn root(&self) -> Option<&FlatTreeNode<Node, Meta>> {
-        self.nodes.get(self.root_index)?.as_ref()
+        self.nodes.first()?.as_ref()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -138,7 +157,7 @@ impl<Node, Meta> FlatTree<Node, Meta> {
         }
 
         let mut stack: Vec<(usize, bool)> = Vec::new();
-        stack.push((self.root_index, false));
+        stack.push((0, false));
 
         while let Some((index, visited)) = stack.pop() {
             let node = match self.nodes.get(index) {
@@ -194,7 +213,6 @@ where
         WriteUpdateFut: Future<Output = Result<(), Error>>,
     {
         let mut next_nodes = vec![None; self.nodes.len()];
-
         for (index, node) in self.nodes.into_iter().enumerate() {
             match node {
                 None => {}
@@ -211,11 +229,7 @@ where
                 }
             }
         }
-
-        Ok(FlatTree {
-            nodes: next_nodes,
-            root_index: self.root_index,
-        })
+        Ok(FlatTree { nodes: next_nodes })
     }
 
     pub async fn map_option<NextNode, Error, MapFn, WriteUpdateFn, WriteUpdateFut>(
@@ -230,7 +244,6 @@ where
         WriteUpdateFut: Future<Output = Result<(), Error>>,
     {
         let mut next_nodes = vec![None; self.nodes.len()];
-
         for (index, node) in self.nodes.into_iter().enumerate() {
             match node {
                 None => {}
@@ -247,14 +260,9 @@ where
             }
         }
 
-        // Prune empty branches: any Branch that ends up with no present
-        // children becomes None. We process in depth-first post-order so
-        // children are considered before parents.
-        let mut result = FlatTree {
-            nodes: next_nodes,
-            root_index: self.root_index,
-        };
+        let mut result = FlatTree { nodes: next_nodes };
 
+        // Drop empty branches (post-order)
         for index in result.depth_first_search() {
             let is_empty_branch = match result.nodes.get(index).and_then(|node| node.as_ref()) {
                 Some(FlatTreeNode::Branch { children, .. }) => !children.iter().any(|&child| {
@@ -267,12 +275,10 @@ where
                 }),
                 _ => false,
             };
-
             if is_empty_branch {
                 result.nodes[index] = None;
             }
         }
-
         Ok(result)
     }
 
@@ -301,10 +307,7 @@ where
                 }
             }
         }
-        Ok(FlatTree {
-            nodes: next_nodes,
-            root_index: self.root_index,
-        })
+        Ok(FlatTree { nodes: next_nodes })
     }
 
     pub async fn map_result_async<
@@ -332,7 +335,6 @@ where
         WriteUpdateFut: Future<Output = Result<(), Error>>,
     {
         let mut next_nodes = vec![None; self.nodes.len()];
-
         for (index, node) in self.nodes.into_iter().enumerate() {
             match node {
                 None => {}
@@ -350,11 +352,7 @@ where
                 }
             }
         }
-
-        Ok(FlatTree {
-            nodes: next_nodes,
-            root_index: self.root_index,
-        })
+        Ok(FlatTree { nodes: next_nodes })
     }
 
     pub async fn map_tree_result_async<
@@ -380,7 +378,6 @@ where
         WriteUpdateFn: Fn(usize, Tree<NextNode, Meta>) -> WriteFut,
     {
         let mut next_nodes = vec![None; self.nodes.len()];
-
         for (index, node) in self.nodes.into_iter().enumerate() {
             match node {
                 None => {}
@@ -395,11 +392,7 @@ where
                 }
             }
         }
-
-        Ok(FlatTree {
-            nodes: next_nodes,
-            root_index: self.root_index,
-        })
+        Ok(FlatTree { nodes: next_nodes })
     }
 }
 
@@ -436,10 +429,10 @@ fn replace_tree_nodes<Node, Meta>(
     nodes: &mut Vec<Option<FlatTreeNode<Node, Meta>>>,
     tree: Option<Tree<Node, Meta>>,
     root_index: usize,
-) {
-    // NOTE(mw): This removes all children. In the future, maybe we'd want to keep children
-    //   that exist in the new tree, however that's not what we need now. Also, how would we
-    //   check equality?
+) where
+    Node: Clone,
+    Meta: Clone,
+{
     if let Some(Some(FlatTreeNode::Branch { meta: _, children })) = nodes.get(root_index) {
         for child in children.clone() {
             replace_tree_nodes(nodes, None, child);
@@ -448,9 +441,17 @@ fn replace_tree_nodes<Node, Meta>(
 
     match tree {
         None => {
-            nodes[root_index] = None;
+            if root_index < nodes.len() {
+                nodes[root_index] = None;
+            } else {
+                nodes.resize(root_index + 1, None);
+                nodes[root_index] = None;
+            }
         }
         Some(Tree::Leaf { node, meta }) => {
+            if root_index >= nodes.len() {
+                nodes.resize(root_index + 1, None);
+            }
             nodes[root_index] = Some(FlatTreeNode::Leaf { node, meta });
         }
         Some(Tree::Branch { children, meta }) => {
@@ -458,6 +459,9 @@ fn replace_tree_nodes<Node, Meta>(
             for child in children {
                 let child_index = append_tree_nodes(nodes, child);
                 child_indices.push(child_index);
+            }
+            if root_index >= nodes.len() {
+                nodes.resize(root_index + 1, None);
             }
             nodes[root_index] = Some(FlatTreeNode::Branch {
                 children: child_indices,
@@ -470,12 +474,13 @@ fn replace_tree_nodes<Node, Meta>(
 impl<Node, Meta> From<Tree<Node, Meta>> for FlatTree<Node, Meta> {
     fn from(tree: Tree<Node, Meta>) -> Self {
         let mut nodes = Vec::new();
-        let root_index = append_tree_nodes(&mut nodes, tree);
-        FlatTree { nodes, root_index }
+        // Root will be at index 0 after the first append.
+        let _ = append_tree_nodes(&mut nodes, tree);
+        FlatTree { nodes }
     }
 }
 
-/// From<FlatTree> -> Tree: reconstruct a nested tree. This is lenient:
+/// Reconstruct a nested tree (lenient):
 /// - Missing or invalid children are skipped.
 /// - If the root is missing, returns an empty Branch with default meta.
 impl<Node, Meta> From<FlatTree<Node, Meta>> for Tree<Node, Meta>
@@ -494,7 +499,6 @@ where
                 return None;
             }
             let node = nodes[index].take()?;
-
             match node {
                 FlatTreeNode::Leaf { node, meta } => Some(Tree::Leaf { node, meta }),
                 FlatTreeNode::Branch { children, meta } => {
@@ -512,7 +516,7 @@ where
             }
         }
 
-        build(flat.root_index, &mut flat.nodes).unwrap_or_else(|| Tree::Branch {
+        build(0, &mut flat.nodes).unwrap_or_else(|| Tree::Branch {
             children: Vec::new(),
             meta: Meta::default(),
         })

@@ -3,7 +3,7 @@ mod config;
 use std::{env, net::Ipv4Addr, path::PathBuf, sync::Arc, time::Duration};
 
 use clap::{Parser, Subcommand};
-use lusid_apply_stdio::{AppUpdate, AppView};
+use lusid_apply_stdio::{AppUpdate, AppView, AppViewError};
 use lusid_cmd::{Command, CommandError};
 use lusid_ctx::Context;
 use lusid_ssh::{Ssh, SshConnectOptions, SshError, SshVolume};
@@ -119,6 +119,9 @@ pub enum AppError {
     #[error(transparent)]
     Ssh(#[from] SshError),
 
+    #[error(transparent)]
+    View(#[from] AppViewError),
+
     #[error("failed to convert params toml to json: {0}")]
     ParamsTomlToJson(#[from] serde_json::Error),
 
@@ -133,6 +136,9 @@ pub enum AppError {
 
     #[error(transparent)]
     Which(#[from] which::Error),
+
+    #[error("unexpected view state")]
+    UnexpectedViewState,
 }
 
 pub async fn get_config(cli: &Cli) -> Result<Config, AppError> {
@@ -269,49 +275,59 @@ async fn cmd_dev_apply(config: Config, machine_id: String) -> Result<(), AppErro
                 };
                 let update: AppUpdate =
                     serde_json::from_str(&line).map_err(AppError::ParseApplyStdoutJson)?;
-                view.update(update.clone());
+
+                println!("update: {:?}", update);
+
+                view = view.update(update.clone())?;
 
                 match update {
                     AppUpdate::ResourceParams { .. } => {
-                        println!(
-                            "resource params: {}",
-                            view.resource_params
-                                .clone()
-                                .expect("expected resource params to exist")
-                        );
+                        let AppView::ResourceParams {
+                            ref resource_params,
+                        } = view
+                        else {
+                            return Err(AppError::UnexpectedViewState);
+                        };
+                        println!("resource params: {}", resource_params);
                     }
                     AppUpdate::ResourcesComplete => {
-                        println!(
-                            "resources: {}",
-                            view.resources.clone().expect("expected resources to exist")
-                        );
+                        let AppView::Resources { ref resources, .. } = view else {
+                            return Err(AppError::UnexpectedViewState);
+                        };
+                        println!("resources: {}", resources);
                     }
                     AppUpdate::ResourceStatesComplete => {
-                        println!(
-                            "resource states: {}",
-                            view.resource_states
-                                .clone()
-                                .expect("expected resource states to exist")
-                        );
+                        let AppView::ResourceStates {
+                            ref resource_states,
+                            ..
+                        } = view
+                        else {
+                            return Err(AppError::UnexpectedViewState);
+                        };
+                        println!("resource states: {}", resource_states);
                     }
                     AppUpdate::ResourceChangesComplete { has_changes } => {
-                        println!(
-                            "resource changes: {}",
-                            view.resource_changes
-                                .clone()
-                                .expect("expected resource changes to exist")
-                        );
+                        let AppView::ResourceChanges {
+                            ref resource_changes,
+                            ..
+                        } = view
+                        else {
+                            return Err(AppError::UnexpectedViewState);
+                        };
+                        println!("resource changes: {}", resource_changes);
                         if !has_changes {
                             println!("no changes!")
                         }
                     }
                     AppUpdate::OperationsComplete => {
-                        println!(
-                            "operations: {}",
-                            view.operations_tree
-                                .clone()
-                                .expect("expected operations tree to exist")
-                        );
+                        let AppView::Operations {
+                            ref operations_tree,
+                            ..
+                        } = view
+                        else {
+                            return Err(AppError::UnexpectedViewState);
+                        };
+                        println!("operations: {}", operations_tree);
                     }
                     AppUpdate::OperationsApplyStart { operations: epochs } => {
                         println!("operations by epoch:");
@@ -323,10 +339,13 @@ async fn cmd_dev_apply(config: Config, machine_id: String) -> Result<(), AppErro
                         }
                     }
                     AppUpdate::OperationApplyStart { index } => {
-                        let epochs = view
-                            .operations_epochs
-                            .clone()
-                            .expect("expected operation by epochs to exist");
+                        let AppView::OperationsApply {
+                            operations_epochs: ref epochs,
+                            ..
+                        } = view
+                        else {
+                            return Err(AppError::UnexpectedViewState);
+                        };
                         let epoch = epochs.get(index.0).unwrap_or_else(|| {
                             panic!("expected operation epoch {} to exist", index.0)
                         });
