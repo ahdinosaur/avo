@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use serde::{Deserialize, Serialize};
 
 use crate::View;
@@ -7,8 +9,17 @@ pub struct Fragment {
     pub children: Vec<View>,
 }
 
+impl Display for Fragment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for children in self.children.iter() {
+            Display::fmt(children, f)?
+        }
+        Ok(())
+    }
+}
+
 impl Fragment {
-    fn new(children: Vec<View>) -> Self {
+    pub fn new(children: Vec<View>) -> Self {
         Self { children }
     }
 }

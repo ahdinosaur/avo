@@ -1,7 +1,28 @@
 #![allow(clippy::collapsible_if)]
 
-use lusid_view::{View, ViewNode, ViewTree};
+use std::fmt::Display;
+
+use lusid_view::{Fragment, Render, View, ViewTree};
 use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ViewNode {
+    NotStarted,
+    Started,
+    Complete(View),
+}
+
+impl Render for ViewNode {
+    fn render(&self) -> View {
+        match self {
+            ViewNode::NotStarted => View::Span("🟩".into()),
+            ViewNode::Started => View::Span("⌛".into()),
+            ViewNode::Complete(view) => {
+                View::Fragment(Fragment::new(vec![View::Span("✅".into()), view.clone()]))
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FlatViewTreeNode {
@@ -170,21 +191,21 @@ pub enum AppUpdate {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OperationView {
-    label: ViewNode,
-    stdout: String,
-    stderr: String,
-    is_complete: bool,
+    pub label: View,
+    pub stdout: String,
+    pub stderr: String,
+    pub is_complete: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AppView {
-    resource_params: Option<FlatViewTree>,
-    resources: Option<FlatViewTree>,
-    resource_states: Option<FlatViewTree>,
-    resource_changes: Option<FlatViewTree>,
-    has_changes: bool,
-    operations_tree: Option<FlatViewTree>,
-    operations_epochs: Vec<Vec<OperationView>>,
+    pub resource_params: Option<FlatViewTree>,
+    pub resources: Option<FlatViewTree>,
+    pub resource_states: Option<FlatViewTree>,
+    pub resource_changes: Option<FlatViewTree>,
+    pub has_changes: Option<bool>,
+    pub operations_tree: Option<FlatViewTree>,
+    pub operations_epochs: Option<Vec<Vec<OperationView>>>,
 }
 
 impl AppView {
@@ -239,7 +260,7 @@ impl AppView {
                 }
             }
             AppUpdate::ResourceChangesComplete { has_changes } => {
-                self.has_changes = has_changes;
+                self.has_changes = Some(has_changes);
             }
 
             AppUpdate::OperationsStart => {
@@ -252,52 +273,89 @@ impl AppView {
             AppUpdate::OperationsComplete => {}
 
             AppUpdate::OperationsApplyStart { operations } => {
-                self.operations_epochs = operations
-                    .into_iter()
-                    .map(|epoch| {
-                        epoch
-                            .into_iter()
-                            .map(|view| OperationView {
-                                label: ViewNode::Complete(view),
-                                stdout: String::default(),
-                                stderr: String::default(),
-                                is_complete: false,
-                            })
-                            .collect::<Vec<OperationView>>()
-                    })
-                    .collect::<Vec<Vec<OperationView>>>();
+                self.operations_epochs = Some(
+                    operations
+                        .into_iter()
+                        .map(|epoch| {
+                            epoch
+                                .into_iter()
+                                .map(|view| OperationView {
+                                    label: view,
+                                    stdout: String::default(),
+                                    stderr: String::default(),
+                                    is_complete: false,
+                                })
+                                .collect::<Vec<OperationView>>()
+                        })
+                        .collect::<Vec<Vec<OperationView>>>(),
+                );
             }
             AppUpdate::OperationApplyStart { index } => {
-                if let Some(epoch) = self.operations_epochs.get_mut(index.0) {
-                    if let Some(operation) = epoch.get_mut(index.1) {
-                        operation.stdout.clear();
-                        operation.stderr.clear();
-                        operation.is_complete = false;
+                if let Some(ref mut epochs) = self.operations_epochs {
+                    if let Some(epoch) = epochs.get_mut(index.0) {
+                        if let Some(operation) = epoch.get_mut(index.1) {
+                            operation.stdout.clear();
+                            operation.stderr.clear();
+                            operation.is_complete = false;
+                        }
                     }
                 }
             }
             AppUpdate::OperationApplyStdout { index, stdout } => {
-                if let Some(epoch) = self.operations_epochs.get_mut(index.0) {
-                    if let Some(operation) = epoch.get_mut(index.1) {
-                        operation.stdout.push_str(&stdout);
+                if let Some(ref mut epochs) = self.operations_epochs {
+                    if let Some(epoch) = epochs.get_mut(index.0) {
+                        if let Some(operation) = epoch.get_mut(index.1) {
+                            operation.stdout.push_str(&stdout);
+                        }
                     }
                 }
             }
             AppUpdate::OperationApplyStderr { index, stderr } => {
-                if let Some(epoch) = self.operations_epochs.get_mut(index.0) {
-                    if let Some(operation) = epoch.get_mut(index.1) {
-                        operation.stderr.push_str(&stderr);
+                if let Some(ref mut epochs) = self.operations_epochs {
+                    if let Some(epoch) = epochs.get_mut(index.0) {
+                        if let Some(operation) = epoch.get_mut(index.1) {
+                            operation.stderr.push_str(&stderr);
+                        }
                     }
                 }
             }
             AppUpdate::OperationApplyComplete { index } => {
-                if let Some(epoch) = self.operations_epochs.get_mut(index.0) {
-                    if let Some(operation) = epoch.get_mut(index.1) {
-                        operation.is_complete = true;
+                if let Some(ref mut epochs) = self.operations_epochs {
+                    if let Some(epoch) = epochs.get_mut(index.0) {
+                        if let Some(operation) = epoch.get_mut(index.1) {
+                            operation.is_complete = true;
+                        }
                     }
                 }
             }
             AppUpdate::OperationsApplyComplete => {}
         }
+    }
+}
+
+impl From<FlatViewTree> for ViewTree {
+    fn from(value: FlatViewTree) -> Self {
+        fn build(tree: &FlatViewTree, index: usize) -> Option<ViewTree> {
+            let node = tree.get_node(index)?;
+            Some(match node {
+                FlatViewTreeNode::Branch { view, children } => ViewTree::Branch {
+                    view: view.render(),
+                    children: children
+                        .iter()
+                        .filter_map(|child| build(tree, *child))
+                        .collect(),
+                },
+                FlatViewTreeNode::Leaf { view } => ViewTree::Leaf {
+                    view: view.render(),
+                },
+            })
+        }
+        build(&value, 0).expect("root node to exist")
+    }
+}
+
+impl Display for FlatViewTree {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        ViewTree::from(self.clone()).fmt(f)
     }
 }

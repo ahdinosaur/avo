@@ -1,3 +1,5 @@
+use std::fmt::{Debug, Display};
+
 use serde::{Deserialize, Serialize};
 
 use crate::{Alignment, Span, TextStyle, View};
@@ -44,6 +46,15 @@ impl Line {
     pub fn push_span(mut self, span: Span) -> Self {
         self.spans.push(span);
         self
+    }
+}
+
+impl Display for Line {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for span in self.spans.iter() {
+            Display::fmt(span, f)?
+        }
+        writeln!(f)
     }
 }
 

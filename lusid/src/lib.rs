@@ -3,7 +3,7 @@ mod config;
 use std::{env, net::Ipv4Addr, path::PathBuf, sync::Arc, time::Duration};
 
 use clap::{Parser, Subcommand};
-use lusid_apply_stdio::AppUpdate;
+use lusid_apply_stdio::{AppUpdate, AppView};
 use lusid_cmd::{Command, CommandError};
 use lusid_ctx::Context;
 use lusid_ssh::{Ssh, SshConnectOptions, SshError, SshVolume};
@@ -257,6 +257,7 @@ async fn cmd_dev_apply(config: Config, machine_id: String) -> Result<(), AppErro
 
     let mut handle = ssh.command(&command).await?;
 
+    let mut view = AppView::default();
     {
         let stdout_fut = async {
             let reader = tokio::io::BufReader::new(&mut handle.stdout);
@@ -268,7 +269,90 @@ async fn cmd_dev_apply(config: Config, machine_id: String) -> Result<(), AppErro
                 };
                 let update: AppUpdate =
                     serde_json::from_str(&line).map_err(AppError::ParseApplyStdoutJson)?;
-                println!("{update:?}");
+                println!("update: {update:?}");
+                view.update(update.clone());
+
+                match update {
+                    AppUpdate::ResourceParams { .. } => {
+                        println!(
+                            "resource params: {}",
+                            view.resource_params
+                                .clone()
+                                .expect("resource params to exist")
+                        );
+                    }
+                    AppUpdate::ResourcesComplete => {
+                        println!(
+                            "resources: {}",
+                            view.resources.clone().expect("resources to exist")
+                        );
+                    }
+                    AppUpdate::ResourceStatesComplete => {
+                        println!(
+                            "resource states: {}",
+                            view.resource_states
+                                .clone()
+                                .expect("resource states to exist")
+                        );
+                    }
+                    AppUpdate::ResourceChangesComplete { has_changes } => {
+                        println!(
+                            "resource changes: {}",
+                            view.resource_changes
+                                .clone()
+                                .expect("resource changes to exist")
+                        );
+                        if !has_changes {
+                            println!("no changes!")
+                        }
+                    }
+                    AppUpdate::OperationsComplete => {
+                        println!(
+                            "operations: {}",
+                            view.operations_tree
+                                .clone()
+                                .expect("operations tree to exist")
+                        );
+                    }
+                    AppUpdate::OperationsApplyStart { operations: epochs } => {
+                        println!("operations by epoch:");
+                        for (epoch_index, epoch) in epochs.iter().enumerate() {
+                            println!("  - epoch #{epoch_index}:");
+                            for operation in epoch {
+                                println!("    - {operation}");
+                            }
+                        }
+                    }
+                    AppUpdate::OperationApplyStart { index } => {
+                        let epochs = view
+                            .operations_epochs
+                            .clone()
+                            .expect("operation by epochs to exist");
+                        let epoch = epochs
+                            .get(index.0)
+                            .unwrap_or_else(|| panic!("operation epoch {} to exist", index.0));
+                        let operation = epoch
+                            .get(index.1)
+                            .unwrap_or_else(|| panic!("operation {} in epoch to exist", index.1));
+                        println!(
+                            "starting operation ({}, {}): {}",
+                            index.0, index.1, operation.label
+                        )
+                    }
+                    AppUpdate::OperationApplyStdout { index: _, stdout } => {
+                        println!("{stdout}")
+                    }
+                    AppUpdate::OperationApplyStderr { index: _, stderr } => {
+                        eprintln!("{stderr}")
+                    }
+                    AppUpdate::OperationApplyComplete { index: _ } => {
+                        println!("✅️")
+                    }
+                    AppUpdate::OperationsApplyComplete => {
+                        println!("✅️✅️✅️")
+                    }
+                    _ => {}
+                }
             }
 
             Ok(())

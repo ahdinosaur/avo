@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use serde::{Deserialize, Serialize};
 
 use crate::{Alignment, Line, TextStyle, View};
@@ -44,6 +46,15 @@ impl Paragraph {
     pub fn push_line(mut self, line: Line) -> Self {
         self.lines.push(line);
         self
+    }
+}
+
+impl Display for Paragraph {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for line in self.lines.iter() {
+            Display::fmt(line, f)?
+        }
+        Ok(())
     }
 }
 
