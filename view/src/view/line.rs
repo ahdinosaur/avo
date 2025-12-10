@@ -54,7 +54,7 @@ impl Display for Line {
         for span in self.spans.iter() {
             Display::fmt(span, f)?
         }
-        writeln!(f)
+        Ok(())
     }
 }
 

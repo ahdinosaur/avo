@@ -52,7 +52,7 @@ impl Paragraph {
 impl Display for Paragraph {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for line in self.lines.iter() {
-            Display::fmt(line, f)?
+            writeln!(f, "{line}")?
         }
         Ok(())
     }
