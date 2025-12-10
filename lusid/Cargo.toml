@@ -4,16 +4,17 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-lusid-apply = { path = "../lusid-apply", version = "0.1" }
+lusid-apply-stdio = { path = "../apply-stdio", version = "0.1" }
+lusid-cmd = { path = "../cmd", version = "0.1" }
 lusid-ctx = { path = "../ctx", version = "0.1" }
 lusid-machine = { path = "../machine", version = "0.1" }
-lusid-operation = { path = "../operation", version = "0.1" }
 lusid-params = { path = "../params", version = "0.1" }
-lusid-plan = { path = "../plan", version = "0.1" }
 lusid-ssh = { path = "../ssh", version = "0.1" }
 lusid-store = { path = "../store", version = "0.1" }
 lusid-system = { path = "../system", version = "0.1" }
+lusid-view = { path = "../view", version = "0.1" }
 lusid-vm = { path = "../vm", version = "0.1" }
+comfy-table = "7.2.1"
 clap.workspace = true
 rimu.workspace = true
 rimu-interop = { path = "../rimu-interop", version = "0.1" }
@@ -24,4 +25,4 @@ tokio.workspace = true
 toml = "0.9.8"
 tracing.workspace = true
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
-comfy-table = "7.2.1"
+which = "8.0.0"

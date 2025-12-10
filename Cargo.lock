@@ -1900,15 +1900,15 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "comfy-table",
- "lusid-apply",
+ "lusid-apply-stdio",
+ "lusid-cmd",
  "lusid-ctx",
  "lusid-machine",
- "lusid-operation",
  "lusid-params",
- "lusid-plan",
  "lusid-ssh",
  "lusid-store",
  "lusid-system",
+ "lusid-view",
  "lusid-vm",
  "rimu",
  "rimu-interop",
@@ -1919,6 +1919,7 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+ "which",
 ]
 
 [[package]]
@@ -1926,6 +1927,7 @@ name = "lusid-apply"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "lusid-apply-stdio",
  "lusid-causality",
  "lusid-ctx",
  "lusid-operation",
@@ -1934,6 +1936,8 @@ dependencies = [
  "lusid-resource",
  "lusid-store",
  "lusid-system",
+ "lusid-tree",
+ "lusid-view",
  "rimu",
  "rimu-interop",
  "serde",
@@ -1945,9 +1949,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "lusid-apply-stdio"
+version = "0.1.0"
+dependencies = [
+ "lusid-view",
+ "serde",
+]
+
+[[package]]
 name = "lusid-causality"
 version = "0.1.0"
 dependencies = [
+ "lusid-tree",
  "thiserror 2.0.17",
 ]
 
@@ -1955,6 +1968,7 @@ dependencies = [
 name = "lusid-cmd"
 version = "0.1.0"
 dependencies = [
+ "async-promise",
  "thiserror 2.0.17",
  "tokio",
 ]
@@ -2003,7 +2017,10 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "lusid-cmd",
+ "lusid-view",
+ "pin-project",
  "thiserror 2.0.17",
+ "tokio",
  "tracing",
 ]
 
@@ -2024,12 +2041,15 @@ dependencies = [
 name = "lusid-plan"
 version = "0.1.0"
 dependencies = [
+ "cuid2",
  "displaydoc",
  "lusid-causality",
  "lusid-operation",
  "lusid-params",
  "lusid-resource",
  "lusid-store",
+ "lusid-tree",
+ "lusid-view",
  "rimu",
  "rimu-interop",
  "thiserror 2.0.17",
@@ -2042,13 +2062,13 @@ name = "lusid-resource"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "cuid2",
  "futures-util",
  "indexmap",
  "lusid-causality",
  "lusid-cmd",
  "lusid-operation",
  "lusid-params",
+ "lusid-view",
  "rimu",
  "serde",
  "thiserror 2.0.17",
@@ -2092,6 +2112,21 @@ dependencies = [
  "hostname",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "lusid-tree"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.17",
+]
+
+[[package]]
+name = "lusid-view"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "termtree",
 ]
 
 [[package]]
@@ -2526,6 +2561,26 @@ name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
+
+[[package]]
+name = "pin-project"
+version = "1.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "677f1add503faace112b9f1373e43e9e054bfdd22ff1a63c1bc485eaec6a6a8a"
+dependencies = [
+ "pin-project-internal",
+]
+
+[[package]]
+name = "pin-project-internal"
+version = "1.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e918e4ff8c4549eb882f14b3a4bc8c8bc93de829416eacf579f1207a8fbf861"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.108",
+]
 
 [[package]]
 name = "pin-project-lite"
@@ -3738,6 +3793,12 @@ dependencies = [
  "libc",
  "numtoa",
 ]
+
+[[package]]
+name = "termtree"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f50febec83f5ee1df3015341d8bd429f2d1cc62bcba7ea2076759d315084683"
 
 [[package]]
 name = "thiserror"

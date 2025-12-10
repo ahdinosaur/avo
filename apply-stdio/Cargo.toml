@@ -1,0 +1,8 @@
+[package]
+name = "lusid-apply-stdio"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+lusid-view = { path = "../view", version = "0.1" }
+serde.workspace = true

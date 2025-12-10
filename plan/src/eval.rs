@@ -1,10 +1,10 @@
-use lusid_params::ParamValues;
 use displaydoc::Display;
+use lusid_params::ParamValues;
 use rimu::{call, Spanned, Value};
 use rimu_interop::FromRimu;
 use thiserror::Error;
 
-use crate::model::{IntoPlanActionError, PlanAction, SetupFunction};
+use crate::model::{IntoPlanItemError, PlanItem, SetupFunction};
 
 #[derive(Debug, Error, Display)]
 pub enum EvalError {
@@ -12,14 +12,14 @@ pub enum EvalError {
     RimuCall(#[from] Box<rimu::EvalError>),
     /// Setup returned a non-list value
     ReturnedNotList,
-    /// Invalid PlanAction value
-    InvalidPlanAction(Box<Spanned<IntoPlanActionError>>),
+    /// Invalid PlanItem value
+    InvalidPlanItem(Box<Spanned<IntoPlanItemError>>),
 }
 
 pub(crate) fn evaluate(
     setup: Spanned<SetupFunction>,
     params: Option<Spanned<ParamValues>>,
-) -> Result<Vec<Spanned<PlanAction>>, EvalError> {
+) -> Result<Vec<Spanned<PlanItem>>, EvalError> {
     let (setup, setup_span) = setup.take();
 
     let args = match params {
@@ -39,8 +39,8 @@ pub(crate) fn evaluate(
 
     let mut out = Vec::with_capacity(items.len());
     for item in items {
-        let call = PlanAction::from_rimu_spanned(item)
-            .map_err(|error| EvalError::InvalidPlanAction(Box::new(error)))?;
+        let call = PlanItem::from_rimu_spanned(item)
+            .map_err(|error| EvalError::InvalidPlanItem(Box::new(error)))?;
         out.push(call)
     }
     Ok(out)

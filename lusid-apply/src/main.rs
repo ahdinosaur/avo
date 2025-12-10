@@ -51,5 +51,6 @@ fn install_tracing(level: &str) {
         .with_target(true)
         .with_level(true)
         .with_ansi(true)
+        .with_writer(std::io::stderr)
         .init();
 }

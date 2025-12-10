@@ -1,15 +1,23 @@
 use clap::Parser;
 use tracing_subscriber::{fmt, EnvFilter};
 
-use lusid::{run, Cli};
+use lusid::{get_config, run, Cli};
 
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
-    install_tracing(&cli.log);
+    let config = match get_config(&cli).await {
+        Ok(c) => c,
+        Err(error) => {
+            tracing::error!("{error}");
+            std::process::exit(1);
+        }
+    };
 
-    if let Err(err) = run(cli).await {
-        tracing::error!("{err}");
+    install_tracing(&config.log);
+
+    if let Err(error) = run(cli, config).await {
+        tracing::error!("{error}");
         std::process::exit(1);
     }
 }

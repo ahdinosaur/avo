@@ -1,7 +1,8 @@
+use std::fmt::Display;
+
 use async_trait::async_trait;
-use cuid2::create_id;
 use indexmap::indexmap;
-use lusid_causality::{NodeId, Tree};
+use lusid_causality::{CausalityMeta, CausalityTree};
 use lusid_cmd::{Command, CommandError};
 use lusid_operation::{operations::apt::AptOperation, Operation};
 use lusid_params::{ParamField, ParamType, ParamTypes};
@@ -11,15 +12,49 @@ use thiserror::Error;
 
 use crate::ResourceType;
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum AptParams {
+    Package { package: String },
+    Packages { packages: Vec<String> },
+}
+
+impl Display for AptParams {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AptParams::Package { package } => write!(f, "Apt(package = {package})"),
+            AptParams::Packages { packages } => {
+                write!(f, "Apt(packages = [{}])", packages.join(", "))
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AptResource {
     pub package: String,
+}
+
+impl Display for AptResource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { package } = self;
+        write!(f, "Apt({package})")
+    }
 }
 
 #[derive(Debug, Clone)]
 pub enum AptState {
     NotInstalled,
     Installed,
+}
+
+impl Display for AptState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AptState::NotInstalled => write!(f, "Apt::NotInstalled"),
+            AptState::Installed => write!(f, "Apt::Installed"),
+        }
+    }
 }
 
 #[derive(Error, Debug)]
@@ -36,15 +71,16 @@ pub enum AptChange {
     Install { package: String },
 }
 
+impl Display for AptChange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AptChange::Install { package } => write!(f, "Apt::Installed({package})"),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Apt;
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
-pub enum AptParams {
-    Package { package: String },
-    Packages { packages: Vec<String> },
-}
 
 #[async_trait]
 impl ResourceType for Apt {
@@ -74,13 +110,19 @@ impl ResourceType for Apt {
     type Params = AptParams;
     type Resource = AptResource;
 
-    fn resources(params: Self::Params) -> Vec<Tree<Self::Resource>> {
+    fn resources(params: Self::Params) -> Vec<CausalityTree<Self::Resource>> {
         match params {
-            AptParams::Package { package } => vec![Tree::leaf(AptResource { package })],
-            AptParams::Packages { packages } => vec![Tree::branch(
+            AptParams::Package { package } => vec![CausalityTree::leaf(
+                CausalityMeta::default(),
+                AptResource { package },
+            )],
+            AptParams::Packages { packages } => vec![CausalityTree::branch(
+                CausalityMeta::default(),
                 packages
                     .into_iter()
-                    .map(|package| Tree::leaf(AptResource { package }))
+                    .map(|package| {
+                        CausalityTree::leaf(CausalityMeta::default(), AptResource { package })
+                    })
                     .collect(),
             )],
         }
@@ -133,24 +175,26 @@ impl ResourceType for Apt {
         }
     }
 
-    fn operations(change: Self::Change) -> Vec<Tree<Operation>> {
-        let update_id = create_id();
+    fn operations(change: Self::Change) -> Vec<CausalityTree<Operation>> {
         match change {
             AptChange::Install { package } => {
                 vec![
-                    Tree::Leaf {
-                        id: Some(NodeId(update_id.clone())),
+                    CausalityTree::Leaf {
                         node: Operation::Apt(AptOperation::Update),
-                        before: vec![],
-                        after: vec![],
+                        meta: CausalityMeta {
+                            id: Some("update".into()),
+                            ..Default::default()
+                        },
                     },
-                    Tree::Leaf {
-                        id: None,
+                    CausalityTree::Leaf {
                         node: Operation::Apt(AptOperation::Install {
                             packages: vec![package],
                         }),
-                        before: vec![NodeId(update_id)],
-                        after: vec![],
+                        meta: CausalityMeta {
+                            id: None,
+                            before: vec!["update".into()],
+                            after: vec![],
+                        },
                     },
                 ]
             }

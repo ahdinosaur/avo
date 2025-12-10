@@ -1,12 +1,16 @@
-use lusid_causality::{compute_epochs, EpochError};
+use lusid_apply_stdio::AppUpdate;
+use lusid_causality::{compute_epochs, CausalityTree, EpochError};
 use lusid_ctx::{Context, ContextError};
-use lusid_operation::{apply_operations, merge_operations, partition_by_type, OperationApplyError};
+use lusid_operation::{Operation, OperationApplyError};
 use lusid_params::{ParamValues, ParamValuesFromTypeError};
-use lusid_plan::{self, plan, PlanError, PlanId};
+use lusid_plan::{self, map_plan_subitems, plan, render_plan_tree, PlanError, PlanId, PlanNodeId};
 use lusid_resource::{Resource, ResourceState, ResourceStateError};
 use lusid_store::Store;
+use lusid_tree::FlatTree;
+use lusid_view::Render;
 use rimu::SourceId;
 use thiserror::Error;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tracing::{debug, error, info};
 
 pub struct ApplyOptions {
@@ -19,17 +23,29 @@ pub enum ApplyError {
     #[error(transparent)]
     Context(#[from] ContextError),
 
-    #[error("JSON parameters parse failed: {0}")]
-    Json(#[from] serde_json::Error),
+    #[error("failed to parse JSON parameters: {0}")]
+    JsonParameters(#[source] serde_json::Error),
 
-    #[error("Failed to convert parameters for Lusid: {0}")]
+    #[error("failed to output JSON: {0}")]
+    JsonOutput(#[source] serde_json::Error),
+
+    #[error("failed to read operation stdio: {0}")]
+    ReadOperationStdio(#[source] tokio::io::Error),
+
+    #[error("failed to write to stdout: {0}")]
+    WriteStdout(#[source] tokio::io::Error),
+
+    #[error("failed to flush stdout: {0}")]
+    FlushStdout(#[source] tokio::io::Error),
+
+    #[error("failed to convert parameters for Lusid: {0}")]
     ParamValuesFromType(#[from] ParamValuesFromTypeError),
 
     #[error(transparent)]
     Plan(#[from] PlanError),
 
     #[error(transparent)]
-    Epoch(#[from] EpochError),
+    Epoch(#[from] EpochError<PlanNodeId>),
 
     #[error(transparent)]
     ResourceState(#[from] ResourceStateError),
@@ -56,48 +72,119 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
             None
         }
         Some(json) => {
-            let value: serde_json::Value = serde_json::from_str(&json)?;
+            let value: serde_json::Value =
+                serde_json::from_str(&json).map_err(ApplyError::JsonParameters)?;
             let source_id = SourceId::from("<cli:params>".to_string());
             let params = ParamValues::from_type(value, source_id)?;
             Some(params)
         }
     };
 
-    // Parse/evaluate to Tree<ResourceParams>
+    // Parse/evaluate to tree of resource params.
     let resource_params = plan(plan_id, param_values, &mut store).await?;
     debug!("Resource params: {resource_params:?}");
+    emit(AppUpdate::ResourceParams {
+        resource_params: render_plan_tree(resource_params.clone()),
+    })
+    .await?;
+    let resource_params = FlatTree::from(resource_params);
 
-    // Map to Tree<Resource>
-    let resources = resource_params.map_tree(|params| params.resources());
-    debug!("Resources: {resources:?}");
-
-    // Get Tree<(Resource, ResourceState)>
-    let resource_states = resources
-        .map_result_async(|resource| async move {
-            let state = resource.state().await?;
-            Ok::<(Resource, ResourceState), ResourceStateError>((resource, state))
-        })
+    // Get tree of atomic resources.
+    emit(AppUpdate::ResourcesStart).await?;
+    let resources = resource_params
+        .map_tree(
+            |node, meta| map_plan_subitems(node, meta, |node| node.resources()),
+            |index, tree| {
+                emit(AppUpdate::ResourcesNode {
+                    index,
+                    tree: render_plan_tree(tree),
+                })
+            },
+        )
         .await?;
-    debug!("Resource states: {resource_states:?}");
+    debug!("Resources: {:?}", CausalityTree::from(resources.clone()));
+    emit(AppUpdate::ResourcesComplete).await?;
 
-    // Get Tree<ResourceChange>
-    let changes = resource_states.map_option(|(resource, state)| resource.change(&state));
-    debug!("Changes: {changes:?}");
+    // Get tree of (resource, resource state)
+    emit(AppUpdate::ResourceStatesStart).await?;
+    let resource_states = resources
+        .map_result_async(
+            |resource| async move {
+                let state = resource.state().await?;
+                Ok::<(Resource, ResourceState), ApplyError>((resource, state))
+            },
+            |index| emit(AppUpdate::ResourceStatesNodeStart { index }),
+            |index, (_resource, resource_state)| {
+                emit(AppUpdate::ResourceStatesNodeComplete {
+                    index,
+                    node: resource_state.render(),
+                })
+            },
+        )
+        .await?;
+    debug!(
+        "Resource states: {:?}",
+        CausalityTree::from(resource_states.clone()).map(|(_resource, state)| state)
+    );
+    emit(AppUpdate::ResourceStatesComplete).await?;
 
-    let Some(changes) = changes else {
+    // Get tree of resource changes
+    emit(AppUpdate::ResourceChangesStart).await?;
+    let resource_changes = resource_states
+        .map_option(
+            |(resource, state)| resource.change(&state),
+            |index, node| {
+                emit(AppUpdate::ResourceChangesNode {
+                    index,
+                    node: node.map(|n| n.render()),
+                })
+            },
+        )
+        .await?;
+    debug!(
+        "Resource changes: {:?}",
+        CausalityTree::from(resource_changes.clone())
+    );
+    emit(AppUpdate::ResourceChangesComplete {
+        has_changes: !resource_changes.is_empty(),
+    })
+    .await?;
+
+    if resource_changes.is_empty() {
         info!("No changes to apply!");
         return Ok(());
     };
 
-    // Get Tree<Operations>
-    let operations = changes.map_tree(|change| change.operations());
+    // Get CausalityTree<Operations>
+    emit(AppUpdate::OperationsStart).await?;
+    let operations = resource_changes
+        .map_tree(
+            |node, meta| map_plan_subitems(node, meta, |node| node.operations()),
+            |index, tree| {
+                emit(AppUpdate::OperationsNode {
+                    index,
+                    operations: render_plan_tree(tree),
+                })
+            },
+        )
+        .await?;
+    debug!(
+        "Operations tree: {:?}",
+        CausalityTree::from(operations.clone())
+    );
+    emit(AppUpdate::OperationsComplete).await?;
 
-    debug!("Operations tree: {operations:?}");
-
-    let operation_epochs = compute_epochs(operations)?;
-    let epochs_count = operation_epochs.len();
+    let operation_epochs = compute_epochs(CausalityTree::from(operations))?;
     debug!("Operation epochs: {operation_epochs:?}");
+    emit(AppUpdate::OperationsApplyStart {
+        operations: operation_epochs
+            .iter()
+            .map(|epoch| epoch.iter().map(Render::render).collect())
+            .collect(),
+    })
+    .await?;
 
+    let epochs_count = operation_epochs.len();
     for (epoch_index, operations) in operation_epochs.into_iter().enumerate() {
         info!(
             epoch = epoch_index,
@@ -106,15 +193,84 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
         );
         debug!("Operations: {operations:?}");
 
-        let operations = partition_by_type(operations);
-        debug!("Operations by type: {operations:?}");
+        let operations = Operation::merge(operations);
+        debug!("Merged operations: {operations:?}");
 
-        let merged = merge_operations(operations);
-        debug!("Merged operations: {merged:?}");
+        for (operation_index, operation) in operations.iter().enumerate() {
+            let index = (epoch_index, operation_index);
 
-        apply_operations(merged).await?;
+            emit(AppUpdate::OperationApplyStart { index }).await?;
+
+            let (output, stdout, stderr) = operation.apply().await?;
+
+            let output_task = async {
+                output.await?;
+                Ok::<(), ApplyError>(())
+            };
+
+            let stdout_task = {
+                let mut lines = BufReader::new(stdout).lines();
+                async move {
+                    while let Some(line) = lines
+                        .next_line()
+                        .await
+                        .map_err(ApplyError::ReadOperationStdio)?
+                    {
+                        emit(AppUpdate::OperationApplyStdout {
+                            index,
+                            stdout: line,
+                        })
+                        .await?;
+                    }
+                    Ok::<(), ApplyError>(())
+                }
+            };
+
+            let stderr_task = {
+                let mut lines = BufReader::new(stderr).lines();
+                async move {
+                    while let Some(line) = lines
+                        .next_line()
+                        .await
+                        .map_err(ApplyError::ReadOperationStdio)?
+                    {
+                        emit(AppUpdate::OperationApplyStderr {
+                            index,
+                            stderr: line,
+                        })
+                        .await?;
+                    }
+                    Ok::<(), ApplyError>(())
+                }
+            };
+
+            tokio::try_join!(output_task, stdout_task, stderr_task)?;
+
+            emit(AppUpdate::OperationApplyComplete {
+                index: (epoch_index, operation_index),
+            })
+            .await?;
+        }
     }
 
     info!("Apply completed");
+    Ok(())
+}
+
+async fn emit(update: AppUpdate) -> Result<(), ApplyError> {
+    let mut stdout = tokio::io::stdout();
+
+    stdout
+        .write_all(&serde_json::to_vec(&update).map_err(ApplyError::JsonOutput)?)
+        .await
+        .map_err(ApplyError::WriteStdout)?;
+
+    stdout
+        .write_all(b"\n")
+        .await
+        .map_err(ApplyError::WriteStdout)?;
+
+    stdout.flush().await.map_err(ApplyError::FlushStdout)?;
+
     Ok(())
 }
