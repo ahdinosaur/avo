@@ -145,7 +145,10 @@ pub async fn apply(options: ApplyOptions) -> Result<(), ApplyError> {
         "Resource changes: {:?}",
         CausalityTree::from(resource_changes.clone())
     );
-    emit(AppUpdate::ResourceChangesComplete).await?;
+    emit(AppUpdate::ResourceChangesComplete {
+        has_changes: !resource_changes.is_empty(),
+    })
+    .await?;
 
     if resource_changes.is_empty() {
         info!("No changes to apply!");

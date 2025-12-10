@@ -139,7 +139,9 @@ pub enum AppUpdate {
         index: usize,
         node: Option<View>,
     },
-    ResourceChangesComplete,
+    ResourceChangesComplete {
+        has_changes: bool,
+    },
     OperationsStart,
     OperationsNode {
         index: usize,
@@ -180,6 +182,7 @@ pub struct AppView {
     resources: Option<FlatViewTree>,
     resource_states: Option<FlatViewTree>,
     resource_changes: Option<FlatViewTree>,
+    has_changes: bool,
     operations_tree: Option<FlatViewTree>,
     operations_epochs: Vec<Vec<OperationView>>,
 }
@@ -235,7 +238,9 @@ impl AppView {
                     }
                 }
             }
-            AppUpdate::ResourceChangesComplete => {}
+            AppUpdate::ResourceChangesComplete { has_changes } => {
+                self.has_changes = has_changes;
+            }
 
             AppUpdate::OperationsStart => {
                 self.operations_tree = Some(FlatViewTree::default());

@@ -7,7 +7,6 @@ use lusid_apply_stdio::AppUpdate;
 use lusid_cmd::{Command, CommandError};
 use lusid_ctx::Context;
 use lusid_ssh::{Ssh, SshConnectOptions, SshError, SshVolume};
-use lusid_view::View;
 use lusid_vm::{Vm, VmError, VmOptions};
 use thiserror::Error;
 use tokio::io::AsyncBufReadExt;
