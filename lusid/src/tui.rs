@@ -271,22 +271,22 @@ impl PipelineStage {
 
 #[derive(Debug, Default, Clone)]
 struct TreeState {
-    expanded: HashSet<usize>,
+    collapsed: HashSet<usize>,
     selected_node: Option<usize>,
     list_offset: usize,
 }
 
 impl TreeState {
-    fn expand_root(&mut self) {
-        self.expanded.insert(FlatViewTree::root_index());
+    fn toggle(&mut self, node_index: usize) {
+        if self.collapsed.contains(&node_index) {
+            self.collapsed.remove(&node_index);
+        } else {
+            self.collapsed.insert(node_index);
+        }
     }
 
-    fn toggle(&mut self, node_index: usize) {
-        if self.expanded.contains(&node_index) {
-            self.expanded.remove(&node_index);
-        } else {
-            self.expanded.insert(node_index);
-        }
+    fn is_expanded(&self, node_index: usize) -> bool {
+        !self.collapsed.contains(&node_index)
     }
 
     fn ensure_visible_row(&mut self, selected_row: usize, height: usize) {
@@ -373,7 +373,7 @@ struct TuiApp {
 
 impl TuiApp {
     fn new() -> Self {
-        let mut app = Self {
+        Self {
             app_view: AppView::default(),
             stage: PipelineStage::ResourceParams,
             follow_pipeline: true,
@@ -388,19 +388,12 @@ impl TuiApp {
 
             stderr_tail: CircularBuffer::new(200),
             child_exited: false,
-        };
-
-        app.params_state.expand_root();
-        app.resources_state.expand_root();
-        app.states_state.expand_root();
-        app.changes_state.expand_root();
-        app.operations_state.expand_root();
-
-        app
+        }
     }
 
     fn apply_update(&mut self, update: AppUpdate) -> Result<(), TuiError> {
         let current = std::mem::take(&mut self.app_view);
+
         self.app_view = current.update(update)?;
 
         if self.follow_pipeline {
@@ -572,8 +565,6 @@ impl TuiApp {
     }
 }
 
-// Accessors: map AppView to data for each pipeline stage.
-// This keeps draw logic and navigation logic simple and consistent.
 fn app_view_params(view: &AppView) -> Option<&FlatViewTree> {
     match view {
         AppView::ResourceParams { resource_params } => Some(resource_params),
@@ -677,11 +668,7 @@ fn app_view_epochs(view: &AppView) -> Option<&Vec<Vec<OperationView>>> {
     }
 }
 
-fn draw_ui(
-    frame: &mut ratatui::Frame<'_>,
-    app: &mut TuiApp,
-    outcome: Option<&Result<(), TuiError>>,
-) {
+fn draw_ui(frame: &mut ratatui::Frame, app: &mut TuiApp, outcome: Option<&Result<(), TuiError>>) {
     let size = frame.size();
 
     let layout = Layout::default()
@@ -702,7 +689,7 @@ fn draw_ui(
 }
 
 fn draw_pipeline(
-    frame: &mut ratatui::Frame<'_>,
+    frame: &mut ratatui::Frame,
     area: Rect,
     app: &TuiApp,
     outcome: Option<&Result<(), TuiError>>,
@@ -746,9 +733,9 @@ fn draw_pipeline(
             Block::default()
                 .borders(Borders::BOTTOM)
                 .title(if app.follow_pipeline {
-                    "pipeline (follow pipeline: enabled)"
+                    "pipeline (following)"
                 } else {
-                    "pipeline (follow pipeline: disabled)"
+                    "pipeline"
                 }),
         )
         .alignment(Alignment::Left)
@@ -765,32 +752,21 @@ fn pipeline_feedback_line(app: &TuiApp, outcome: Option<&Result<(), TuiError>>) 
     match &app.app_view {
         AppView::Start => "Waiting for planning output...".to_string(),
 
-        AppView::ResourceParams { .. } => {
-            "Resource parameters planned. Navigate with Left and Right.".to_string()
-        }
+        AppView::ResourceParams { .. } => "Resource parameters planned.".to_string(),
 
-        AppView::Resources { .. } => "Resources planned. Navigate with Left and Right.".to_string(),
+        AppView::Resources { .. } => "Resources planned.".to_string(),
 
-        AppView::ResourceStates { .. } => {
-            "Resource states are being fetched. Navigate with Left and Right.".to_string()
-        }
+        AppView::ResourceStates { .. } => "Resource states are being fetched.".to_string(),
 
         AppView::ResourceChanges { has_changes, .. } => match has_changes {
             None => "Computing resource changes...".to_string(),
             Some(false) => "No changes.".to_string(),
-            Some(true) => {
-                "Changes detected. In a future version you will be asked whether you want to proceed."
-                    .to_string()
-            }
+            Some(true) => "Changes detected.".to_string(),
         },
 
-        AppView::Operations { .. } => {
-            "Operations tree planned. Navigate with Left and Right.".to_string()
-        }
+        AppView::Operations { .. } => "Operations tree planned.".to_string(),
 
-        AppView::OperationsApply { .. } => {
-            "Applying operations epochs. Use Up and Down to select an operation.".to_string()
-        }
+        AppView::OperationsApply { .. } => "Applying operations epochs.".to_string(),
 
         AppView::Done { .. } => {
             if app.child_exited {
@@ -956,7 +932,7 @@ fn draw_apply(
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("operations epochs: operations"),
+                .title("operations epochs:"),
         )
         .highlight_style(
             Style::default()
@@ -1114,7 +1090,7 @@ fn build_visible_rows_rec(
         }
 
         FlatViewTreeNode::Branch { view, children } => {
-            let is_expanded = state.expanded.contains(&index);
+            let is_expanded = state.is_expanded(index);
 
             out.push(TreeRow {
                 index,

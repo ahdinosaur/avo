@@ -79,6 +79,10 @@ impl FlatViewTree {
         self.nodes.first().and_then(|n| n.as_ref())
     }
 
+    pub fn nodes(&self) -> impl Iterator<Item = &Option<FlatViewTreeNode>> {
+        self.nodes.iter()
+    }
+
     /// Returns true if the root node is missing.
     pub fn is_empty(&self) -> bool {
         self.root().is_none()
