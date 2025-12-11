@@ -81,7 +81,7 @@ pub struct MachineConfig {
 
 impl Config {
     pub async fn load(path: &Path, cli: &Cli) -> Result<Self, ConfigError> {
-        let config = Self::load_config(&path).await?;
+        let config = Self::load_config(path).await?;
         let ConfigToml {
             machines,
             log,
@@ -91,7 +91,7 @@ impl Config {
 
         let machines = Self::resolve_machines(machines, path)?;
 
-        let log = cli.log.clone().or(log).unwrap_or("info".into());
+        let log = cli.log.clone().or(log).unwrap_or("error".into());
 
         let lusid_apply_linux_x86_64_path = cli
             .lusid_apply_linux_x86_64_path
@@ -114,11 +114,12 @@ impl Config {
     }
 
     pub fn get_machine(&self, machine_id: &str) -> Result<MachineConfig, ConfigError> {
-        Ok(self.machines.get(machine_id).cloned().ok_or_else(|| {
-            ConfigError::MachineIdNotFound {
+        self.machines
+            .get(machine_id)
+            .cloned()
+            .ok_or_else(|| ConfigError::MachineIdNotFound {
                 machine_id: machine_id.to_string(),
-            }
-        })?)
+            })
     }
 
     pub fn local_machine(&self) -> Result<MachineConfig, ConfigError> {
@@ -126,7 +127,7 @@ impl Config {
         self.machines
             .values()
             .find(|cfg| cfg.machine.hostname == hostname)
-            .ok_or_else(|| ConfigError::LocalMachineNotFound { hostname })
+            .ok_or(ConfigError::LocalMachineNotFound { hostname })
             .cloned()
     }
 
@@ -197,7 +198,7 @@ impl Config {
                     name,
                     MachineConfig {
                         machine,
-                        plan: Self::resolve_plan_path(&plan_path, &plan)?,
+                        plan: Self::resolve_plan_path(plan_path, &plan)?,
                         params,
                     },
                 ))
