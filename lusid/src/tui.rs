@@ -2,12 +2,10 @@
 
 use std::collections::HashSet;
 use std::future::Future;
-use std::hash::{Hash, Hasher};
 use std::io;
 use std::pin::Pin;
 use std::time::Duration;
 
-use ansi_to_tui::IntoText;
 use crossterm::{
     event::{Event as CEvent, KeyCode, KeyEvent, KeyModifiers},
     execute,
@@ -19,7 +17,6 @@ use lusid_apply_stdio::{
 };
 use lusid_cmd::CommandError;
 use lusid_ssh::SshError;
-use ratatui::layout::Size;
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -88,7 +85,7 @@ where
     let mut event_rx = spawn_crossterm_event_channel();
     let mut tick = interval(Duration::from_millis(33));
 
-    let mut app = TuiState::new();
+    let mut app = TuiApp::new();
 
     let mut stdout_done = false;
     let mut stderr_done = false;
@@ -96,17 +93,12 @@ where
     let mut outcome: Option<Result<(), TuiError>> = None;
     let mut should_quit = false;
 
-    let mut wait = wait;
+    tokio::pin!(wait);
 
     loop {
-        // State -> ViewModel happens outside rendering.
-        // Rendering receives an already-safe, already-prepared view-model.
-        let size = terminal_session.terminal.size()?;
-        let view_model = app.view_model(size, outcome.as_ref());
-
         terminal_session
             .terminal
-            .draw(|frame| render_ui(frame, &view_model))?;
+            .draw(|frame| draw_ui(frame, &mut app, outcome.as_ref()))?;
 
         tokio::select! {
             result = &mut wait, if outcome.is_none() => {
@@ -153,6 +145,9 @@ where
         if should_quit {
             break;
         }
+
+        let _io_closed = stdout_done && stderr_done;
+        let _ = _io_closed;
     }
 
     match outcome {
@@ -307,97 +302,6 @@ impl TreeState {
             self.list_offset = selected_row.saturating_sub(height.saturating_sub(1));
         }
     }
-
-    fn visible_rows(&mut self, tree: &FlatViewTree) -> Vec<TreeRow> {
-        let rows = build_visible_rows(tree, self);
-
-        if rows.is_empty() {
-            self.selected_node = None;
-            self.list_offset = 0;
-            return rows;
-        }
-
-        let selection_is_visible = self
-            .selected_node
-            .and_then(|_| selected_row_index(&rows, self))
-            .is_some();
-
-        if self.selected_node.is_none() || !selection_is_visible {
-            self.selected_node = Some(rows[0].index);
-        }
-
-        rows
-    }
-
-    fn move_selection(&mut self, tree: &FlatViewTree, delta: i32) {
-        let rows = self.visible_rows(tree);
-        if rows.is_empty() {
-            return;
-        }
-
-        let current_row = selected_row_index(&rows, self).unwrap_or(0);
-
-        let next_row = if delta >= 0 {
-            (current_row + delta as usize).min(rows.len() - 1)
-        } else {
-            current_row.saturating_sub((-delta) as usize)
-        };
-
-        self.selected_node = Some(rows[next_row].index);
-    }
-
-    fn toggle_selected_branch(&mut self, tree: &FlatViewTree) {
-        let rows = self.visible_rows(tree);
-        if rows.is_empty() {
-            return;
-        }
-
-        let selected_row = selected_row_index(&rows, self).unwrap_or(0);
-        let row = &rows[selected_row];
-
-        if row.is_branch {
-            self.toggle(row.index);
-        }
-    }
-
-    fn view_model(&mut self, title: &str, tree: &FlatViewTree, area: Rect) -> TreeViewModel {
-        let rows = self.visible_rows(tree);
-
-        let selected_row = selected_row_index(&rows, self);
-        let inner_height = area.height.saturating_sub(2) as usize;
-
-        if let Some(selected_row) = selected_row {
-            self.ensure_visible_row(selected_row, inner_height);
-        }
-
-        let items = rows
-            .iter()
-            .map(|row| {
-                let mut spans: Vec<Span<'static>> = Vec::new();
-                spans.push(Span::raw("  ".repeat(row.depth)));
-
-                if row.is_branch {
-                    spans.push(Span::styled(
-                        format!("{} ", if row.is_expanded { "▼" } else { "▶" }),
-                        Style::default().fg(Color::Yellow),
-                    ));
-                } else {
-                    spans.push(Span::styled("• ", Style::default().fg(Color::DarkGray)));
-                }
-
-                spans.push(Span::raw(row.label.clone()));
-
-                ListItem::new(Line::from(spans))
-            })
-            .collect::<Vec<ListItem<'static>>>();
-
-        TreeViewModel {
-            title: title.to_string(),
-            items,
-            selected: selected_row,
-            offset: self.list_offset,
-        }
-    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -405,11 +309,6 @@ struct OperationsApplyState {
     flat_index_to_epoch_operation: Vec<(usize, usize)>,
     selected_flat: Option<usize>,
     list_offset: usize,
-
-    stdout_rendered: Text<'static>,
-    stderr_rendered: Text<'static>,
-    last_render_key: Option<(usize, usize, u64, u64)>,
-    last_ansi_error: Option<String>,
 }
 
 impl OperationsApplyState {
@@ -423,16 +322,16 @@ impl OperationsApplyState {
             }
         }
 
-        let len = self.flat_index_to_epoch_operation.len();
-        if len == 0 {
+        if self.flat_index_to_epoch_operation.is_empty() {
             self.selected_flat = None;
             self.list_offset = 0;
         } else {
-            let sel = self.selected_flat.unwrap_or(0).min(len - 1);
+            let sel = self
+                .selected_flat
+                .unwrap_or(0)
+                .min(self.flat_index_to_epoch_operation.len() - 1);
             self.selected_flat = Some(sel);
         }
-
-        self.last_render_key = None;
     }
 
     fn visible_len(&self) -> usize {
@@ -452,146 +351,10 @@ impl OperationsApplyState {
             self.list_offset = selected_row.saturating_sub(height.saturating_sub(1));
         }
     }
-
-    fn move_down(&mut self) {
-        let len = self.visible_len();
-        if len == 0 {
-            self.selected_flat = None;
-            self.list_offset = 0;
-            return;
-        }
-
-        let selected = self.selected_flat.unwrap_or(0);
-        self.selected_flat = Some((selected + 1).min(len.saturating_sub(1)));
-    }
-
-    fn move_up(&mut self) {
-        let len = self.visible_len();
-        if len == 0 {
-            self.selected_flat = None;
-            self.list_offset = 0;
-            return;
-        }
-
-        let selected = self.selected_flat.unwrap_or(0);
-        self.selected_flat = Some(selected.saturating_sub(1));
-    }
-
-    fn refresh_selected_logs(&mut self, epochs: &[Vec<OperationView>]) {
-        let Some(sel) = self.selected_flat else {
-            self.stdout_rendered = Text::default();
-            self.stderr_rendered = Text::default();
-            self.last_render_key = None;
-            self.last_ansi_error = None;
-            return;
-        };
-
-        let Some((e, o)) = self.flat_index_to_epoch_operation.get(sel).copied() else {
-            self.stdout_rendered = Text::default();
-            self.stderr_rendered = Text::default();
-            self.last_render_key = None;
-            self.last_ansi_error = None;
-            return;
-        };
-
-        let Some(op) = epochs.get(e).and_then(|v| v.get(o)) else {
-            self.stdout_rendered = Text::default();
-            self.stderr_rendered = Text::default();
-            self.last_render_key = None;
-            self.last_ansi_error = None;
-            return;
-        };
-
-        let out_hash = fingerprint(&op.stdout);
-        let err_hash = fingerprint(&op.stderr);
-
-        let key = (e, o, out_hash, err_hash);
-        if self.last_render_key == Some(key) {
-            return;
-        }
-
-        self.last_render_key = Some(key);
-        self.last_ansi_error = None;
-
-        let (stdout_text, stdout_err) = ansi_to_text_or_fallback(&op.stdout, "stdout");
-        let (stderr_text, stderr_err) = ansi_to_text_or_fallback(&op.stderr, "stderr");
-
-        self.stdout_rendered = stdout_text;
-        self.stderr_rendered = stderr_text;
-
-        self.last_ansi_error = stdout_err.or(stderr_err);
-    }
-
-    fn view_model(
-        &mut self,
-        epochs: &[Vec<OperationView>],
-        area: Rect,
-    ) -> OperationsApplyViewModel {
-        if self.flat_index_to_epoch_operation.is_empty() {
-            self.rebuild_index(epochs);
-        }
-
-        let layout = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Percentage(60), Constraint::Percentage(40)].as_ref())
-            .split(area);
-
-        let mut items: Vec<ListItem<'static>> = Vec::new();
-        for (epoch_index, operations) in epochs.iter().enumerate() {
-            for (operation_index, operation) in operations.iter().enumerate() {
-                let status = if operation.is_complete { "✅" } else { "…" };
-                let label = format!(
-                    "[{status}] (epoch {epoch_index}, operation {operation_index}) {}",
-                    operation.label
-                );
-                items.push(ListItem::new(Line::from(Span::raw(label))));
-            }
-        }
-
-        if self.visible_len() == 0 {
-            self.selected_flat = None;
-            self.list_offset = 0;
-        } else {
-            let sel = self.selected_flat.unwrap_or(0).min(self.visible_len() - 1);
-            self.selected_flat = Some(sel);
-        }
-
-        let list_inner_height = layout[0].height.saturating_sub(2) as usize;
-        if let Some(sel) = self.selected_flat {
-            self.ensure_visible_row(sel, list_inner_height);
-        }
-
-        self.refresh_selected_logs(epochs);
-
-        let mut stdout = self.stdout_rendered.clone();
-        let stderr = self.stderr_rendered.clone();
-
-        if let Some(err) = self.last_ansi_error.clone() {
-            let header = Line::from(Span::styled(
-                format!("ansi-to-tui parse issue: {err}"),
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-            ));
-
-            let mut lines = vec![header, Line::raw("")];
-            lines.extend(stdout.lines);
-            stdout = Text::from(lines);
-        }
-
-        OperationsApplyViewModel {
-            operations: ListViewModel {
-                title: "operations epochs:".to_string(),
-                items,
-                selected: self.selected_flat,
-                offset: self.list_offset,
-            },
-            stdout,
-            stderr,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
-struct TuiState {
+struct TuiApp {
     app_view: AppView,
     stage: PipelineStage,
     follow_pipeline: bool,
@@ -608,7 +371,7 @@ struct TuiState {
     child_exited: bool,
 }
 
-impl TuiState {
+impl TuiApp {
     fn new() -> Self {
         Self {
             app_view: AppView::default(),
@@ -630,6 +393,7 @@ impl TuiState {
 
     fn apply_update(&mut self, update: AppUpdate) -> Result<(), TuiError> {
         let current = std::mem::take(&mut self.app_view);
+
         self.app_view = current.update(update)?;
 
         if self.follow_pipeline {
@@ -640,9 +404,7 @@ impl TuiState {
         }
 
         if let Some(epochs) = app_view_epochs(&self.app_view) {
-            // Rebuild mapping if shape changed; this keeps selection stable and safe.
             self.operations_apply_state.rebuild_index(epochs);
-            self.operations_apply_state.refresh_selected_logs(epochs);
         }
 
         Ok(())
@@ -653,59 +415,54 @@ impl TuiState {
     }
 
     fn handle_event(&mut self, event: CEvent) -> Result<bool, TuiError> {
-        match event {
-            CEvent::Key(KeyEvent {
-                code, modifiers, ..
-            }) => {
-                if modifiers == KeyModifiers::NONE {
-                    match code {
-                        KeyCode::Char('q') | KeyCode::Esc => return Ok(true),
+        if let CEvent::Key(KeyEvent {
+            code, modifiers, ..
+        }) = event
+        {
+            if modifiers == KeyModifiers::NONE {
+                match code {
+                    KeyCode::Char('q') | KeyCode::Esc => return Ok(true),
 
-                        KeyCode::Char('f') => {
-                            self.follow_pipeline = !self.follow_pipeline;
-                            if self.follow_pipeline {
-                                let next = PipelineStage::from_app_view(&self.app_view);
-                                if next.is_available(&self.app_view) {
-                                    self.stage = next;
-                                }
+                    KeyCode::Char('f') => {
+                        self.follow_pipeline = !self.follow_pipeline;
+                        if self.follow_pipeline {
+                            let next = PipelineStage::from_app_view(&self.app_view);
+                            if next.is_available(&self.app_view) {
+                                self.stage = next;
                             }
                         }
-
-                        KeyCode::Left => {
-                            self.follow_pipeline = false;
-                            self.navigate_stage_relative(-1);
-                        }
-
-                        KeyCode::Right => {
-                            self.follow_pipeline = false;
-                            self.navigate_stage_relative(1);
-                        }
-
-                        KeyCode::Tab => {
-                            self.follow_pipeline = false;
-                            self.navigate_stage_relative(1);
-                        }
-
-                        KeyCode::BackTab => {
-                            self.follow_pipeline = false;
-                            self.navigate_stage_relative(-1);
-                        }
-
-                        KeyCode::Down | KeyCode::Char('j') => self.move_down(),
-                        KeyCode::Up | KeyCode::Char('k') => self.move_up(),
-
-                        KeyCode::Enter | KeyCode::Char(' ') => self.toggle_selected(),
-
-                        _ => {}
                     }
+
+                    KeyCode::Left => {
+                        self.follow_pipeline = false;
+                        self.navigate_stage_relative(-1);
+                    }
+
+                    KeyCode::Right => {
+                        self.follow_pipeline = false;
+                        self.navigate_stage_relative(1);
+                    }
+
+                    // Optional: keep Tab behavior as another way to move between stages.
+                    KeyCode::Tab => {
+                        self.follow_pipeline = false;
+                        self.navigate_stage_relative(1);
+                    }
+
+                    // Optional: keep Shift-Tab behavior as another way to move between stages.
+                    KeyCode::BackTab => {
+                        self.follow_pipeline = false;
+                        self.navigate_stage_relative(-1);
+                    }
+
+                    KeyCode::Down | KeyCode::Char('j') => self.move_down(),
+                    KeyCode::Up | KeyCode::Char('k') => self.move_up(),
+
+                    KeyCode::Enter | KeyCode::Char(' ') => self.toggle_selected(),
+
+                    _ => {}
                 }
             }
-
-            CEvent::Resize(_, _) => {
-                // No-op: we clamp offsets during view-model construction.
-            }
-
-            _ => {}
         }
 
         Ok(false)
@@ -740,14 +497,17 @@ impl TuiState {
     fn move_down(&mut self) {
         match self.stage {
             PipelineStage::OperationsEpochs => {
-                self.operations_apply_state.move_down();
-                if let Some(epochs) = app_view_epochs(&self.app_view) {
-                    self.operations_apply_state.refresh_selected_logs(epochs);
+                let len = self.operations_apply_state.visible_len();
+                if len == 0 {
+                    return;
                 }
+                let selected = self.operations_apply_state.selected_flat.unwrap_or(0);
+                self.operations_apply_state.selected_flat =
+                    Some((selected + 1).min(len.saturating_sub(1)));
             }
             _ => {
                 if let Some((tree, state)) = self.tree_for_stage_mut() {
-                    state.move_selection(tree, 1);
+                    tree_move_selection(tree, state, 1);
                 }
             }
         }
@@ -756,14 +516,12 @@ impl TuiState {
     fn move_up(&mut self) {
         match self.stage {
             PipelineStage::OperationsEpochs => {
-                self.operations_apply_state.move_up();
-                if let Some(epochs) = app_view_epochs(&self.app_view) {
-                    self.operations_apply_state.refresh_selected_logs(epochs);
-                }
+                let selected = self.operations_apply_state.selected_flat.unwrap_or(0);
+                self.operations_apply_state.selected_flat = Some(selected.saturating_sub(1));
             }
             _ => {
                 if let Some((tree, state)) = self.tree_for_stage_mut() {
-                    state.move_selection(tree, -1);
+                    tree_move_selection(tree, state, -1);
                 }
             }
         }
@@ -771,7 +529,17 @@ impl TuiState {
 
     fn toggle_selected(&mut self) {
         if let Some((tree, state)) = self.tree_for_stage_mut() {
-            state.toggle_selected_branch(tree);
+            let rows = build_visible_rows(tree, state);
+            if rows.is_empty() {
+                return;
+            }
+
+            let selected_row = selected_row_index(&rows, state).unwrap_or(0);
+            let row = &rows[selected_row];
+
+            if row.is_branch {
+                state.toggle(row.index);
+            }
         }
     }
 
@@ -795,400 +563,7 @@ impl TuiState {
             PipelineStage::OperationsEpochs => None,
         }
     }
-
-    fn view_model(&mut self, size: Size, outcome: Option<&Result<(), TuiError>>) -> TuiViewModel {
-        let layout = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints(
-                [
-                    Constraint::Length(4),
-                    Constraint::Min(5),
-                    Constraint::Length(3),
-                ]
-                .as_ref(),
-            )
-            .split(Rect {
-                x: 0,
-                y: 0,
-                width: size.width,
-                height: size.height,
-            });
-
-        let pipeline = self.pipeline_view_model(outcome);
-        let main = self.main_view_model(layout[1]);
-        let status = self.status_view_model(outcome);
-
-        TuiViewModel {
-            pipeline_area: layout[0],
-            main_area: layout[1],
-            status_area: layout[2],
-            pipeline,
-            main,
-            status,
-        }
-    }
-
-    fn pipeline_view_model(&self, outcome: Option<&Result<(), TuiError>>) -> PipelineViewModel {
-        let mut pipeline_spans: Vec<Span<'static>> = Vec::new();
-
-        for (index, stage) in PipelineStage::ALL.iter().copied().enumerate() {
-            if index > 0 {
-                pipeline_spans.push(Span::styled(
-                    " -> ".to_string(),
-                    Style::default().fg(Color::DarkGray),
-                ));
-            }
-
-            let available = stage.is_available(&self.app_view);
-            let selected = stage == self.stage;
-
-            let style = match (available, selected) {
-                (true, true) => Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-                (true, false) => Style::default().fg(Color::White),
-                (false, true) => Style::default()
-                    .fg(Color::DarkGray)
-                    .add_modifier(Modifier::BOLD)
-                    .add_modifier(Modifier::CROSSED_OUT),
-                (false, false) => Style::default()
-                    .fg(Color::DarkGray)
-                    .add_modifier(Modifier::CROSSED_OUT),
-            };
-
-            pipeline_spans.push(Span::styled(stage.label().to_string(), style));
-        }
-
-        let feedback = pipeline_feedback_line(self, outcome);
-
-        let lines = vec![
-            Line::from(pipeline_spans),
-            Line::from(Span::styled(feedback, Style::default().fg(Color::Yellow))),
-        ];
-
-        PipelineViewModel {
-            title: if self.follow_pipeline {
-                "pipeline (following)".to_string()
-            } else {
-                "pipeline".to_string()
-            },
-            text: Text::from(lines),
-        }
-    }
-
-    fn main_view_model(&mut self, area: Rect) -> MainViewModel {
-        match self.stage {
-            PipelineStage::ResourceParams => match app_view_params(&self.app_view) {
-                Some(tree) => {
-                    MainViewModel::Tree(self.params_state.view_model("resource params", tree, area))
-                }
-                None => MainViewModel::Placeholder(PlaceholderViewModel {
-                    title: "lusid".to_string(),
-                    text: Text::from("Waiting for resource params..."),
-                    alignment: Alignment::Center,
-                }),
-            },
-
-            PipelineStage::Resources => match app_view_resources(&self.app_view) {
-                Some(tree) => {
-                    MainViewModel::Tree(self.resources_state.view_model("resources", tree, area))
-                }
-                None => MainViewModel::Placeholder(PlaceholderViewModel {
-                    title: "lusid".to_string(),
-                    text: Text::from("Resources are not available yet."),
-                    alignment: Alignment::Center,
-                }),
-            },
-
-            PipelineStage::ResourceStates => match app_view_states(&self.app_view) {
-                Some(tree) => {
-                    MainViewModel::Tree(self.states_state.view_model("resource states", tree, area))
-                }
-                None => MainViewModel::Placeholder(PlaceholderViewModel {
-                    title: "lusid".to_string(),
-                    text: Text::from("Resource states are not available yet."),
-                    alignment: Alignment::Center,
-                }),
-            },
-
-            PipelineStage::ResourceChanges => match app_view_changes(&self.app_view) {
-                Some(tree) => MainViewModel::Tree(self.changes_state.view_model(
-                    "resource changes",
-                    tree,
-                    area,
-                )),
-                None => MainViewModel::Placeholder(PlaceholderViewModel {
-                    title: "lusid".to_string(),
-                    text: Text::from("Resource changes are not available yet."),
-                    alignment: Alignment::Center,
-                }),
-            },
-
-            PipelineStage::OperationsTree => match app_view_operations(&self.app_view) {
-                Some(tree) => MainViewModel::Tree(self.operations_state.view_model(
-                    "operations tree",
-                    tree,
-                    area,
-                )),
-                None => MainViewModel::Placeholder(PlaceholderViewModel {
-                    title: "lusid".to_string(),
-                    text: Text::from("Operations tree is not available yet."),
-                    alignment: Alignment::Center,
-                }),
-            },
-
-            PipelineStage::OperationsEpochs => match app_view_epochs(&self.app_view) {
-                Some(epochs) => MainViewModel::OperationsApply(
-                    self.operations_apply_state.view_model(epochs, area),
-                ),
-                None => MainViewModel::Placeholder(PlaceholderViewModel {
-                    title: "lusid".to_string(),
-                    text: Text::from("Operations epochs are not available."),
-                    alignment: Alignment::Center,
-                }),
-            },
-        }
-    }
-
-    fn status_view_model(&self, outcome: Option<&Result<(), TuiError>>) -> StatusViewModel {
-        let hints =
-            "Left and Right navigate stages  Up and Down move  Enter toggles tree  f follow  q quit";
-
-        let phase = match &self.app_view {
-            AppView::Start => "planning...",
-            AppView::ResourceParams { .. } => "resource params planned",
-            AppView::Resources { .. } => "resources planned",
-            AppView::ResourceStates { .. } => "resource states fetched",
-            AppView::ResourceChanges { has_changes, .. } => match has_changes {
-                None => "changes computing...",
-                Some(true) => "changes ready",
-                Some(false) => "no changes",
-            },
-            AppView::Operations { .. } => "operations planned",
-            AppView::OperationsApply { .. } => "operations applying...",
-            AppView::Done { .. } => "complete",
-        };
-
-        let outcome_line = match outcome {
-            None => String::new(),
-            Some(Ok(())) => "process exited successfully".to_string(),
-            Some(Err(err)) => format!("process error: {err}"),
-        };
-
-        let stderr_last = self.stderr_tail.iter().last().cloned().unwrap_or_default();
-
-        let lines = vec![
-            Line::from(Span::styled(
-                format!("{phase:<40}"),
-                Style::default()
-                    .fg(Color::Green)
-                    .add_modifier(Modifier::BOLD),
-            )),
-            Line::from(Span::styled(
-                hints.to_string(),
-                Style::default().fg(Color::DarkGray),
-            )),
-            Line::from(Span::styled(
-                if !outcome_line.is_empty() {
-                    outcome_line
-                } else {
-                    stderr_last
-                },
-                Style::default().fg(Color::Red),
-            )),
-        ];
-
-        StatusViewModel {
-            text: Text::from(lines),
-        }
-    }
 }
-
-/* ----------------------------- View model types ---------------------------- */
-
-#[derive(Debug, Clone)]
-struct TuiViewModel {
-    pipeline_area: Rect,
-    main_area: Rect,
-    status_area: Rect,
-
-    pipeline: PipelineViewModel,
-    main: MainViewModel,
-    status: StatusViewModel,
-}
-
-#[derive(Debug, Clone)]
-struct PipelineViewModel {
-    title: String,
-    text: Text<'static>,
-}
-
-#[derive(Debug, Clone)]
-struct StatusViewModel {
-    text: Text<'static>,
-}
-
-#[derive(Debug, Clone)]
-enum MainViewModel {
-    Placeholder(PlaceholderViewModel),
-    Tree(TreeViewModel),
-    OperationsApply(OperationsApplyViewModel),
-}
-
-#[derive(Debug, Clone)]
-struct PlaceholderViewModel {
-    title: String,
-    text: Text<'static>,
-    alignment: Alignment,
-}
-
-#[derive(Debug, Clone)]
-struct TreeViewModel {
-    title: String,
-    items: Vec<ListItem<'static>>,
-    selected: Option<usize>,
-    offset: usize,
-}
-
-#[derive(Debug, Clone)]
-struct ListViewModel {
-    title: String,
-    items: Vec<ListItem<'static>>,
-    selected: Option<usize>,
-    offset: usize,
-}
-
-#[derive(Debug, Clone)]
-struct OperationsApplyViewModel {
-    operations: ListViewModel,
-    stdout: Text<'static>,
-    stderr: Text<'static>,
-}
-
-/* -------------------------------- Rendering -------------------------------- */
-
-fn render_ui(frame: &mut ratatui::Frame, vm: &TuiViewModel) {
-    render_pipeline(frame, vm.pipeline_area, &vm.pipeline);
-    render_main(frame, vm.main_area, &vm.main);
-    render_status(frame, vm.status_area, &vm.status);
-}
-
-fn render_pipeline(frame: &mut ratatui::Frame, area: Rect, vm: &PipelineViewModel) {
-    let widget = Paragraph::new(vm.text.clone())
-        .block(
-            Block::default()
-                .borders(Borders::BOTTOM)
-                .title(vm.title.clone()),
-        )
-        .alignment(Alignment::Left)
-        .wrap(Wrap { trim: true });
-
-    frame.render_widget(widget, area);
-}
-
-fn render_status(frame: &mut ratatui::Frame, area: Rect, vm: &StatusViewModel) {
-    let widget = Paragraph::new(vm.text.clone())
-        .block(Block::default().borders(Borders::TOP))
-        .alignment(Alignment::Left)
-        .wrap(Wrap { trim: true });
-
-    frame.render_widget(widget, area);
-}
-
-fn render_main(frame: &mut ratatui::Frame, area: Rect, vm: &MainViewModel) {
-    match vm {
-        MainViewModel::Placeholder(ph) => {
-            let widget = Paragraph::new(ph.text.clone())
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title(ph.title.clone()),
-                )
-                .alignment(ph.alignment);
-
-            frame.render_widget(widget, area);
-        }
-
-        MainViewModel::Tree(tree) => render_list(
-            frame,
-            area,
-            &tree.title,
-            &tree.items,
-            tree.selected,
-            tree.offset,
-        ),
-
-        MainViewModel::OperationsApply(apply) => render_apply(frame, area, apply),
-    }
-}
-
-fn render_list(
-    frame: &mut ratatui::Frame,
-    area: Rect,
-    title: &str,
-    items: &[ListItem<'static>],
-    selected: Option<usize>,
-    offset: usize,
-) {
-    let mut list_state = ListState::default();
-    list_state.select(selected);
-    *list_state.offset_mut() = offset;
-
-    let widget = List::new(items.to_vec())
-        .block(Block::default().borders(Borders::ALL).title(title))
-        .highlight_style(
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        );
-
-    frame.render_stateful_widget(widget, area, &mut list_state);
-}
-
-fn render_apply(frame: &mut ratatui::Frame<'_>, area: Rect, vm: &OperationsApplyViewModel) {
-    let layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)].as_ref())
-        .split(area);
-
-    let mut list_state = ListState::default();
-    list_state.select(vm.operations.selected);
-    *list_state.offset_mut() = vm.operations.offset;
-
-    let operations_list = List::new(vm.operations.items.clone())
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(vm.operations.title.clone()),
-        )
-        .highlight_style(
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        );
-
-    frame.render_stateful_widget(operations_list, layout[0], &mut list_state);
-
-    let logs_layout = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)].as_ref())
-        .split(layout[1]);
-
-    let stdout_widget = Paragraph::new(vm.stdout.clone())
-        .block(Block::default().borders(Borders::ALL).title("stdout"))
-        .wrap(Wrap { trim: false })
-        .style(Style::default().fg(Color::White));
-
-    let stderr_widget = Paragraph::new(vm.stderr.clone())
-        .block(Block::default().borders(Borders::ALL).title("stderr"))
-        .wrap(Wrap { trim: false })
-        .style(Style::default().fg(Color::Red));
-
-    frame.render_widget(stdout_widget, logs_layout[0]);
-    frame.render_widget(stderr_widget, logs_layout[1]);
-}
-
-/* --------------------------- AppView access helpers -------------------------- */
 
 fn app_view_params(view: &AppView) -> Option<&FlatViewTree> {
     match view {
@@ -1293,9 +668,83 @@ fn app_view_epochs(view: &AppView) -> Option<&Vec<Vec<OperationView>>> {
     }
 }
 
-/* ---------------------------- Pipeline feedback ---------------------------- */
+fn draw_ui(frame: &mut ratatui::Frame, app: &mut TuiApp, outcome: Option<&Result<(), TuiError>>) {
+    let size = frame.size();
 
-fn pipeline_feedback_line(app: &TuiState, outcome: Option<&Result<(), TuiError>>) -> String {
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(
+            [
+                Constraint::Length(4),
+                Constraint::Min(5),
+                Constraint::Length(3),
+            ]
+            .as_ref(),
+        )
+        .split(size);
+
+    draw_pipeline(frame, layout[0], app, outcome);
+    draw_main(frame, layout[1], app);
+    draw_status(frame, layout[2], app, outcome);
+}
+
+fn draw_pipeline(
+    frame: &mut ratatui::Frame,
+    area: Rect,
+    app: &TuiApp,
+    outcome: Option<&Result<(), TuiError>>,
+) {
+    let mut pipeline_spans: Vec<Span> = Vec::new();
+
+    for (index, stage) in PipelineStage::ALL.iter().copied().enumerate() {
+        if index > 0 {
+            pipeline_spans.push(Span::styled(" -> ", Style::default().fg(Color::DarkGray)));
+        }
+
+        let available = stage.is_available(&app.app_view);
+        let selected = stage == app.stage;
+
+        let style = match (available, selected) {
+            (true, true) => Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+            (true, false) => Style::default().fg(Color::White),
+            (false, true) => Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD)
+                .add_modifier(Modifier::CROSSED_OUT),
+            (false, false) => Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::CROSSED_OUT),
+        };
+
+        pipeline_spans.push(Span::styled(stage.label(), style));
+    }
+
+    let feedback = pipeline_feedback_line(app, outcome);
+
+    let lines = vec![
+        Line::from(pipeline_spans),
+        Line::from(Span::styled(feedback, Style::default().fg(Color::Yellow))),
+    ];
+
+    let widget = Paragraph::new(Text::from(lines))
+        .block(
+            Block::default()
+                .borders(Borders::BOTTOM)
+                .title(if app.follow_pipeline {
+                    "pipeline (following)"
+                } else {
+                    "pipeline"
+                }),
+        )
+        .alignment(Alignment::Left)
+        .wrap(Wrap { trim: true });
+
+    frame.render_widget(widget, area);
+}
+
+fn pipeline_feedback_line(app: &TuiApp, outcome: Option<&Result<(), TuiError>>) -> String {
     if let Some(Err(err)) = outcome {
         return format!("Process error: {err}");
     }
@@ -1329,7 +778,257 @@ fn pipeline_feedback_line(app: &TuiState, outcome: Option<&Result<(), TuiError>>
     }
 }
 
-/* ------------------------------- Tree rows -------------------------------- */
+fn draw_main(frame: &mut ratatui::Frame<'_>, area: Rect, app: &mut TuiApp) {
+    match app.stage {
+        PipelineStage::ResourceParams => match app_view_params(&app.app_view) {
+            Some(tree) => draw_tree(frame, area, "resource params", tree, &mut app.params_state),
+            None => draw_placeholder(frame, area, "Waiting for resource params..."),
+        },
+
+        PipelineStage::Resources => match app_view_resources(&app.app_view) {
+            Some(tree) => draw_tree(frame, area, "resources", tree, &mut app.resources_state),
+            None => draw_placeholder(frame, area, "Resources are not available yet."),
+        },
+
+        PipelineStage::ResourceStates => match app_view_states(&app.app_view) {
+            Some(tree) => draw_tree(frame, area, "resource states", tree, &mut app.states_state),
+            None => draw_placeholder(frame, area, "Resource states are not available yet."),
+        },
+
+        PipelineStage::ResourceChanges => match app_view_changes(&app.app_view) {
+            Some(tree) => draw_tree(
+                frame,
+                area,
+                "resource changes",
+                tree,
+                &mut app.changes_state,
+            ),
+            None => draw_placeholder(frame, area, "Resource changes are not available yet."),
+        },
+
+        PipelineStage::OperationsTree => match app_view_operations(&app.app_view) {
+            Some(tree) => draw_tree(
+                frame,
+                area,
+                "operations tree",
+                tree,
+                &mut app.operations_state,
+            ),
+            None => draw_placeholder(frame, area, "Operations tree is not available yet."),
+        },
+
+        PipelineStage::OperationsEpochs => match app_view_epochs(&app.app_view) {
+            Some(epochs) => draw_apply(frame, area, epochs, &mut app.operations_apply_state),
+            None => draw_placeholder(frame, area, "Operations epochs are not available."),
+        },
+    }
+}
+
+fn draw_status(
+    frame: &mut ratatui::Frame<'_>,
+    area: Rect,
+    app: &TuiApp,
+    outcome: Option<&Result<(), TuiError>>,
+) {
+    let hints =
+        "Left and Right navigate stages  Up and Down move  Enter toggles tree  f follow  q quit";
+
+    let phase = match &app.app_view {
+        AppView::Start => "planning...",
+        AppView::ResourceParams { .. } => "resource params planned",
+        AppView::Resources { .. } => "resources planned",
+        AppView::ResourceStates { .. } => "resource states fetched",
+        AppView::ResourceChanges { has_changes, .. } => match has_changes {
+            None => "changes computing...",
+            Some(true) => "changes ready",
+            Some(false) => "no changes",
+        },
+        AppView::Operations { .. } => "operations planned",
+        AppView::OperationsApply { .. } => "operations applying...",
+        AppView::Done { .. } => "complete",
+    };
+
+    let outcome_line = match outcome {
+        None => String::new(),
+        Some(Ok(())) => "process exited successfully".to_string(),
+        Some(Err(err)) => format!("process error: {err}"),
+    };
+
+    let stderr_last = app.stderr_tail.iter().last().cloned().unwrap_or_default();
+
+    let lines = vec![
+        Line::from(Span::styled(
+            format!("{phase:<40}"),
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(hints, Style::default().fg(Color::DarkGray))),
+        Line::from(Span::styled(
+            if !outcome_line.is_empty() {
+                outcome_line
+            } else {
+                stderr_last
+            },
+            Style::default().fg(Color::Red),
+        )),
+    ];
+
+    let widget = Paragraph::new(Text::from(lines))
+        .block(Block::default().borders(Borders::TOP))
+        .alignment(Alignment::Left)
+        .wrap(Wrap { trim: true });
+
+    frame.render_widget(widget, area);
+}
+
+fn draw_placeholder(frame: &mut ratatui::Frame<'_>, area: Rect, text: &str) {
+    let widget = Paragraph::new(Text::from(text))
+        .block(Block::default().borders(Borders::ALL).title("lusid"))
+        .alignment(Alignment::Center);
+    frame.render_widget(widget, area);
+}
+
+fn draw_apply(
+    frame: &mut ratatui::Frame<'_>,
+    area: Rect,
+    epochs: &[Vec<OperationView>],
+    state: &mut OperationsApplyState,
+) {
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)].as_ref())
+        .split(area);
+
+    if state.flat_index_to_epoch_operation.is_empty() {
+        state.rebuild_index(epochs);
+    }
+
+    let mut items: Vec<ListItem<'_>> = Vec::new();
+    for (epoch_index, operations) in epochs.iter().enumerate() {
+        for (operation_index, operation) in operations.iter().enumerate() {
+            let status = if operation.is_complete { "✅" } else { "…" };
+            let label = format!(
+                "[{status}] (epoch {epoch_index}, operation {operation_index}) {}",
+                operation.label
+            );
+            items.push(ListItem::new(Line::from(Span::raw(label))));
+        }
+    }
+
+    let mut list_state = ListState::default();
+    if let Some(selected) = state.selected_flat {
+        list_state.select(Some(selected));
+    }
+    *list_state.offset_mut() = state.list_offset;
+
+    let height = layout[0].height.saturating_sub(2) as usize;
+    if let Some(sel) = state.selected_flat {
+        state.ensure_visible_row(sel, height);
+        *list_state.offset_mut() = state.list_offset;
+    }
+
+    let operations_list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("operations epochs:"),
+        )
+        .highlight_style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        );
+
+    frame.render_stateful_widget(operations_list, layout[0], &mut list_state);
+
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+
+    if let Some(sel) = state.selected_flat {
+        if let Some((e, o)) = state.flat_index_to_epoch_operation.get(sel).copied() {
+            if let Some(op) = epochs.get(e).and_then(|v| v.get(o)) {
+                stdout = op.stdout.clone();
+                stderr = op.stderr.clone();
+            }
+        }
+    }
+
+    let logs_layout = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)].as_ref())
+        .split(layout[1]);
+
+    let stdout_widget = Paragraph::new(stdout)
+        .block(Block::default().borders(Borders::ALL).title("stdout"))
+        .wrap(Wrap { trim: false })
+        .style(Style::default().fg(Color::White));
+
+    let stderr_widget = Paragraph::new(stderr)
+        .block(Block::default().borders(Borders::ALL).title("stderr"))
+        .wrap(Wrap { trim: false })
+        .style(Style::default().fg(Color::Red));
+
+    frame.render_widget(stdout_widget, logs_layout[0]);
+    frame.render_widget(stderr_widget, logs_layout[1]);
+}
+
+fn draw_tree(
+    frame: &mut ratatui::Frame<'_>,
+    area: Rect,
+    title: &str,
+    tree: &FlatViewTree,
+    state: &mut TreeState,
+) {
+    let rows = build_visible_rows(tree, state);
+
+    if state.selected_node.is_none() {
+        state.selected_node = rows.first().map(|r| r.index);
+    }
+
+    let selected_row = selected_row_index(&rows, state);
+
+    let items = rows
+        .iter()
+        .map(|row| {
+            let mut spans: Vec<Span> = Vec::new();
+            spans.push(Span::raw("  ".repeat(row.depth)));
+
+            if row.is_branch {
+                spans.push(Span::styled(
+                    format!("{} ", if row.is_expanded { "▼" } else { "▶" }),
+                    Style::default().fg(Color::Yellow),
+                ));
+            } else {
+                spans.push(Span::styled("• ", Style::default().fg(Color::DarkGray)));
+            }
+
+            spans.push(Span::raw(&row.label));
+
+            ListItem::new(Line::from(spans))
+        })
+        .collect::<Vec<_>>();
+
+    let mut list_state = ListState::default();
+    list_state.select(selected_row);
+    *list_state.offset_mut() = state.list_offset;
+
+    let inner_height = area.height.saturating_sub(2) as usize;
+    if let Some(selected_row) = selected_row {
+        state.ensure_visible_row(selected_row, inner_height);
+        *list_state.offset_mut() = state.list_offset;
+    }
+
+    let widget = List::new(items)
+        .block(Block::default().borders(Borders::ALL).title(title))
+        .highlight_style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        );
+
+    frame.render_stateful_widget(widget, area, &mut list_state);
+}
 
 #[derive(Debug, Clone)]
 struct TreeRow {
@@ -1415,34 +1114,25 @@ fn selected_row_index(rows: &[TreeRow], state: &TreeState) -> Option<usize> {
     rows.iter().position(|r| r.index == selected_node)
 }
 
-/* --------------------------- ANSI conversion utils -------------------------- */
+fn tree_move_selection(tree: &FlatViewTree, state: &mut TreeState, delta: i32) {
+    let rows = build_visible_rows(tree, state);
 
-fn ansi_to_text_or_fallback(input: &str, label: &str) -> (Text<'static>, Option<String>) {
-    if input.is_empty() {
-        return (Text::default(), None);
+    if rows.is_empty() {
+        state.selected_node = None;
+        state.list_offset = 0;
+        return;
     }
 
-    match input.into_text() {
-        Ok(text) => (text.to_owned(), None),
-        Err(err) => {
-            let msg = format!("{label} parse error: {err}");
-            let fallback = Text::from(input.to_string());
-            (fallback, Some(msg))
-        }
-    }
+    let current_row = selected_row_index(&rows, state).unwrap_or(0);
+
+    let next_row = if delta >= 0 {
+        (current_row + delta as usize).min(rows.len() - 1)
+    } else {
+        current_row.saturating_sub((-delta) as usize)
+    };
+
+    state.selected_node = Some(rows[next_row].index);
 }
-
-// A cheap, deterministic fingerprint so we only re-parse ANSI when content changes.
-// (Not cryptographic.)
-fn fingerprint(s: &str) -> u64 {
-    use std::collections::hash_map::DefaultHasher;
-
-    let mut h = DefaultHasher::new();
-    s.hash(&mut h);
-    h.finish()
-}
-
-/* ------------------------------ Small helpers ------------------------------ */
 
 #[derive(Debug, Clone)]
 struct CircularBuffer<T> {
