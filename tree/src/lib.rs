@@ -45,6 +45,13 @@ impl<Node, Meta> Tree<Node, Meta> {
         matches!(self, Tree::Branch { .. })
     }
 
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Tree::Branch { children, .. } => children.iter().all(|child| child.is_empty()),
+            Tree::Leaf { .. } => false,
+        }
+    }
+
     pub fn map<NextNode, MapFn>(self, map: MapFn) -> Tree<NextNode, Meta>
     where
         MapFn: Fn(Node) -> NextNode + Copy,

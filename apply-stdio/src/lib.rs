@@ -812,7 +812,7 @@ impl AppView {
 /// Lenient conversion to nested ViewTree:
 /// - Skips missing or invalid children
 /// - If the root is missing, returns a single-node tree with "?".
-impl From<FlatViewTree> for ViewTree {
+impl From<FlatViewTree> for Option<ViewTree> {
     fn from(value: FlatViewTree) -> Self {
         fn build(tree: &mut [Option<FlatViewTreeNode>], index: usize) -> Option<ViewTree> {
             if index >= tree.len() {
@@ -825,29 +825,29 @@ impl From<FlatViewTree> for ViewTree {
                     Some(ViewTree::Leaf { view })
                 }
                 FlatViewTreeNode::Branch { view, children } => {
-                    let mut built_children = Vec::new();
-                    for child_index in children {
-                        if let Some(child) = build(tree, child_index) {
-                            built_children.push(child);
-                        }
+                    let children: Vec<_> = children
+                        .iter()
+                        .filter_map(|child| build(tree, *child))
+                        .collect();
+                    if children.is_empty() {
+                        return None;
                     }
-                    Some(ViewTree::Branch {
-                        view,
-                        children: built_children,
-                    })
+                    Some(ViewTree::Branch { view, children })
                 }
             }
         }
 
         let mut nodes = value.nodes;
-        build(&mut nodes, 0).unwrap_or_else(|| ViewTree::Leaf {
-            view: View::Span("?".into()),
-        })
+        build(&mut nodes, 0)
     }
 }
 
 impl std::fmt::Display for FlatViewTree {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        ViewTree::from(self.clone()).fmt(f)
+        if let Some(tree) = Option::<ViewTree>::from(self.clone()) {
+            tree.fmt(f)
+        } else {
+            write!(f, "<empty>")
+        }
     }
 }

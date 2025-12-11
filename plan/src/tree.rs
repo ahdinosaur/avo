@@ -55,7 +55,7 @@ where
 {
     match tree {
         Tree::Branch { meta, children } => ViewTree::Branch {
-            view: meta.id.map(|id| id.render()).unwrap_or("?".render()),
+            view: meta.id.map(|id| id.render()).unwrap_or(".".render()),
             children: children.into_iter().map(render_plan_tree).collect(),
         },
         Tree::Leaf { meta: _, node } => ViewTree::Leaf {
