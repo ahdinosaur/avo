@@ -9,7 +9,7 @@ use lusid_ctx::Context;
 use lusid_ssh::{Ssh, SshConnectOptions, SshError, SshVolume};
 use lusid_vm::{Vm, VmError, VmOptions};
 use thiserror::Error;
-use tokio::io::AsyncBufReadExt;
+use tokio::io::{AsyncBufReadExt, AsyncRead};
 use tracing::{debug, error};
 use which::which;
 
@@ -193,7 +193,21 @@ async fn cmd_local_apply(config: Config) -> Result<(), AppError> {
         command.args(["--params", &params_json]);
     }
 
-    let _output = command.run().await?;
+    let mut output = command.output().await?;
+
+    {
+        let stdout_fut = view_apply(&mut output.stdout);
+        let stderr_fut = async {
+            tokio::io::copy(&mut output.stderr, &mut tokio::io::stderr())
+                .await
+                .map(|_| ()) // drop the number of bytes written
+                .map_err(AppError::ForwardApplyStderr)
+        };
+
+        tokio::try_join!(stdout_fut, stderr_fut)?;
+    }
+
+    let _exit_status = output.status.await?;
 
     Ok(())
 }
@@ -264,118 +278,8 @@ async fn cmd_dev_apply(config: Config, machine_id: String) -> Result<(), AppErro
 
     let mut handle = ssh.command(&command).await?;
 
-    let mut view = AppView::default();
     {
-        let stdout_fut = async {
-            let reader = tokio::io::BufReader::new(&mut handle.stdout);
-            let mut lines = reader.lines();
-
-            loop {
-                let Some(line) = lines.next_line().await.map_err(AppError::ReadApplyStdout)? else {
-                    break;
-                };
-                let update: AppUpdate =
-                    serde_json::from_str(&line).map_err(AppError::ParseApplyStdoutJson)?;
-
-                debug!("update: {:?}", update);
-
-                view = view.update(update.clone())?;
-
-                match update {
-                    AppUpdate::ResourceParams { .. } => {
-                        let AppView::ResourceParams {
-                            ref resource_params,
-                        } = view
-                        else {
-                            return Err(AppError::UnexpectedViewState);
-                        };
-                        println!("resource params: {}", resource_params);
-                    }
-                    AppUpdate::ResourcesComplete => {
-                        let AppView::Resources { ref resources, .. } = view else {
-                            return Err(AppError::UnexpectedViewState);
-                        };
-                        println!("resources: {}", resources);
-                    }
-                    AppUpdate::ResourceStatesComplete => {
-                        let AppView::ResourceStates {
-                            ref resource_states,
-                            ..
-                        } = view
-                        else {
-                            return Err(AppError::UnexpectedViewState);
-                        };
-                        println!("resource states: {}", resource_states);
-                    }
-                    AppUpdate::ResourceChangesComplete { has_changes } => {
-                        let AppView::ResourceChanges {
-                            ref resource_changes,
-                            ..
-                        } = view
-                        else {
-                            return Err(AppError::UnexpectedViewState);
-                        };
-                        println!("resource changes: {}", resource_changes);
-                        if !has_changes {
-                            println!("no changes!")
-                        }
-                    }
-                    AppUpdate::OperationsComplete => {
-                        let AppView::Operations {
-                            ref operations_tree,
-                            ..
-                        } = view
-                        else {
-                            return Err(AppError::UnexpectedViewState);
-                        };
-                        println!("operations: {}", operations_tree);
-                    }
-                    AppUpdate::OperationsApplyStart { operations: epochs } => {
-                        println!("operations by epoch:");
-                        for (epoch_index, epoch) in epochs.iter().enumerate() {
-                            println!("  - epoch #{epoch_index}:");
-                            for operation in epoch {
-                                println!("    - {operation}");
-                            }
-                        }
-                    }
-                    AppUpdate::OperationApplyStart { index } => {
-                        let AppView::OperationsApply {
-                            operations_epochs: ref epochs,
-                            ..
-                        } = view
-                        else {
-                            return Err(AppError::UnexpectedViewState);
-                        };
-                        let epoch = epochs.get(index.0).unwrap_or_else(|| {
-                            panic!("expected operation epoch {} to exist", index.0)
-                        });
-                        let operation = epoch.get(index.1).unwrap_or_else(|| {
-                            panic!("expected operation {} in epoch to exist", index.1)
-                        });
-                        println!(
-                            "starting operation ({}, {}): {}",
-                            index.0, index.1, operation.label
-                        )
-                    }
-                    AppUpdate::OperationApplyStdout { index: _, stdout } => {
-                        println!("{stdout}")
-                    }
-                    AppUpdate::OperationApplyStderr { index: _, stderr } => {
-                        eprintln!("{stderr}")
-                    }
-                    AppUpdate::OperationApplyComplete { index: _ } => {
-                        println!("✅️")
-                    }
-                    AppUpdate::OperationsApplyComplete => {
-                        println!("✅️✅️✅️")
-                    }
-                    _ => {}
-                }
-            }
-
-            Ok(())
-        };
+        let stdout_fut = view_apply(&mut handle.stdout);
         let stderr_fut = async {
             tokio::io::copy(&mut handle.stderr, &mut tokio::io::stderr())
                 .await
@@ -423,6 +327,121 @@ async fn cmd_dev_ssh(config: Config, machine_id: String) -> Result<(), AppError>
     let _exit_code = ssh.terminal().await?;
 
     ssh.disconnect().await?;
+
+    Ok(())
+}
+
+async fn view_apply<ApplyOut>(apply_out: &mut ApplyOut) -> Result<(), AppError>
+where
+    ApplyOut: AsyncRead + Unpin,
+{
+    let mut view = AppView::default();
+    let reader = tokio::io::BufReader::new(apply_out);
+    let mut lines = reader.lines();
+
+    loop {
+        let Some(line) = lines.next_line().await.map_err(AppError::ReadApplyStdout)? else {
+            break;
+        };
+        let update: AppUpdate =
+            serde_json::from_str(&line).map_err(AppError::ParseApplyStdoutJson)?;
+
+        debug!("update: {:?}", update);
+
+        view = view.update(update.clone())?;
+
+        match update {
+            AppUpdate::ResourceParams { .. } => {
+                let AppView::ResourceParams {
+                    ref resource_params,
+                } = view
+                else {
+                    return Err(AppError::UnexpectedViewState);
+                };
+                println!("resource params: {}", resource_params);
+            }
+            AppUpdate::ResourcesComplete => {
+                let AppView::Resources { ref resources, .. } = view else {
+                    return Err(AppError::UnexpectedViewState);
+                };
+                println!("resources: {}", resources);
+            }
+            AppUpdate::ResourceStatesComplete => {
+                let AppView::ResourceStates {
+                    ref resource_states,
+                    ..
+                } = view
+                else {
+                    return Err(AppError::UnexpectedViewState);
+                };
+                println!("resource states: {}", resource_states);
+            }
+            AppUpdate::ResourceChangesComplete { has_changes } => {
+                let AppView::ResourceChanges {
+                    ref resource_changes,
+                    ..
+                } = view
+                else {
+                    return Err(AppError::UnexpectedViewState);
+                };
+                println!("resource changes: {}", resource_changes);
+                if !has_changes {
+                    println!("no changes!")
+                }
+            }
+            AppUpdate::OperationsComplete => {
+                let AppView::Operations {
+                    ref operations_tree,
+                    ..
+                } = view
+                else {
+                    return Err(AppError::UnexpectedViewState);
+                };
+                println!("operations: {}", operations_tree);
+            }
+            AppUpdate::OperationsApplyStart { operations: epochs } => {
+                println!("operations by epoch:");
+                for (epoch_index, epoch) in epochs.iter().enumerate() {
+                    println!("  - epoch #{epoch_index}:");
+                    for operation in epoch {
+                        println!("    - {operation}");
+                    }
+                }
+            }
+            AppUpdate::OperationApplyStart { index } => {
+                let AppView::OperationsApply {
+                    operations_epochs: ref epochs,
+                    ..
+                } = view
+                else {
+                    return Err(AppError::UnexpectedViewState);
+                };
+                let epoch = epochs
+                    .get(index.0)
+                    .unwrap_or_else(|| panic!("expected operation epoch {} to exist", index.0));
+                let operation = epoch
+                    .get(index.1)
+                    .unwrap_or_else(|| panic!("expected operation {} in epoch to exist", index.1));
+                println!(
+                    "starting operation ({}, {}): {}",
+                    index.0, index.1, operation.label
+                )
+            }
+            AppUpdate::OperationApplyStdout { index: _, stdout } => {
+                println!("{stdout}")
+            }
+            AppUpdate::OperationApplyStderr { index: _, stderr } => {
+                eprintln!("{stderr}")
+            }
+            AppUpdate::OperationApplyComplete { index: _ } => {
+                println!("✅️")
+            }
+            AppUpdate::OperationsApplyComplete => {
+                println!("✅️✅️✅️")
+            }
+            _ => {}
+        }
+    }
 
     Ok(())
 }
