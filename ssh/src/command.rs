@@ -24,20 +24,11 @@ pub enum SshCommandError {
     Russh(#[from] russh::Error),
 }
 
-/// A streaming handle to a running SSH command.
-///
-/// - stdout/stderr are AsyncBufRead (and AsyncRead) via ReadStream.
-/// - stdin is available via stdin().
-/// - exit code and other events exposed as Promises.
-/// - call wait() to await completion and get the exit code.
-pub struct SshCommandHandle {
-    pub stdout: ReadStream,
-    pub stderr: ReadStream,
-    pub channel: AsyncChannel,
-    pub command: String,
+pub struct SshChannelHandle {
+    channel: AsyncChannel,
 }
 
-impl SshCommandHandle {
+impl SshChannelHandle {
     /// Obtain a writer for the command's stdin.
     pub fn stdin(&self) -> impl AsyncWrite + use<> {
         self.channel.stdin()
@@ -61,7 +52,7 @@ impl SshCommandHandle {
     /// Close the channel cleanly and wait for it to be closed, returning exit
     /// code if received.
     #[tracing::instrument(skip(self))]
-    pub async fn wait(mut self) -> Result<Option<u32>, SshError> {
+    pub async fn wait(&mut self) -> Result<Option<u32>, SshError> {
         let exit_code = self.exit_code().wait().await.copied();
 
         if !self.channel.is_closed() {
@@ -77,6 +68,19 @@ impl SshCommandHandle {
 
         Ok(exit_code)
     }
+}
+
+/// A streaming handle to a running SSH command.
+///
+/// - stdout/stderr are AsyncBufRead (and AsyncRead) via ReadStream.
+/// - stdin is available via stdin().
+/// - exit code and other events exposed as Promises.
+/// - call wait() to await completion and get the exit code.
+pub struct SshCommandHandle {
+    pub stdout: ReadStream,
+    pub stderr: ReadStream,
+    pub channel: SshChannelHandle,
+    pub command: String,
 }
 
 /// Execute a remote command and return a streaming handle.
@@ -107,7 +111,7 @@ pub(super) async fn ssh_command(
     Ok(SshCommandHandle {
         stdout,
         stderr,
-        channel,
+        channel: SshChannelHandle { channel },
         command: command.to_owned(),
     })
 }
