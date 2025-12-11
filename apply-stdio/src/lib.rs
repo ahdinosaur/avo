@@ -253,7 +253,7 @@ fn replace_view_tree_nodes(
     }
 }
 
-/// A UI update event stream (same shape as before).
+/// A UI update event stream.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AppUpdate {
     ResourceParams {
@@ -416,7 +416,7 @@ impl AppView {
                 })
             }
 
-            // Phase: Resources (incremental population)
+            // Phase: Resources
             (
                 AppView::Resources {
                     resource_params,
@@ -457,7 +457,7 @@ impl AppView {
                 })
             }
 
-            // Phase: ResourceStates (streaming updates)
+            // Phase: ResourceStates
             (
                 AppView::ResourceStates {
                     resource_params,
@@ -523,7 +523,7 @@ impl AppView {
                 })
             }
 
-            // Phase: ResourceChanges (streaming updates)
+            // Phase: ResourceChanges
             (
                 AppView::ResourceChanges {
                     resource_params,
@@ -587,7 +587,7 @@ impl AppView {
                 })
             }
 
-            // Phase: Operations (streaming tree)
+            // Phase: Operations
             (
                 AppView::Operations {
                     resource_params,
