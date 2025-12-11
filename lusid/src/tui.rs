@@ -22,7 +22,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Tabs, Wrap},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
     Terminal,
 };
 use serde_json::Error as SerdeJsonError;
@@ -36,7 +36,7 @@ pub enum TuiError {
     #[error(transparent)]
     Io(#[from] io::Error),
 
-    #[error("terminal init failed")]
+    #[error("terminal initialization failed")]
     TerminalInit,
 
     #[error("failed to enable raw mode")]
@@ -84,14 +84,13 @@ where
     let mut terminal_session = TerminalSession::enter()?;
     let mut event_rx = spawn_crossterm_event_channel();
     let mut tick = interval(Duration::from_millis(33));
+
     let mut app = TuiApp::new();
 
     let mut stdout_done = false;
     let mut stderr_done = false;
 
-    // We keep the outcome and only return it after the user exits the UI.
     let mut outcome: Option<Result<(), TuiError>> = None;
-
     let mut should_quit = false;
 
     tokio::pin!(wait);
@@ -99,19 +98,14 @@ where
     loop {
         terminal_session
             .terminal
-            .draw(|frame| draw_ui(frame, &mut app))?;
+            .draw(|frame| draw_ui(frame, &mut app, outcome.as_ref()))?;
 
         tokio::select! {
-            // Child exit (only once)
             result = &mut wait, if outcome.is_none() => {
-                let result = result.map_err(Into::into);
                 app.child_exited = true;
-
-                // Keep UI open; just remember the outcome.
-                outcome = Some(result);
+                outcome = Some(result.map_err(Into::into));
             }
 
-            // Apply stdout (AppUpdate stream)
             line = stdout_lines.next_line(), if !stdout_done => {
                 match line {
                     Ok(Some(line)) => {
@@ -120,34 +114,27 @@ where
                             app.apply_update(update)?;
                         }
                     }
-                    Ok(None) => {
+                    Ok(None) => stdout_done = true,
+                    Err(err) => {
+                        app.child_exited = true;
+                        outcome = Some(Err(TuiError::ReadApplyStdout(err)));
                         stdout_done = true;
                     }
-                    Err(err) => {
-                        // Fatal: can't continue decoding updates.
-                        outcome = Some(Err(TuiError::ReadApplyStdout(err)));
-                        app.child_exited = true;
-                    }
                 }
             }
 
-            // Apply stderr (display tail)
             line = stderr_lines.next_line(), if !stderr_done => {
                 match line {
-                    Ok(Some(line)) => {
-                        app.push_stderr(line);
-                    }
-                    Ok(None) => {
-                        stderr_done = true;
-                    }
+                    Ok(Some(line)) => app.push_stderr(line),
+                    Ok(None) => stderr_done = true,
                     Err(err) => {
-                        outcome = Some(Err(TuiError::ReadApplyStderr(err)));
                         app.child_exited = true;
+                        outcome = Some(Err(TuiError::ReadApplyStderr(err)));
+                        stderr_done = true;
                     }
                 }
             }
 
-            // Keyboard
             Some(event) = event_rx.recv() => {
                 should_quit = app.handle_event(event)?;
             }
@@ -159,16 +146,10 @@ where
             break;
         }
 
-        // IMPORTANT: do NOT auto-exit just because pipes are closed.
-        // That is exactly what makes the UI “flash and close” on “no changes”.
-        //
-        // If you want optional auto-exit, do it behind a flag or a short delay.
-        if app.child_exited && outcome.is_some() && stdout_done && stderr_done {
-            app.io_closed = true; // add this bool to your app if you want to show a banner
-        }
+        let _io_closed = stdout_done && stderr_done;
+        let _ = _io_closed;
     }
 
-    // After user quits, return the child outcome (propagates failure correctly).
     match outcome {
         None => Ok(()),
         Some(result) => result,
@@ -182,6 +163,7 @@ struct TerminalSession {
 impl TerminalSession {
     fn enter() -> Result<Self, TuiError> {
         enable_raw_mode().map_err(|_| TuiError::EnableRawMode)?;
+
         let mut stdout = io::stdout();
         execute!(stdout, EnterAlternateScreen).map_err(|_| TuiError::TerminalInit)?;
 
@@ -203,69 +185,86 @@ impl Drop for TerminalSession {
 
 fn spawn_crossterm_event_channel() -> mpsc::Receiver<CEvent> {
     let (tx, rx) = mpsc::channel(64);
+
     std::thread::spawn(move || loop {
         let ready = crossterm::event::poll(Duration::from_millis(100)).unwrap_or(false);
         if !ready {
             continue;
         }
+
         if let Ok(evt) = crossterm::event::read() {
             if tx.blocking_send(evt).is_err() {
                 break;
             }
         }
     });
+
     rx
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AppTab {
+enum PipelineStage {
     ResourceParams,
     Resources,
     ResourceStates,
     ResourceChanges,
-    Operations,
-    Apply,
+    OperationsTree,
+    OperationsEpochs,
 }
 
-impl AppTab {
-    const ALL: [AppTab; 6] = [
-        AppTab::ResourceParams,
-        AppTab::Resources,
-        AppTab::ResourceStates,
-        AppTab::ResourceChanges,
-        AppTab::Operations,
-        AppTab::Apply,
+impl PipelineStage {
+    const ALL: [PipelineStage; 6] = [
+        PipelineStage::ResourceParams,
+        PipelineStage::Resources,
+        PipelineStage::ResourceStates,
+        PipelineStage::ResourceChanges,
+        PipelineStage::OperationsTree,
+        PipelineStage::OperationsEpochs,
     ];
 
-    fn title(self) -> &'static str {
+    fn label(self) -> &'static str {
         match self {
-            AppTab::ResourceParams => "params",
-            AppTab::Resources => "resources",
-            AppTab::ResourceStates => "states",
-            AppTab::ResourceChanges => "changes",
-            AppTab::Operations => "operations",
-            AppTab::Apply => "apply",
+            PipelineStage::ResourceParams => "resource params",
+            PipelineStage::Resources => "resources",
+            PipelineStage::ResourceStates => "resource states",
+            PipelineStage::ResourceChanges => "resource changes",
+            PipelineStage::OperationsTree => "operations tree",
+            PipelineStage::OperationsEpochs => "operations epochs",
         }
     }
 
     fn index(self) -> usize {
-        AppTab::ALL.iter().position(|t| *t == self).unwrap()
+        PipelineStage::ALL
+            .iter()
+            .position(|s| *s == self)
+            .expect("PipelineStage must be in ALL")
     }
 
     fn from_index(index: usize) -> Self {
-        AppTab::ALL[index]
+        PipelineStage::ALL[index]
     }
 
-    fn from_app_view(view: &AppView) -> AppTab {
+    fn is_available(self, view: &AppView) -> bool {
+        match self {
+            PipelineStage::ResourceParams => app_view_params(view).is_some(),
+            PipelineStage::Resources => app_view_resources(view).is_some(),
+            PipelineStage::ResourceStates => app_view_states(view).is_some(),
+            PipelineStage::ResourceChanges => app_view_changes(view).is_some(),
+            PipelineStage::OperationsTree => app_view_operations(view).is_some(),
+            PipelineStage::OperationsEpochs => app_view_epochs(view).is_some(),
+        }
+    }
+
+    fn from_app_view(view: &AppView) -> PipelineStage {
         match view {
-            AppView::Start => AppTab::ResourceParams,
-            AppView::ResourceParams { .. } => AppTab::ResourceParams,
-            AppView::Resources { .. } => AppTab::Resources,
-            AppView::ResourceStates { .. } => AppTab::ResourceStates,
-            AppView::ResourceChanges { .. } => AppTab::ResourceChanges,
-            AppView::Operations { .. } => AppTab::Operations,
-            AppView::OperationsApply { .. } => AppTab::Apply,
-            AppView::Done { .. } => AppTab::Apply,
+            AppView::Start => PipelineStage::ResourceParams,
+            AppView::ResourceParams { .. } => PipelineStage::ResourceParams,
+            AppView::Resources { .. } => PipelineStage::Resources,
+            AppView::ResourceStates { .. } => PipelineStage::ResourceStates,
+            AppView::ResourceChanges { .. } => PipelineStage::ResourceChanges,
+            AppView::Operations { .. } => PipelineStage::OperationsTree,
+            AppView::OperationsApply { .. } => PipelineStage::OperationsEpochs,
+            AppView::Done { .. } => PipelineStage::OperationsEpochs,
         }
     }
 }
@@ -294,7 +293,9 @@ impl TreeState {
         if height == 0 {
             return;
         }
+
         let bottom = self.list_offset + height.saturating_sub(1);
+
         if selected_row < self.list_offset {
             self.list_offset = selected_row;
         } else if selected_row > bottom {
@@ -305,42 +306,45 @@ impl TreeState {
 
 #[derive(Debug, Default, Clone)]
 struct OperationsApplyState {
-    flat_index_to_epoch_op: Vec<(usize, usize)>,
+    flat_index_to_epoch_operation: Vec<(usize, usize)>,
     selected_flat: Option<usize>,
     list_offset: usize,
 }
 
 impl OperationsApplyState {
     fn rebuild_index(&mut self, epochs: &[Vec<OperationView>]) {
-        self.flat_index_to_epoch_op.clear();
+        self.flat_index_to_epoch_operation.clear();
+
         for (epoch_index, operations) in epochs.iter().enumerate() {
             for (operation_index, _) in operations.iter().enumerate() {
-                self.flat_index_to_epoch_op
+                self.flat_index_to_epoch_operation
                     .push((epoch_index, operation_index));
             }
         }
 
-        if self.flat_index_to_epoch_op.is_empty() {
+        if self.flat_index_to_epoch_operation.is_empty() {
             self.selected_flat = None;
             self.list_offset = 0;
         } else {
             let sel = self
                 .selected_flat
                 .unwrap_or(0)
-                .min(self.flat_index_to_epoch_op.len() - 1);
+                .min(self.flat_index_to_epoch_operation.len() - 1);
             self.selected_flat = Some(sel);
         }
     }
 
     fn visible_len(&self) -> usize {
-        self.flat_index_to_epoch_op.len()
+        self.flat_index_to_epoch_operation.len()
     }
 
     fn ensure_visible_row(&mut self, selected_row: usize, height: usize) {
         if height == 0 {
             return;
         }
+
         let bottom = self.list_offset + height.saturating_sub(1);
+
         if selected_row < self.list_offset {
             self.list_offset = selected_row;
         } else if selected_row > bottom {
@@ -352,38 +356,38 @@ impl OperationsApplyState {
 #[derive(Debug, Clone)]
 struct TuiApp {
     app_view: AppView,
-    tab: AppTab,
-    tabs: Vec<String>,
-    follow_phase: bool,
+    stage: PipelineStage,
+    follow_pipeline: bool,
 
     params_state: TreeState,
     resources_state: TreeState,
     states_state: TreeState,
     changes_state: TreeState,
     operations_state: TreeState,
+
     operations_apply_state: OperationsApplyState,
 
     stderr_tail: CircularBuffer<String>,
     child_exited: bool,
-    io_closed: bool,
 }
 
 impl TuiApp {
     fn new() -> Self {
         let mut app = Self {
             app_view: AppView::default(),
-            tab: AppTab::ResourceParams,
-            tabs: AppTab::ALL.iter().map(|t| t.title().to_string()).collect(),
-            follow_phase: true,
+            stage: PipelineStage::ResourceParams,
+            follow_pipeline: true,
+
             params_state: TreeState::default(),
             resources_state: TreeState::default(),
             states_state: TreeState::default(),
             changes_state: TreeState::default(),
             operations_state: TreeState::default(),
+
             operations_apply_state: OperationsApplyState::default(),
+
             stderr_tail: CircularBuffer::new(200),
             child_exited: false,
-            io_closed: false,
         };
 
         app.params_state.expand_root();
@@ -396,24 +400,18 @@ impl TuiApp {
     }
 
     fn apply_update(&mut self, update: AppUpdate) -> Result<(), TuiError> {
-        self.app_view = self.app_view.clone().update(update)?;
+        let current = std::mem::take(&mut self.app_view);
+        self.app_view = current.update(update)?;
 
-        if self.follow_phase {
-            self.tab = AppTab::from_app_view(&self.app_view);
+        if self.follow_pipeline {
+            let next = PipelineStage::from_app_view(&self.app_view);
+            if next.is_available(&self.app_view) {
+                self.stage = next;
+            }
         }
 
-        match &self.app_view {
-            AppView::OperationsApply {
-                operations_epochs, ..
-            } => {
-                self.operations_apply_state.rebuild_index(operations_epochs);
-            }
-            AppView::Done {
-                operations_epochs, ..
-            } => {
-                self.operations_apply_state.rebuild_index(operations_epochs);
-            }
-            _ => {}
+        if let Some(epochs) = app_view_epochs(&self.app_view) {
+            self.operations_apply_state.rebuild_index(epochs);
         }
 
         Ok(())
@@ -433,128 +431,264 @@ impl TuiApp {
                     KeyCode::Char('q') | KeyCode::Esc => return Ok(true),
 
                     KeyCode::Char('f') => {
-                        self.follow_phase = !self.follow_phase;
-                        if self.follow_phase {
-                            self.tab = AppTab::from_app_view(&self.app_view);
+                        self.follow_pipeline = !self.follow_pipeline;
+                        if self.follow_pipeline {
+                            let next = PipelineStage::from_app_view(&self.app_view);
+                            if next.is_available(&self.app_view) {
+                                self.stage = next;
+                            }
                         }
                     }
 
-                    KeyCode::Tab => {
-                        self.follow_phase = false;
-                        let idx = (self.tab.index() + 1) % AppTab::ALL.len();
-                        self.tab = AppTab::from_index(idx);
-                    }
-
-                    KeyCode::BackTab => {
-                        self.follow_phase = false;
-                        let idx = (self.tab.index() + AppTab::ALL.len() - 1) % AppTab::ALL.len();
-                        self.tab = AppTab::from_index(idx);
-                    }
-
                     KeyCode::Left => {
-                        self.follow_phase = false;
-                        let idx = (self.tab.index() + AppTab::ALL.len() - 1) % AppTab::ALL.len();
-                        self.tab = AppTab::from_index(idx);
+                        self.follow_pipeline = false;
+                        self.navigate_stage_relative(-1);
                     }
 
                     KeyCode::Right => {
-                        self.follow_phase = false;
-                        let idx = (self.tab.index() + 1) % AppTab::ALL.len();
-                        self.tab = AppTab::from_index(idx);
+                        self.follow_pipeline = false;
+                        self.navigate_stage_relative(1);
+                    }
+
+                    // Optional: keep Tab behavior as another way to move between stages.
+                    KeyCode::Tab => {
+                        self.follow_pipeline = false;
+                        self.navigate_stage_relative(1);
+                    }
+
+                    // Optional: keep Shift-Tab behavior as another way to move between stages.
+                    KeyCode::BackTab => {
+                        self.follow_pipeline = false;
+                        self.navigate_stage_relative(-1);
                     }
 
                     KeyCode::Down | KeyCode::Char('j') => self.move_down(),
                     KeyCode::Up | KeyCode::Char('k') => self.move_up(),
+
                     KeyCode::Enter | KeyCode::Char(' ') => self.toggle_selected(),
 
                     _ => {}
                 }
             }
         }
+
         Ok(false)
     }
 
-    fn active_tree_state_and_tree_mut(&mut self) -> Option<(&FlatViewTree, &mut TreeState)> {
-        match (&self.tab, &self.app_view) {
-            (AppTab::ResourceParams, AppView::ResourceParams { resource_params }) => {
-                Some((resource_params, &mut self.params_state))
+    fn navigate_stage_relative(&mut self, direction: i32) {
+        if direction == 0 {
+            return;
+        }
+
+        let current_index = self.stage.index();
+
+        if direction > 0 {
+            for next_index in (current_index + 1)..PipelineStage::ALL.len() {
+                let candidate = PipelineStage::from_index(next_index);
+                if candidate.is_available(&self.app_view) {
+                    self.stage = candidate;
+                    return;
+                }
             }
-            (AppTab::Resources, AppView::Resources { resources, .. }) => {
-                Some((resources, &mut self.resources_state))
+        } else {
+            for next_index in (0..current_index).rev() {
+                let candidate = PipelineStage::from_index(next_index);
+                if candidate.is_available(&self.app_view) {
+                    self.stage = candidate;
+                    return;
+                }
             }
-            (
-                AppTab::ResourceStates,
-                AppView::ResourceStates {
-                    resource_states, ..
-                },
-            ) => Some((resource_states, &mut self.states_state)),
-            (
-                AppTab::ResourceChanges,
-                AppView::ResourceChanges {
-                    resource_changes, ..
-                },
-            ) => Some((resource_changes, &mut self.changes_state)),
-            (
-                AppTab::Operations,
-                AppView::Operations {
-                    operations_tree, ..
-                },
-            ) => Some((operations_tree, &mut self.operations_state)),
-            _ => None,
         }
     }
 
     fn move_down(&mut self) {
-        if let Some((tree, state)) = self.active_tree_state_and_tree_mut() {
-            tree_move_selection(tree, state, 1);
-            return;
-        }
-
-        if matches!(self.tab, AppTab::Apply) {
-            let len = self.operations_apply_state.visible_len();
-            if len == 0 {
-                return;
+        match self.stage {
+            PipelineStage::OperationsEpochs => {
+                let len = self.operations_apply_state.visible_len();
+                if len == 0 {
+                    return;
+                }
+                let selected = self.operations_apply_state.selected_flat.unwrap_or(0);
+                self.operations_apply_state.selected_flat =
+                    Some((selected + 1).min(len.saturating_sub(1)));
             }
-            let selected = self.operations_apply_state.selected_flat.unwrap_or(0);
-            self.operations_apply_state.selected_flat =
-                Some((selected + 1).min(len.saturating_sub(1)));
+            _ => {
+                if let Some((tree, state)) = self.tree_for_stage_mut() {
+                    tree_move_selection(tree, state, 1);
+                }
+            }
         }
     }
 
     fn move_up(&mut self) {
-        if let Some((tree, state)) = self.active_tree_state_and_tree_mut() {
-            tree_move_selection(tree, state, -1);
-            return;
-        }
-
-        if matches!(self.tab, AppTab::Apply) {
-            let selected = self.operations_apply_state.selected_flat.unwrap_or(0);
-            self.operations_apply_state.selected_flat = Some(selected.saturating_sub(1));
+        match self.stage {
+            PipelineStage::OperationsEpochs => {
+                let selected = self.operations_apply_state.selected_flat.unwrap_or(0);
+                self.operations_apply_state.selected_flat = Some(selected.saturating_sub(1));
+            }
+            _ => {
+                if let Some((tree, state)) = self.tree_for_stage_mut() {
+                    tree_move_selection(tree, state, -1);
+                }
+            }
         }
     }
 
     fn toggle_selected(&mut self) {
-        if let Some((tree, state)) = self.active_tree_state_and_tree_mut() {
+        if let Some((tree, state)) = self.tree_for_stage_mut() {
             let rows = build_visible_rows(tree, state);
             if rows.is_empty() {
                 return;
             }
+
             let selected_row = selected_row_index(&rows, state).unwrap_or(0);
             let row = &rows[selected_row];
+
             if row.is_branch {
                 state.toggle(row.index);
             }
         }
     }
+
+    fn tree_for_stage_mut(&mut self) -> Option<(&FlatViewTree, &mut TreeState)> {
+        match self.stage {
+            PipelineStage::ResourceParams => {
+                app_view_params(&self.app_view).map(|tree| (tree, &mut self.params_state))
+            }
+            PipelineStage::Resources => {
+                app_view_resources(&self.app_view).map(|tree| (tree, &mut self.resources_state))
+            }
+            PipelineStage::ResourceStates => {
+                app_view_states(&self.app_view).map(|tree| (tree, &mut self.states_state))
+            }
+            PipelineStage::ResourceChanges => {
+                app_view_changes(&self.app_view).map(|tree| (tree, &mut self.changes_state))
+            }
+            PipelineStage::OperationsTree => {
+                app_view_operations(&self.app_view).map(|tree| (tree, &mut self.operations_state))
+            }
+            PipelineStage::OperationsEpochs => None,
+        }
+    }
 }
 
-fn draw_ui(frame: &mut ratatui::Frame<'_>, app: &mut TuiApp) {
+// Accessors: map AppView to data for each pipeline stage.
+// This keeps draw logic and navigation logic simple and consistent.
+fn app_view_params(view: &AppView) -> Option<&FlatViewTree> {
+    match view {
+        AppView::ResourceParams { resource_params } => Some(resource_params),
+        AppView::Resources {
+            resource_params, ..
+        } => Some(resource_params),
+        AppView::ResourceStates {
+            resource_params, ..
+        } => Some(resource_params),
+        AppView::ResourceChanges {
+            resource_params, ..
+        } => Some(resource_params),
+        AppView::Operations {
+            resource_params, ..
+        } => Some(resource_params),
+        AppView::OperationsApply {
+            resource_params, ..
+        } => Some(resource_params),
+        AppView::Done {
+            resource_params, ..
+        } => Some(resource_params),
+        AppView::Start => None,
+    }
+}
+
+fn app_view_resources(view: &AppView) -> Option<&FlatViewTree> {
+    match view {
+        AppView::Resources { resources, .. } => Some(resources),
+        AppView::ResourceStates { resources, .. } => Some(resources),
+        AppView::ResourceChanges { resources, .. } => Some(resources),
+        AppView::Operations { resources, .. } => Some(resources),
+        AppView::OperationsApply { resources, .. } => Some(resources),
+        AppView::Done { resources, .. } => Some(resources),
+        _ => None,
+    }
+}
+
+fn app_view_states(view: &AppView) -> Option<&FlatViewTree> {
+    match view {
+        AppView::ResourceStates {
+            resource_states, ..
+        } => Some(resource_states),
+        AppView::ResourceChanges {
+            resource_states, ..
+        } => Some(resource_states),
+        AppView::Operations {
+            resource_states, ..
+        } => Some(resource_states),
+        AppView::OperationsApply {
+            resource_states, ..
+        } => Some(resource_states),
+        AppView::Done {
+            resource_states, ..
+        } => Some(resource_states),
+        _ => None,
+    }
+}
+
+fn app_view_changes(view: &AppView) -> Option<&FlatViewTree> {
+    match view {
+        AppView::ResourceChanges {
+            resource_changes, ..
+        } => Some(resource_changes),
+        AppView::Operations {
+            resource_changes, ..
+        } => Some(resource_changes),
+        AppView::OperationsApply {
+            resource_changes, ..
+        } => Some(resource_changes),
+        AppView::Done {
+            resource_changes, ..
+        } => Some(resource_changes),
+        _ => None,
+    }
+}
+
+fn app_view_operations(view: &AppView) -> Option<&FlatViewTree> {
+    match view {
+        AppView::Operations {
+            operations_tree, ..
+        } => Some(operations_tree),
+        AppView::OperationsApply {
+            operations_tree, ..
+        } => Some(operations_tree),
+        AppView::Done {
+            operations_tree, ..
+        } => Some(operations_tree),
+        _ => None,
+    }
+}
+
+fn app_view_epochs(view: &AppView) -> Option<&Vec<Vec<OperationView>>> {
+    match view {
+        AppView::OperationsApply {
+            operations_epochs, ..
+        } => Some(operations_epochs),
+        AppView::Done {
+            operations_epochs, ..
+        } => Some(operations_epochs),
+        _ => None,
+    }
+}
+
+fn draw_ui(
+    frame: &mut ratatui::Frame<'_>,
+    app: &mut TuiApp,
+    outcome: Option<&Result<(), TuiError>>,
+) {
     let size = frame.size();
+
     let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints(
             [
-                Constraint::Length(1),
+                Constraint::Length(4),
                 Constraint::Min(5),
                 Constraint::Length(3),
             ]
@@ -562,104 +696,168 @@ fn draw_ui(frame: &mut ratatui::Frame<'_>, app: &mut TuiApp) {
         )
         .split(size);
 
-    draw_tabs(frame, layout[0], app);
+    draw_pipeline(frame, layout[0], app, outcome);
     draw_main(frame, layout[1], app);
-    draw_status(frame, layout[2], app);
+    draw_status(frame, layout[2], app, outcome);
 }
 
-fn draw_tabs(frame: &mut ratatui::Frame<'_>, area: Rect, app: &TuiApp) {
-    let titles = app
-        .tabs
-        .iter()
-        .map(|t| Line::from(vec![Span::styled(t, Style::default())]))
-        .collect::<Vec<_>>();
+fn draw_pipeline(
+    frame: &mut ratatui::Frame<'_>,
+    area: Rect,
+    app: &TuiApp,
+    outcome: Option<&Result<(), TuiError>>,
+) {
+    let mut pipeline_spans: Vec<Span> = Vec::new();
 
-    let suffix = if app.follow_phase { " (follow)" } else { "" };
-    let tabs = Tabs::new(titles)
+    for (index, stage) in PipelineStage::ALL.iter().copied().enumerate() {
+        if index > 0 {
+            pipeline_spans.push(Span::styled(" -> ", Style::default().fg(Color::DarkGray)));
+        }
+
+        let available = stage.is_available(&app.app_view);
+        let selected = stage == app.stage;
+
+        let style = match (available, selected) {
+            (true, true) => Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+            (true, false) => Style::default().fg(Color::White),
+            (false, true) => Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD)
+                .add_modifier(Modifier::CROSSED_OUT),
+            (false, false) => Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::CROSSED_OUT),
+        };
+
+        pipeline_spans.push(Span::styled(stage.label(), style));
+    }
+
+    let feedback = pipeline_feedback_line(app, outcome);
+
+    let lines = vec![
+        Line::from(pipeline_spans),
+        Line::from(Span::styled(feedback, Style::default().fg(Color::Yellow))),
+    ];
+
+    let widget = Paragraph::new(Text::from(lines))
         .block(
             Block::default()
                 .borders(Borders::BOTTOM)
-                .title(format!("lusid{suffix}")),
+                .title(if app.follow_pipeline {
+                    "pipeline (follow pipeline: enabled)"
+                } else {
+                    "pipeline (follow pipeline: disabled)"
+                }),
         )
-        .select(app.tab.index())
-        .highlight_style(
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        );
+        .alignment(Alignment::Left)
+        .wrap(Wrap { trim: true });
 
-    frame.render_widget(tabs, area);
+    frame.render_widget(widget, area);
 }
 
-fn draw_main(frame: &mut ratatui::Frame<'_>, area: Rect, app: &mut TuiApp) {
+fn pipeline_feedback_line(app: &TuiApp, outcome: Option<&Result<(), TuiError>>) -> String {
+    if let Some(Err(err)) = outcome {
+        return format!("Process error: {err}");
+    }
+
     match &app.app_view {
-        AppView::Start => draw_placeholder(frame, area, "waiting for plan..."),
-        AppView::ResourceParams { resource_params } => draw_tree(
-            frame,
-            area,
-            "resource params",
-            resource_params,
-            &mut app.params_state,
-        ),
-        AppView::Resources { resources, .. } => draw_tree(
-            frame,
-            area,
-            "resources",
-            resources,
-            &mut app.resources_state,
-        ),
-        AppView::ResourceStates {
-            resource_states, ..
-        } => draw_tree(
-            frame,
-            area,
-            "resource states",
-            resource_states,
-            &mut app.states_state,
-        ),
-        AppView::ResourceChanges {
-            resource_changes,
-            has_changes,
-            ..
-        } => {
-            let title = match has_changes {
-                Some(true) => "resource changes",
-                Some(false) => "resource changes (no changes)",
-                None => "resource changes (computing)",
-            };
-            draw_tree(frame, area, title, resource_changes, &mut app.changes_state)
+        AppView::Start => "Waiting for planning output...".to_string(),
+
+        AppView::ResourceParams { .. } => {
+            "Resource parameters planned. Navigate with Left and Right.".to_string()
         }
-        AppView::Operations {
-            operations_tree, ..
-        } => draw_tree(
-            frame,
-            area,
-            "operations",
-            operations_tree,
-            &mut app.operations_state,
-        ),
-        AppView::OperationsApply {
-            operations_epochs, ..
-        } => draw_apply(
-            frame,
-            area,
-            operations_epochs,
-            &mut app.operations_apply_state,
-        ),
-        AppView::Done {
-            operations_epochs, ..
-        } => draw_apply(
-            frame,
-            area,
-            operations_epochs,
-            &mut app.operations_apply_state,
-        ),
+
+        AppView::Resources { .. } => "Resources planned. Navigate with Left and Right.".to_string(),
+
+        AppView::ResourceStates { .. } => {
+            "Resource states are being fetched. Navigate with Left and Right.".to_string()
+        }
+
+        AppView::ResourceChanges { has_changes, .. } => match has_changes {
+            None => "Computing resource changes...".to_string(),
+            Some(false) => "No changes.".to_string(),
+            Some(true) => {
+                "Changes detected. In a future version you will be asked whether you want to proceed."
+                    .to_string()
+            }
+        },
+
+        AppView::Operations { .. } => {
+            "Operations tree planned. Navigate with Left and Right.".to_string()
+        }
+
+        AppView::OperationsApply { .. } => {
+            "Applying operations epochs. Use Up and Down to select an operation.".to_string()
+        }
+
+        AppView::Done { .. } => {
+            if app.child_exited {
+                "Complete.".to_string()
+            } else {
+                "Complete (waiting for process to exit)...".to_string()
+            }
+        }
     }
 }
 
-fn draw_status(frame: &mut ratatui::Frame<'_>, area: Rect, app: &TuiApp) {
-    let hints = "←/→ tabs  ↑/↓ move  Enter toggle  f follow  q quit";
-    let left = match &app.app_view {
+fn draw_main(frame: &mut ratatui::Frame<'_>, area: Rect, app: &mut TuiApp) {
+    match app.stage {
+        PipelineStage::ResourceParams => match app_view_params(&app.app_view) {
+            Some(tree) => draw_tree(frame, area, "resource params", tree, &mut app.params_state),
+            None => draw_placeholder(frame, area, "Waiting for resource params..."),
+        },
+
+        PipelineStage::Resources => match app_view_resources(&app.app_view) {
+            Some(tree) => draw_tree(frame, area, "resources", tree, &mut app.resources_state),
+            None => draw_placeholder(frame, area, "Resources are not available yet."),
+        },
+
+        PipelineStage::ResourceStates => match app_view_states(&app.app_view) {
+            Some(tree) => draw_tree(frame, area, "resource states", tree, &mut app.states_state),
+            None => draw_placeholder(frame, area, "Resource states are not available yet."),
+        },
+
+        PipelineStage::ResourceChanges => match app_view_changes(&app.app_view) {
+            Some(tree) => draw_tree(
+                frame,
+                area,
+                "resource changes",
+                tree,
+                &mut app.changes_state,
+            ),
+            None => draw_placeholder(frame, area, "Resource changes are not available yet."),
+        },
+
+        PipelineStage::OperationsTree => match app_view_operations(&app.app_view) {
+            Some(tree) => draw_tree(
+                frame,
+                area,
+                "operations tree",
+                tree,
+                &mut app.operations_state,
+            ),
+            None => draw_placeholder(frame, area, "Operations tree is not available yet."),
+        },
+
+        PipelineStage::OperationsEpochs => match app_view_epochs(&app.app_view) {
+            Some(epochs) => draw_apply(frame, area, epochs, &mut app.operations_apply_state),
+            None => draw_placeholder(frame, area, "Operations epochs are not available."),
+        },
+    }
+}
+
+fn draw_status(
+    frame: &mut ratatui::Frame<'_>,
+    area: Rect,
+    app: &TuiApp,
+    outcome: Option<&Result<(), TuiError>>,
+) {
+    let hints =
+        "Left and Right navigate stages  Up and Down move  Enter toggles tree  f follow  q quit";
+
+    let phase = match &app.app_view {
         AppView::Start => "planning...",
         AppView::ResourceParams { .. } => "resource params planned",
         AppView::Resources { .. } => "resources planned",
@@ -674,32 +872,45 @@ fn draw_status(frame: &mut ratatui::Frame<'_>, area: Rect, app: &TuiApp) {
         AppView::Done { .. } => "complete",
     };
 
+    let outcome_line = match outcome {
+        None => String::new(),
+        Some(Ok(())) => "process exited successfully".to_string(),
+        Some(Err(err)) => format!("process error: {err}"),
+    };
+
     let stderr_last = app.stderr_tail.iter().last().cloned().unwrap_or_default();
 
     let lines = vec![
         Line::from(Span::styled(
-            format!("{left:<40}"),
+            format!("{phase:<40}"),
             Style::default()
                 .fg(Color::Green)
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(hints, Style::default().fg(Color::DarkGray))),
-        Line::from(Span::styled(stderr_last, Style::default().fg(Color::Red))),
+        Line::from(Span::styled(
+            if !outcome_line.is_empty() {
+                outcome_line
+            } else {
+                stderr_last
+            },
+            Style::default().fg(Color::Red),
+        )),
     ];
 
-    let para = Paragraph::new(Text::from(lines))
+    let widget = Paragraph::new(Text::from(lines))
         .block(Block::default().borders(Borders::TOP))
         .alignment(Alignment::Left)
         .wrap(Wrap { trim: true });
 
-    frame.render_widget(para, area);
+    frame.render_widget(widget, area);
 }
 
 fn draw_placeholder(frame: &mut ratatui::Frame<'_>, area: Rect, text: &str) {
-    let para = Paragraph::new(Text::from(text))
+    let widget = Paragraph::new(Text::from(text))
         .block(Block::default().borders(Borders::ALL).title("lusid"))
         .alignment(Alignment::Center);
-    frame.render_widget(para, area);
+    frame.render_widget(widget, area);
 }
 
 fn draw_apply(
@@ -713,12 +924,16 @@ fn draw_apply(
         .constraints([Constraint::Percentage(60), Constraint::Percentage(40)].as_ref())
         .split(area);
 
+    if state.flat_index_to_epoch_operation.is_empty() {
+        state.rebuild_index(epochs);
+    }
+
     let mut items: Vec<ListItem<'_>> = Vec::new();
     for (epoch_index, operations) in epochs.iter().enumerate() {
         for (operation_index, operation) in operations.iter().enumerate() {
             let status = if operation.is_complete { "✅" } else { "…" };
             let label = format!(
-                "[{status}] ({epoch_index}, {operation_index}) {}",
+                "[{status}] (epoch {epoch_index}, operation {operation_index}) {}",
                 operation.label
             );
             items.push(ListItem::new(Line::from(Span::raw(label))));
@@ -737,11 +952,11 @@ fn draw_apply(
         *list_state.offset_mut() = state.list_offset;
     }
 
-    let ops_list = List::new(items)
+    let operations_list = List::new(items)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("apply: operations"),
+                .title("operations epochs: operations"),
         )
         .highlight_style(
             Style::default()
@@ -749,12 +964,13 @@ fn draw_apply(
                 .add_modifier(Modifier::BOLD),
         );
 
-    frame.render_stateful_widget(ops_list, layout[0], &mut list_state);
+    frame.render_stateful_widget(operations_list, layout[0], &mut list_state);
 
     let mut stdout = String::new();
     let mut stderr = String::new();
+
     if let Some(sel) = state.selected_flat {
-        if let Some((e, o)) = state.flat_index_to_epoch_op.get(sel).copied() {
+        if let Some((e, o)) = state.flat_index_to_epoch_operation.get(sel).copied() {
             if let Some(op) = epochs.get(e).and_then(|v| v.get(o)) {
                 stdout = op.stdout.clone();
                 stderr = op.stderr.clone();
@@ -767,18 +983,18 @@ fn draw_apply(
         .constraints([Constraint::Percentage(60), Constraint::Percentage(40)].as_ref())
         .split(layout[1]);
 
-    let stdout_para = Paragraph::new(stdout)
+    let stdout_widget = Paragraph::new(stdout)
         .block(Block::default().borders(Borders::ALL).title("stdout"))
         .wrap(Wrap { trim: false })
         .style(Style::default().fg(Color::White));
 
-    let stderr_para = Paragraph::new(stderr)
+    let stderr_widget = Paragraph::new(stderr)
         .block(Block::default().borders(Borders::ALL).title("stderr"))
         .wrap(Wrap { trim: false })
         .style(Style::default().fg(Color::Red));
 
-    frame.render_widget(stdout_para, logs_layout[0]);
-    frame.render_widget(stderr_para, logs_layout[1]);
+    frame.render_widget(stdout_widget, logs_layout[0]);
+    frame.render_widget(stderr_widget, logs_layout[1]);
 }
 
 fn draw_tree(
@@ -795,25 +1011,25 @@ fn draw_tree(
     }
 
     let selected_row = selected_row_index(&rows, state);
+
     let items = rows
         .iter()
         .map(|row| {
-            let mut segs = Vec::new();
-
-            let indent = "  ".repeat(row.depth);
-            segs.push(Span::raw(indent));
+            let mut spans: Vec<Span> = Vec::new();
+            spans.push(Span::raw("  ".repeat(row.depth)));
 
             if row.is_branch {
-                segs.push(Span::styled(
+                spans.push(Span::styled(
                     format!("{} ", if row.is_expanded { "▼" } else { "▶" }),
                     Style::default().fg(Color::Yellow),
                 ));
             } else {
-                segs.push(Span::styled("• ", Style::default().fg(Color::DarkGray)));
+                spans.push(Span::styled("• ", Style::default().fg(Color::DarkGray)));
             }
 
-            segs.push(Span::raw(&row.label));
-            ListItem::new(Line::from(segs))
+            spans.push(Span::raw(&row.label));
+
+            ListItem::new(Line::from(spans))
         })
         .collect::<Vec<_>>();
 
@@ -850,6 +1066,7 @@ struct TreeRow {
 fn build_visible_rows(tree: &FlatViewTree, state: &TreeState) -> Vec<TreeRow> {
     let mut out = Vec::new();
     let mut visited = HashSet::new();
+
     build_visible_rows_rec(
         tree,
         FlatViewTree::root_index(),
@@ -858,6 +1075,7 @@ fn build_visible_rows(tree: &FlatViewTree, state: &TreeState) -> Vec<TreeRow> {
         &mut out,
         &mut visited,
     );
+
     out
 }
 
@@ -885,6 +1103,7 @@ fn build_visible_rows_rec(
                 ViewNode::Started => "in progress".to_string(),
                 ViewNode::Complete(v) => v.to_string(),
             };
+
             out.push(TreeRow {
                 index,
                 depth,
@@ -893,8 +1112,10 @@ fn build_visible_rows_rec(
                 label,
             });
         }
+
         FlatViewTreeNode::Branch { view, children } => {
             let is_expanded = state.expanded.contains(&index);
+
             out.push(TreeRow {
                 index,
                 depth,
@@ -919,6 +1140,7 @@ fn selected_row_index(rows: &[TreeRow], state: &TreeState) -> Option<usize> {
 
 fn tree_move_selection(tree: &FlatViewTree, state: &mut TreeState, delta: i32) {
     let rows = build_visible_rows(tree, state);
+
     if rows.is_empty() {
         state.selected_node = None;
         state.list_offset = 0;
@@ -926,6 +1148,7 @@ fn tree_move_selection(tree: &FlatViewTree, state: &mut TreeState, delta: i32) {
     }
 
     let current_row = selected_row_index(&rows, state).unwrap_or(0);
+
     let next_row = if delta >= 0 {
         (current_row + delta as usize).min(rows.len() - 1)
     } else {
