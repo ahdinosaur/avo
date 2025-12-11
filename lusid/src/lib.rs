@@ -10,7 +10,7 @@ use lusid_ssh::{Ssh, SshConnectOptions, SshError, SshVolume};
 use lusid_vm::{Vm, VmError, VmOptions};
 use thiserror::Error;
 use tokio::io::AsyncBufReadExt;
-use tracing::error;
+use tracing::{debug, error};
 use which::which;
 
 use crate::config::{Config, ConfigError, MachineConfig};
@@ -186,7 +186,7 @@ async fn cmd_local_apply(config: Config) -> Result<(), AppError> {
     let mut command = Command::new(lusid_apply_linux_x86_64_path);
     command
         .args(["--plan", &plan.to_string_lossy()])
-        .args(["--log", "trace"]);
+        .args(["--log", &config.log]);
 
     if let Some(params) = params {
         let params_json = serde_json::to_string(&params)?;
@@ -250,8 +250,9 @@ async fn cmd_dev_apply(config: Config, machine_id: String) -> Result<(), AppErro
         },
     ];
 
+    let log = config.log;
     let mut command =
-        format!("{dev_dir}/lusid-apply --plan {dev_dir}/plan/{plan_filename} --log trace");
+        format!("{dev_dir}/lusid-apply --plan {dev_dir}/plan/{plan_filename} --log {log}");
     if let Some(params) = params {
         let params_json = serde_json::to_string(&params)?;
         command.push_str(&format!(" --params '{params_json}'"));
@@ -276,7 +277,7 @@ async fn cmd_dev_apply(config: Config, machine_id: String) -> Result<(), AppErro
                 let update: AppUpdate =
                     serde_json::from_str(&line).map_err(AppError::ParseApplyStdoutJson)?;
 
-                println!("update: {:?}", update);
+                debug!("update: {:?}", update);
 
                 view = view.update(update.clone())?;
 

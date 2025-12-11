@@ -6,7 +6,7 @@ build-lusid-apply:
   # cargo build -p lusid-apply --target aarch64-unknown-linux-gnu --release
 
 lusid-local-apply:
-  cargo run -p lusid -- local apply --config ./examples/lusid.toml --params '{ "whatever": true }' --log trace
+  cargo run -p lusid -- local apply --config ./examples/lusid.toml --params '{ "whatever": true }'
 
 lusid-dev-apply: build-lusid-apply
   cargo run -p lusid --release -- dev apply --config ./examples/lusid.toml --machine a
