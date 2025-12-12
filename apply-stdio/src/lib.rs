@@ -811,6 +811,121 @@ impl AppView {
             }),
         }
     }
+
+    pub fn resource_params(&self) -> Option<&FlatViewTree> {
+        match self {
+            Self::Start => None,
+            Self::ResourceParams { resource_params }
+            | Self::Resources {
+                resource_params, ..
+            }
+            | Self::ResourceStates {
+                resource_params, ..
+            }
+            | Self::ResourceChanges {
+                resource_params, ..
+            }
+            | Self::Operations {
+                resource_params, ..
+            }
+            | Self::OperationsApply {
+                resource_params, ..
+            }
+            | Self::Done {
+                resource_params, ..
+            } => Some(resource_params),
+        }
+    }
+
+    pub fn resources(&self) -> Option<&FlatViewTree> {
+        match self {
+            Self::Start | Self::ResourceParams { .. } => None,
+            Self::Resources { resources, .. }
+            | Self::ResourceStates { resources, .. }
+            | Self::ResourceChanges { resources, .. }
+            | Self::Operations { resources, .. }
+            | Self::OperationsApply { resources, .. }
+            | Self::Done { resources, .. } => Some(resources),
+        }
+    }
+
+    pub fn resource_states(&self) -> Option<&FlatViewTree> {
+        match self {
+            AppView::Start | AppView::ResourceParams { .. } | AppView::Resources { .. } => None,
+            AppView::ResourceStates {
+                resource_states, ..
+            }
+            | AppView::ResourceChanges {
+                resource_states, ..
+            }
+            | AppView::Operations {
+                resource_states, ..
+            }
+            | AppView::OperationsApply {
+                resource_states, ..
+            }
+            | AppView::Done {
+                resource_states, ..
+            } => Some(resource_states),
+        }
+    }
+
+    pub fn resource_changes(&self) -> Option<&FlatViewTree> {
+        match self {
+            AppView::Start
+            | AppView::ResourceParams { .. }
+            | AppView::Resources { .. }
+            | AppView::ResourceStates { .. } => None,
+            AppView::ResourceChanges {
+                resource_changes, ..
+            }
+            | AppView::Operations {
+                resource_changes, ..
+            }
+            | AppView::OperationsApply {
+                resource_changes, ..
+            }
+            | AppView::Done {
+                resource_changes, ..
+            } => Some(resource_changes),
+        }
+    }
+
+    pub fn operations_tree(&self) -> Option<&FlatViewTree> {
+        match self {
+            AppView::Start
+            | AppView::ResourceParams { .. }
+            | AppView::Resources { .. }
+            | AppView::ResourceStates { .. }
+            | AppView::ResourceChanges { .. } => None,
+            AppView::Operations {
+                operations_tree, ..
+            }
+            | AppView::OperationsApply {
+                operations_tree, ..
+            }
+            | AppView::Done {
+                operations_tree, ..
+            } => Some(operations_tree),
+        }
+    }
+
+    pub fn operations_epochs(&self) -> Option<&Vec<Vec<OperationView>>> {
+        match self {
+            AppView::Start
+            | AppView::ResourceParams { .. }
+            | AppView::Resources { .. }
+            | AppView::ResourceStates { .. }
+            | AppView::ResourceChanges { .. }
+            | AppView::Operations { .. } => None,
+            AppView::OperationsApply {
+                operations_epochs, ..
+            } => Some(operations_epochs),
+            AppView::Done {
+                operations_epochs, ..
+            } => Some(operations_epochs),
+        }
+    }
 }
 
 /// Lenient conversion to nested ViewTree:

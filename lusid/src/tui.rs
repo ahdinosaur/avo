@@ -4,13 +4,8 @@ use std::collections::HashSet;
 use std::future::Future;
 use std::io;
 use std::pin::Pin;
-use std::time::Duration;
 
-use crossterm::{
-    event::{Event as CEvent, KeyCode, KeyEvent, KeyModifiers},
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use lusid_apply_stdio::{
     AppUpdate, AppView, AppViewError, FlatViewTree, FlatViewTreeError, FlatViewTreeNode,
     OperationView, ViewNode,
@@ -18,32 +13,23 @@ use lusid_apply_stdio::{
 use lusid_cmd::CommandError;
 use lusid_ssh::SshError;
 use ratatui::{
-    backend::CrosstermBackend,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
-    Terminal,
+    DefaultTerminal,
 };
 use serde_json::Error as SerdeJsonError;
 use thiserror::Error;
-use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
-use tokio::sync::mpsc;
-use tokio::time::interval;
+use tokio::{
+    io::{AsyncBufReadExt, AsyncRead, BufReader},
+    sync::mpsc::UnboundedReceiver,
+};
 
 #[derive(Error, Debug)]
 pub enum TuiError {
     #[error(transparent)]
     Io(#[from] io::Error),
-
-    #[error("terminal initialization failed")]
-    TerminalInit,
-
-    #[error("failed to enable raw mode")]
-    EnableRawMode,
-
-    #[error("failed to disable raw mode")]
-    DisableRawMode,
 
     #[error("failed to parse apply stdout as json: {0}")]
     ParseApplyStdout(#[from] SerdeJsonError),
@@ -65,6 +51,9 @@ pub enum TuiError {
 
     #[error("ssh failed: {0}")]
     Ssh(#[from] SshError),
+
+    #[error("failed to join task: {0}")]
+    TaskJoin(#[from] tokio::task::JoinError),
 }
 
 pub async fn tui<Stdout, Stderr, Wait, WaitError>(
@@ -78,17 +67,35 @@ where
     Wait: Future<Output = Result<(), WaitError>>,
     WaitError: Into<TuiError>,
 {
-    let mut stdout_lines = BufReader::new(stdout).lines();
-    let mut stderr_lines = BufReader::new(stderr).lines();
+    let terminal = ratatui::init();
 
-    let mut terminal_session = TerminalSession::enter()?;
-    let mut event_rx = spawn_crossterm_event_channel();
-    let mut tick = interval(Duration::from_millis(33));
+    let result = tui_loop(terminal, stdout, stderr, wait).await;
 
+    ratatui::restore();
+
+    result
+}
+
+pub async fn tui_loop<Stdout, Stderr, Wait, WaitError>(
+    mut terminal: DefaultTerminal,
+    stdout: Stdout,
+    stderr: Stderr,
+    wait: Pin<Box<Wait>>,
+) -> Result<(), TuiError>
+where
+    Stdout: AsyncRead + Unpin,
+    Stderr: AsyncRead + Unpin,
+    Wait: Future<Output = Result<(), WaitError>>,
+    WaitError: Into<TuiError>,
+{
     let mut app = TuiApp::new();
 
+    let mut stdout_lines = BufReader::new(stdout).lines();
+    let mut stderr_lines = BufReader::new(stderr).lines();
     let mut stdout_done = false;
     let mut stderr_done = false;
+
+    let mut events = read_events();
 
     let mut outcome: Option<Result<(), TuiError>> = None;
     let mut should_quit = false;
@@ -96,9 +103,7 @@ where
     tokio::pin!(wait);
 
     loop {
-        terminal_session
-            .terminal
-            .draw(|frame| draw_ui(frame, &mut app, outcome.as_ref()))?;
+        terminal.draw(|frame| draw_ui(frame, &mut app, outcome.as_ref()))?;
 
         tokio::select! {
             result = &mut wait, if outcome.is_none() => {
@@ -115,11 +120,7 @@ where
                         }
                     }
                     Ok(None) => stdout_done = true,
-                    Err(err) => {
-                        app.child_exited = true;
-                        outcome = Some(Err(TuiError::ReadApplyStdout(err)));
-                        stdout_done = true;
-                    }
+                    Err(err) => return Err(err.into()),
                 }
             }
 
@@ -127,79 +128,37 @@ where
                 match line {
                     Ok(Some(line)) => app.push_stderr(line),
                     Ok(None) => stderr_done = true,
-                    Err(err) => {
-                        app.child_exited = true;
-                        outcome = Some(Err(TuiError::ReadApplyStderr(err)));
-                        stderr_done = true;
-                    }
+                    Err(err) => return Err(err.into()),
                 }
             }
 
-            Some(event) = event_rx.recv() => {
+            Some(event) = events.recv() => {
                 should_quit = app.handle_event(event)?;
             }
-
-            _ = tick.tick() => {}
         }
 
         if should_quit {
             break;
         }
-
-        let _io_closed = stdout_done && stderr_done;
-        let _ = _io_closed;
     }
 
-    match outcome {
-        None => Ok(()),
-        Some(result) => result,
+    if let Some(outcome) = outcome {
+        return outcome;
     }
+
+    Ok(())
 }
 
-struct TerminalSession {
-    terminal: Terminal<CrosstermBackend<io::Stdout>>,
-}
+fn read_events() -> UnboundedReceiver<Event> {
+    let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
 
-impl TerminalSession {
-    fn enter() -> Result<Self, TuiError> {
-        enable_raw_mode().map_err(|_| TuiError::EnableRawMode)?;
-
-        let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen).map_err(|_| TuiError::TerminalInit)?;
-
-        let backend = CrosstermBackend::new(stdout);
-        let mut terminal = Terminal::new(backend).map_err(|_| TuiError::TerminalInit)?;
-        terminal.clear()?;
-
-        Ok(Self { terminal })
-    }
-}
-
-impl Drop for TerminalSession {
-    fn drop(&mut self) {
-        let _ = disable_raw_mode();
-        let _ = execute!(io::stdout(), LeaveAlternateScreen);
-        let _ = self.terminal.show_cursor();
-    }
-}
-
-fn spawn_crossterm_event_channel() -> mpsc::Receiver<CEvent> {
-    let (tx, rx) = mpsc::channel(64);
-
-    std::thread::spawn(move || loop {
-        let ready = crossterm::event::poll(Duration::from_millis(100)).unwrap_or(false);
-        if !ready {
-            continue;
-        }
-
-        if let Ok(evt) = crossterm::event::read() {
-            if tx.blocking_send(evt).is_err() {
-                break;
-            }
+    tokio::task::spawn_blocking(move || loop {
+        if let Ok(event) = crossterm::event::read() {
+            let _ = event_tx.send(event);
         }
     });
 
-    rx
+    event_rx
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -246,12 +205,12 @@ impl PipelineStage {
 
     fn is_available(self, view: &AppView) -> bool {
         match self {
-            PipelineStage::ResourceParams => app_view_params(view).is_some(),
-            PipelineStage::Resources => app_view_resources(view).is_some(),
-            PipelineStage::ResourceStates => app_view_states(view).is_some(),
-            PipelineStage::ResourceChanges => app_view_changes(view).is_some(),
-            PipelineStage::OperationsTree => app_view_operations(view).is_some(),
-            PipelineStage::OperationsEpochs => app_view_epochs(view).is_some(),
+            PipelineStage::ResourceParams => view.resource_params().is_some(),
+            PipelineStage::Resources => view.resources().is_some(),
+            PipelineStage::ResourceStates => view.resource_states().is_some(),
+            PipelineStage::ResourceChanges => view.resource_changes().is_some(),
+            PipelineStage::OperationsTree => view.operations_tree().is_some(),
+            PipelineStage::OperationsEpochs => view.operations_epochs().is_some(),
         }
     }
 
@@ -403,7 +362,7 @@ impl TuiApp {
             }
         }
 
-        if let Some(epochs) = app_view_epochs(&self.app_view) {
+        if let Some(epochs) = self.app_view.operations_epochs() {
             self.operations_apply_state.rebuild_index(epochs);
         }
 
@@ -414,8 +373,8 @@ impl TuiApp {
         self.stderr_tail.push(line);
     }
 
-    fn handle_event(&mut self, event: CEvent) -> Result<bool, TuiError> {
-        if let CEvent::Key(KeyEvent {
+    fn handle_event(&mut self, event: Event) -> Result<bool, TuiError> {
+        if let Event::Key(KeyEvent {
             code, modifiers, ..
         }) = event
         {
@@ -545,131 +504,33 @@ impl TuiApp {
 
     fn tree_for_stage_mut(&mut self) -> Option<(&FlatViewTree, &mut TreeState)> {
         match self.stage {
-            PipelineStage::ResourceParams => {
-                app_view_params(&self.app_view).map(|tree| (tree, &mut self.params_state))
-            }
-            PipelineStage::Resources => {
-                app_view_resources(&self.app_view).map(|tree| (tree, &mut self.resources_state))
-            }
-            PipelineStage::ResourceStates => {
-                app_view_states(&self.app_view).map(|tree| (tree, &mut self.states_state))
-            }
-            PipelineStage::ResourceChanges => {
-                app_view_changes(&self.app_view).map(|tree| (tree, &mut self.changes_state))
-            }
-            PipelineStage::OperationsTree => {
-                app_view_operations(&self.app_view).map(|tree| (tree, &mut self.operations_state))
-            }
+            PipelineStage::ResourceParams => self
+                .app_view
+                .resource_params()
+                .map(|tree| (tree, &mut self.params_state)),
+            PipelineStage::Resources => self
+                .app_view
+                .resources()
+                .map(|tree| (tree, &mut self.resources_state)),
+            PipelineStage::ResourceStates => self
+                .app_view
+                .resource_states()
+                .map(|tree| (tree, &mut self.states_state)),
+            PipelineStage::ResourceChanges => self
+                .app_view
+                .resource_changes()
+                .map(|tree| (tree, &mut self.changes_state)),
+            PipelineStage::OperationsTree => self
+                .app_view
+                .operations_tree()
+                .map(|tree| (tree, &mut self.operations_state)),
             PipelineStage::OperationsEpochs => None,
         }
     }
 }
 
-fn app_view_params(view: &AppView) -> Option<&FlatViewTree> {
-    match view {
-        AppView::ResourceParams { resource_params } => Some(resource_params),
-        AppView::Resources {
-            resource_params, ..
-        } => Some(resource_params),
-        AppView::ResourceStates {
-            resource_params, ..
-        } => Some(resource_params),
-        AppView::ResourceChanges {
-            resource_params, ..
-        } => Some(resource_params),
-        AppView::Operations {
-            resource_params, ..
-        } => Some(resource_params),
-        AppView::OperationsApply {
-            resource_params, ..
-        } => Some(resource_params),
-        AppView::Done {
-            resource_params, ..
-        } => Some(resource_params),
-        AppView::Start => None,
-    }
-}
-
-fn app_view_resources(view: &AppView) -> Option<&FlatViewTree> {
-    match view {
-        AppView::Resources { resources, .. } => Some(resources),
-        AppView::ResourceStates { resources, .. } => Some(resources),
-        AppView::ResourceChanges { resources, .. } => Some(resources),
-        AppView::Operations { resources, .. } => Some(resources),
-        AppView::OperationsApply { resources, .. } => Some(resources),
-        AppView::Done { resources, .. } => Some(resources),
-        _ => None,
-    }
-}
-
-fn app_view_states(view: &AppView) -> Option<&FlatViewTree> {
-    match view {
-        AppView::ResourceStates {
-            resource_states, ..
-        } => Some(resource_states),
-        AppView::ResourceChanges {
-            resource_states, ..
-        } => Some(resource_states),
-        AppView::Operations {
-            resource_states, ..
-        } => Some(resource_states),
-        AppView::OperationsApply {
-            resource_states, ..
-        } => Some(resource_states),
-        AppView::Done {
-            resource_states, ..
-        } => Some(resource_states),
-        _ => None,
-    }
-}
-
-fn app_view_changes(view: &AppView) -> Option<&FlatViewTree> {
-    match view {
-        AppView::ResourceChanges {
-            resource_changes, ..
-        } => Some(resource_changes),
-        AppView::Operations {
-            resource_changes, ..
-        } => Some(resource_changes),
-        AppView::OperationsApply {
-            resource_changes, ..
-        } => Some(resource_changes),
-        AppView::Done {
-            resource_changes, ..
-        } => Some(resource_changes),
-        _ => None,
-    }
-}
-
-fn app_view_operations(view: &AppView) -> Option<&FlatViewTree> {
-    match view {
-        AppView::Operations {
-            operations_tree, ..
-        } => Some(operations_tree),
-        AppView::OperationsApply {
-            operations_tree, ..
-        } => Some(operations_tree),
-        AppView::Done {
-            operations_tree, ..
-        } => Some(operations_tree),
-        _ => None,
-    }
-}
-
-fn app_view_epochs(view: &AppView) -> Option<&Vec<Vec<OperationView>>> {
-    match view {
-        AppView::OperationsApply {
-            operations_epochs, ..
-        } => Some(operations_epochs),
-        AppView::Done {
-            operations_epochs, ..
-        } => Some(operations_epochs),
-        _ => None,
-    }
-}
-
 fn draw_ui(frame: &mut ratatui::Frame, app: &mut TuiApp, outcome: Option<&Result<(), TuiError>>) {
-    let size = frame.size();
+    let size = frame.area();
 
     let layout = Layout::default()
         .direction(Direction::Vertical)
@@ -780,22 +641,22 @@ fn pipeline_feedback_line(app: &TuiApp, outcome: Option<&Result<(), TuiError>>) 
 
 fn draw_main(frame: &mut ratatui::Frame<'_>, area: Rect, app: &mut TuiApp) {
     match app.stage {
-        PipelineStage::ResourceParams => match app_view_params(&app.app_view) {
+        PipelineStage::ResourceParams => match app.app_view.resource_params() {
             Some(tree) => draw_tree(frame, area, "resource params", tree, &mut app.params_state),
             None => draw_placeholder(frame, area, "Waiting for resource params..."),
         },
 
-        PipelineStage::Resources => match app_view_resources(&app.app_view) {
+        PipelineStage::Resources => match app.app_view.resources() {
             Some(tree) => draw_tree(frame, area, "resources", tree, &mut app.resources_state),
             None => draw_placeholder(frame, area, "Resources are not available yet."),
         },
 
-        PipelineStage::ResourceStates => match app_view_states(&app.app_view) {
+        PipelineStage::ResourceStates => match app.app_view.resource_states() {
             Some(tree) => draw_tree(frame, area, "resource states", tree, &mut app.states_state),
             None => draw_placeholder(frame, area, "Resource states are not available yet."),
         },
 
-        PipelineStage::ResourceChanges => match app_view_changes(&app.app_view) {
+        PipelineStage::ResourceChanges => match app.app_view.resource_changes() {
             Some(tree) => draw_tree(
                 frame,
                 area,
@@ -806,7 +667,7 @@ fn draw_main(frame: &mut ratatui::Frame<'_>, area: Rect, app: &mut TuiApp) {
             None => draw_placeholder(frame, area, "Resource changes are not available yet."),
         },
 
-        PipelineStage::OperationsTree => match app_view_operations(&app.app_view) {
+        PipelineStage::OperationsTree => match app.app_view.operations_tree() {
             Some(tree) => draw_tree(
                 frame,
                 area,
@@ -817,7 +678,7 @@ fn draw_main(frame: &mut ratatui::Frame<'_>, area: Rect, app: &mut TuiApp) {
             None => draw_placeholder(frame, area, "Operations tree is not available yet."),
         },
 
-        PipelineStage::OperationsEpochs => match app_view_epochs(&app.app_view) {
+        PipelineStage::OperationsEpochs => match app.app_view.operations_epochs() {
             Some(epochs) => draw_apply(frame, area, epochs, &mut app.operations_apply_state),
             None => draw_placeholder(frame, area, "Operations epochs are not available."),
         },
