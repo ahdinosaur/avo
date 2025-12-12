@@ -17,13 +17,13 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
-    DefaultTerminal,
+    CompletedFrame, DefaultTerminal, Frame,
 };
 use serde_json::Error as SerdeJsonError;
 use thiserror::Error;
 use tokio::{
     io::{AsyncBufReadExt, AsyncRead, BufReader},
-    sync::mpsc::UnboundedReceiver,
+    sync::mpsc::{unbounded_channel, UnboundedReceiver},
 };
 
 #[derive(Error, Debug)]
@@ -67,27 +67,7 @@ where
     Wait: Future<Output = Result<(), WaitError>>,
     WaitError: Into<TuiError>,
 {
-    let terminal = ratatui::init();
-
-    let result = tui_loop(terminal, stdout, stderr, wait).await;
-
-    ratatui::restore();
-
-    result
-}
-
-pub async fn tui_loop<Stdout, Stderr, Wait, WaitError>(
-    mut terminal: DefaultTerminal,
-    stdout: Stdout,
-    stderr: Stderr,
-    wait: Pin<Box<Wait>>,
-) -> Result<(), TuiError>
-where
-    Stdout: AsyncRead + Unpin,
-    Stderr: AsyncRead + Unpin,
-    Wait: Future<Output = Result<(), WaitError>>,
-    WaitError: Into<TuiError>,
-{
+    let mut terminal = TerminalSession::init();
     let mut app = TuiApp::new();
 
     let mut stdout_lines = BufReader::new(stdout).lines();
@@ -142,19 +122,44 @@ where
         }
     }
 
-    if let Some(outcome) = outcome {
-        return outcome;
+    match outcome {
+        None => Ok(()),
+        Some(result) => result,
+    }
+}
+
+struct TerminalSession {
+    terminal: DefaultTerminal,
+}
+
+impl TerminalSession {
+    fn init() -> Self {
+        let terminal = ratatui::init();
+        Self { terminal }
     }
 
-    Ok(())
+    pub fn draw<F>(&mut self, render_callback: F) -> Result<CompletedFrame<'_>, TuiError>
+    where
+        F: FnOnce(&mut Frame),
+    {
+        Ok(self.terminal.draw(render_callback)?)
+    }
+}
+
+impl Drop for TerminalSession {
+    fn drop(&mut self) {
+        ratatui::restore();
+    }
 }
 
 fn read_events() -> UnboundedReceiver<Event> {
-    let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (event_tx, event_rx) = unbounded_channel();
 
-    tokio::task::spawn_blocking(move || loop {
+    std::thread::spawn(move || loop {
         if let Ok(event) = crossterm::event::read() {
-            let _ = event_tx.send(event);
+            if event_tx.send(event).is_err() {
+                break;
+            }
         }
     });
 
