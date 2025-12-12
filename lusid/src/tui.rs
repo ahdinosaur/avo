@@ -106,7 +106,9 @@ where
 
             line = stderr_lines.next_line(), if !stderr_done => {
                 match line {
-                    Ok(Some(line)) => app.push_stderr(line),
+                    Ok(Some(_line)) => {
+                        // TODO
+                    },
                     Ok(None) => stderr_done = true,
                     Err(err) => return Err(err.into()),
                 }
@@ -331,7 +333,6 @@ struct TuiApp {
 
     operations_apply_state: OperationsApplyState,
 
-    stderr_tail: CircularBuffer<String>,
     child_exited: bool,
 }
 
@@ -349,8 +350,6 @@ impl TuiApp {
             operations_state: TreeState::default(),
 
             operations_apply_state: OperationsApplyState::default(),
-
-            stderr_tail: CircularBuffer::new(200),
             child_exited: false,
         }
     }
@@ -372,10 +371,6 @@ impl TuiApp {
         }
 
         Ok(())
-    }
-
-    fn push_stderr(&mut self, line: String) {
-        self.stderr_tail.push(line);
     }
 
     fn handle_event(&mut self, event: Event) -> Result<bool, TuiError> {
@@ -535,23 +530,23 @@ impl TuiApp {
 }
 
 fn draw_ui(frame: &mut ratatui::Frame, app: &mut TuiApp, outcome: Option<&Result<(), TuiError>>) {
-    let size = frame.area();
-
+    let outer = Block::bordered().title_top("lusid");
     let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints(
             [
                 Constraint::Length(4),
                 Constraint::Min(5),
-                Constraint::Length(3),
+                Constraint::Length(1),
             ]
             .as_ref(),
         )
-        .split(size);
+        .split(outer.inner(frame.area()));
 
+    frame.render_widget(outer, frame.area());
     draw_pipeline(frame, layout[0], app, outcome);
     draw_main(frame, layout[1], app);
-    draw_status(frame, layout[2], app, outcome);
+    draw_help(frame, layout[2], app);
 }
 
 fn draw_pipeline(
@@ -595,15 +590,11 @@ fn draw_pipeline(
     ];
 
     let widget = Paragraph::new(Text::from(lines))
-        .block(
-            Block::default()
-                .borders(Borders::BOTTOM)
-                .title(if app.follow_pipeline {
-                    "pipeline (following)"
-                } else {
-                    "pipeline"
-                }),
-        )
+        .block(Block::bordered().title_top(if app.follow_pipeline {
+            "pipeline (following)"
+        } else {
+            "pipeline"
+        }))
         .alignment(Alignment::Left)
         .wrap(Wrap { trim: true });
 
@@ -690,58 +681,17 @@ fn draw_main(frame: &mut ratatui::Frame<'_>, area: Rect, app: &mut TuiApp) {
     }
 }
 
-fn draw_status(
-    frame: &mut ratatui::Frame<'_>,
-    area: Rect,
-    app: &TuiApp,
-    outcome: Option<&Result<(), TuiError>>,
-) {
+fn draw_help(frame: &mut ratatui::Frame, area: Rect, _app: &TuiApp) {
     let hints =
         "Left and Right navigate stages  Up and Down move  Enter toggles tree  f follow  q quit";
 
-    let phase = match &app.app_view {
-        AppView::Start => "planning...",
-        AppView::ResourceParams { .. } => "resource params planned",
-        AppView::Resources { .. } => "resources planned",
-        AppView::ResourceStates { .. } => "resource states fetched",
-        AppView::ResourceChanges { has_changes, .. } => match has_changes {
-            None => "changes computing...",
-            Some(true) => "changes ready",
-            Some(false) => "no changes",
-        },
-        AppView::Operations { .. } => "operations planned",
-        AppView::OperationsApply { .. } => "operations applying...",
-        AppView::Done { .. } => "complete",
-    };
-
-    let outcome_line = match outcome {
-        None => String::new(),
-        Some(Ok(())) => "process exited successfully".to_string(),
-        Some(Err(err)) => format!("process error: {err}"),
-    };
-
-    let stderr_last = app.stderr_tail.iter().last().cloned().unwrap_or_default();
-
-    let lines = vec![
-        Line::from(Span::styled(
-            format!("{phase:<40}"),
-            Style::default()
-                .fg(Color::Green)
-                .add_modifier(Modifier::BOLD),
-        )),
-        Line::from(Span::styled(hints, Style::default().fg(Color::DarkGray))),
-        Line::from(Span::styled(
-            if !outcome_line.is_empty() {
-                outcome_line
-            } else {
-                stderr_last
-            },
-            Style::default().fg(Color::Red),
-        )),
-    ];
+    let lines = vec![Line::from(Span::styled(
+        hints,
+        Style::default().fg(Color::DarkGray),
+    ))];
 
     let widget = Paragraph::new(Text::from(lines))
-        .block(Block::default().borders(Borders::TOP))
+        .block(Block::default())
         .alignment(Alignment::Left)
         .wrap(Wrap { trim: true });
 
@@ -750,7 +700,7 @@ fn draw_status(
 
 fn draw_placeholder(frame: &mut ratatui::Frame<'_>, area: Rect, text: &str) {
     let widget = Paragraph::new(Text::from(text))
-        .block(Block::default().borders(Borders::ALL).title("lusid"))
+        .block(Block::default().borders(Borders::ALL))
         .alignment(Alignment::Center);
     frame.render_widget(widget, area);
 }
@@ -998,30 +948,4 @@ fn tree_move_selection(tree: &FlatViewTree, state: &mut TreeState, delta: i32) {
     };
 
     state.selected_node = Some(rows[next_row].index);
-}
-
-#[derive(Debug, Clone)]
-struct CircularBuffer<T> {
-    buf: Vec<T>,
-    cap: usize,
-}
-
-impl<T> CircularBuffer<T> {
-    fn new(cap: usize) -> Self {
-        Self {
-            buf: Vec::with_capacity(cap),
-            cap,
-        }
-    }
-
-    fn push(&mut self, val: T) {
-        if self.buf.len() == self.cap {
-            self.buf.remove(0);
-        }
-        self.buf.push(val);
-    }
-
-    fn iter(&self) -> impl Iterator<Item = &T> {
-        self.buf.iter()
-    }
 }
