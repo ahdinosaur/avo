@@ -1,19 +1,20 @@
 mod config;
+mod tui;
 
 use std::{env, net::Ipv4Addr, path::PathBuf, sync::Arc, time::Duration};
 
 use clap::{Parser, Subcommand};
-use lusid_apply_stdio::{AppUpdate, AppView, AppViewError};
+use lusid_apply_stdio::AppViewError;
 use lusid_cmd::{Command, CommandError};
 use lusid_ctx::Context;
 use lusid_ssh::{Ssh, SshConnectOptions, SshError, SshVolume};
 use lusid_vm::{Vm, VmError, VmOptions};
 use thiserror::Error;
-use tokio::io::{AsyncBufReadExt, AsyncRead};
-use tracing::{debug, error};
+use tracing::error;
 use which::which;
 
 use crate::config::{Config, ConfigError, MachineConfig};
+use crate::tui::{tui, TuiError};
 
 #[derive(Parser, Debug)]
 #[command(name = "lusid", version, about = "Lusid CLI")]
@@ -36,22 +37,22 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Cmd {
-    /// Manage machine definitions
+    #[doc = " Manage machine definitions"]
     Machines {
         #[command(subcommand)]
         command: MachinesCmd,
     },
-    /// Manage local machine
+    #[doc = " Manage local machine"]
     Local {
         #[command(subcommand)]
         command: LocalCmd,
     },
-    /// Manage remote machines
+    #[doc = " Manage remote machines"]
     Remote {
         #[command(subcommand)]
         command: RemoteCmd,
     },
-    /// Develop using virtual machines
+    #[doc = " Develop using virtual machines"]
     Dev {
         #[command(subcommand)]
         command: DevCmd,
@@ -60,26 +61,22 @@ pub enum Cmd {
 
 #[derive(Subcommand, Debug)]
 pub enum MachinesCmd {
-    /// List machines from machines.toml
+    #[doc = " List machines from machines.toml"]
     List,
 }
 
 #[derive(Subcommand, Debug)]
 pub enum LocalCmd {
-    // Apply config to local machine.
     Apply,
 }
 
 #[derive(Subcommand, Debug)]
 pub enum RemoteCmd {
-    // Apply config to remote machine.
     Apply {
-        /// Machine identifier
+        #[doc = " Machine identifier"]
         #[arg(long = "machine")]
         machine_id: String,
     },
-
-    // Ssh into remote machine.
     Ssh {
         #[arg(long = "machine")]
         machine_id: String,
@@ -88,14 +85,11 @@ pub enum RemoteCmd {
 
 #[derive(Subcommand, Debug)]
 pub enum DevCmd {
-    // Spin up virtual machine and apply config.
     Apply {
-        /// Machine identifier
+        #[doc = " Machine identifier"]
         #[arg(long = "machine")]
         machine_id: String,
     },
-
-    // Ssh into virtual machine.
     Ssh {
         #[arg(long = "machine")]
         machine_id: String,
@@ -139,6 +133,9 @@ pub enum AppError {
 
     #[error("unexpected view state")]
     UnexpectedViewState,
+
+    #[error(transparent)]
+    Tui(#[from] TuiError),
 }
 
 pub async fn get_config(cli: &Cli) -> Result<Config, AppError> {
@@ -176,6 +173,7 @@ async fn cmd_machines_list(config: Config) -> Result<(), AppError> {
     Ok(())
 }
 
+// Rewritten to use TUI
 async fn cmd_local_apply(config: Config) -> Result<(), AppError> {
     let Config {
         ref lusid_apply_linux_x86_64_path,
@@ -193,21 +191,13 @@ async fn cmd_local_apply(config: Config) -> Result<(), AppError> {
         command.args(["--params", &params_json]);
     }
 
-    let mut output = command.output().await?;
+    let output = command.output().await?;
 
-    {
-        let stdout_fut = view_apply(&mut output.stdout);
-        let stderr_fut = async {
-            tokio::io::copy(&mut output.stderr, &mut tokio::io::stderr())
-                .await
-                .map(|_| ()) // drop the number of bytes written
-                .map_err(AppError::ForwardApplyStderr)
-        };
-
-        tokio::try_join!(stdout_fut, stderr_fut)?;
-    }
-
-    let _exit_status = output.status.await?;
+    let wait = Box::pin(async move {
+        output.status.await?;
+        Ok::<_, CommandError>(())
+    });
+    tui(output.stdout, output.stderr, wait).await?;
 
     Ok(())
 }
@@ -229,7 +219,6 @@ async fn cmd_dev_apply(config: Config, machine_id: String) -> Result<(), AppErro
 
     let instance_id = &machine_id;
     let ports = vec![];
-
     let mut ctx = Context::create().unwrap();
     let options = VmOptions {
         instance_id,
@@ -250,7 +239,6 @@ async fn cmd_dev_apply(config: Config, machine_id: String) -> Result<(), AppErro
     let dev_dir = format!("/home/{}", vm.user);
     let plan_dir = plan.parent().unwrap();
     let plan_filename = plan.file_name().unwrap().to_string_lossy();
-
     let apply_bin = which(config.lusid_apply_linux_x86_64_path)?;
 
     let volumes = vec![
@@ -277,20 +265,12 @@ async fn cmd_dev_apply(config: Config, machine_id: String) -> Result<(), AppErro
     }
 
     let mut handle = ssh.command(&command).await?;
+    let wait = Box::pin(async move {
+        handle.channel.wait().await?;
+        Ok::<_, SshError>(())
+    });
 
-    {
-        let stdout_fut = view_apply(&mut handle.stdout);
-        let stderr_fut = async {
-            tokio::io::copy(&mut handle.stderr, &mut tokio::io::stderr())
-                .await
-                .map(|_| ()) // drop the number of bytes written
-                .map_err(AppError::ForwardApplyStderr)
-        };
-
-        tokio::try_join!(stdout_fut, stderr_fut)?;
-    }
-
-    let _exit_code = handle.wait().await?;
+    tui(&mut handle.stdout, &mut handle.stderr, wait).await?;
 
     ssh.disconnect().await?;
 
@@ -306,7 +286,6 @@ async fn cmd_dev_ssh(config: Config, machine_id: String) -> Result<(), AppError>
 
     let instance_id = &machine_id;
     let ports = vec![];
-
     let mut ctx = Context::create().unwrap();
     let options = VmOptions {
         instance_id,
@@ -327,121 +306,6 @@ async fn cmd_dev_ssh(config: Config, machine_id: String) -> Result<(), AppError>
     let _exit_code = ssh.terminal().await?;
 
     ssh.disconnect().await?;
-
-    Ok(())
-}
-
-async fn view_apply<ApplyOut>(apply_out: &mut ApplyOut) -> Result<(), AppError>
-where
-    ApplyOut: AsyncRead + Unpin,
-{
-    let mut view = AppView::default();
-    let reader = tokio::io::BufReader::new(apply_out);
-    let mut lines = reader.lines();
-
-    loop {
-        let Some(line) = lines.next_line().await.map_err(AppError::ReadApplyStdout)? else {
-            break;
-        };
-        let update: AppUpdate =
-            serde_json::from_str(&line).map_err(AppError::ParseApplyStdoutJson)?;
-
-        debug!("update: {:?}", update);
-
-        view = view.update(update.clone())?;
-
-        match update {
-            AppUpdate::ResourceParams { .. } => {
-                let AppView::ResourceParams {
-                    ref resource_params,
-                } = view
-                else {
-                    return Err(AppError::UnexpectedViewState);
-                };
-                println!("resource params: {}", resource_params);
-            }
-            AppUpdate::ResourcesComplete => {
-                let AppView::Resources { ref resources, .. } = view else {
-                    return Err(AppError::UnexpectedViewState);
-                };
-                println!("resources: {}", resources);
-            }
-            AppUpdate::ResourceStatesComplete => {
-                let AppView::ResourceStates {
-                    ref resource_states,
-                    ..
-                } = view
-                else {
-                    return Err(AppError::UnexpectedViewState);
-                };
-                println!("resource states: {}", resource_states);
-            }
-            AppUpdate::ResourceChangesComplete { has_changes } => {
-                let AppView::ResourceChanges {
-                    ref resource_changes,
-                    ..
-                } = view
-                else {
-                    return Err(AppError::UnexpectedViewState);
-                };
-                println!("resource changes: {}", resource_changes);
-                if !has_changes {
-                    println!("no changes!")
-                }
-            }
-            AppUpdate::OperationsComplete => {
-                let AppView::Operations {
-                    ref operations_tree,
-                    ..
-                } = view
-                else {
-                    return Err(AppError::UnexpectedViewState);
-                };
-                println!("operations: {}", operations_tree);
-            }
-            AppUpdate::OperationsApplyStart { operations: epochs } => {
-                println!("operations by epoch:");
-                for (epoch_index, epoch) in epochs.iter().enumerate() {
-                    println!("  - epoch #{epoch_index}:");
-                    for operation in epoch {
-                        println!("    - {operation}");
-                    }
-                }
-            }
-            AppUpdate::OperationApplyStart { index } => {
-                let AppView::OperationsApply {
-                    operations_epochs: ref epochs,
-                    ..
-                } = view
-                else {
-                    return Err(AppError::UnexpectedViewState);
-                };
-                let epoch = epochs
-                    .get(index.0)
-                    .unwrap_or_else(|| panic!("expected operation epoch {} to exist", index.0));
-                let operation = epoch
-                    .get(index.1)
-                    .unwrap_or_else(|| panic!("expected operation {} in epoch to exist", index.1));
-                println!(
-                    "starting operation ({}, {}): {}",
-                    index.0, index.1, operation.label
-                )
-            }
-            AppUpdate::OperationApplyStdout { index: _, stdout } => {
-                println!("{stdout}")
-            }
-            AppUpdate::OperationApplyStderr { index: _, stderr } => {
-                eprintln!("{stderr}")
-            }
-            AppUpdate::OperationApplyComplete { index: _ } => {
-                println!("✅️")
-            }
-            AppUpdate::OperationsApplyComplete => {
-                println!("✅️✅️✅️")
-            }
-            _ => {}
-        }
-    }
 
     Ok(())
 }
