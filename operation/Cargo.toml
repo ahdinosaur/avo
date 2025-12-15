@@ -11,3 +11,4 @@ pin-project = "1.1.10"
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+url.workspace = true
