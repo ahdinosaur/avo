@@ -14,6 +14,8 @@ pub enum ParamType {
     Number,
     List { item: Box<Spanned<ParamType>> },
     Object { value: Box<Spanned<ParamType>> },
+    LocalPath,
+    RemotePath,
 }
 
 #[derive(Debug, Clone)]
@@ -381,6 +383,14 @@ fn validate_type(
         ParamType::Number => match value_inner {
             Value::Number(_) => Ok(()),
             _ => Err(mismatch(param_type, value)),
+        },
+
+        ParamType::LocalPath => {
+            if let Value::String(path) = value_inner && path {
+                Ok(())
+            } else {
+                Err(mismatch(param_type, value)),
+            }
         },
 
         ParamType::List { item } => {
