@@ -1,9 +1,11 @@
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::time::SystemTime;
 
+use filetime::FileTime;
 use thiserror::Error;
-use tokio::fs;
+use tokio::fs::{self, set_permissions};
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
@@ -12,6 +14,7 @@ pub enum FsError {
     #[error("Cannot create directory '{path}': {source}")]
     CreateDir {
         path: PathBuf,
+        #[source]
         source: std::io::Error,
     },
 
@@ -19,6 +22,7 @@ pub enum FsError {
     CopyDirSpawn {
         from: PathBuf,
         to: PathBuf,
+        #[source]
         source: std::io::Error,
     },
 
@@ -26,6 +30,7 @@ pub enum FsError {
     CopyDirWait {
         from: PathBuf,
         to: PathBuf,
+        #[source]
         source: std::io::Error,
     },
 
@@ -35,30 +40,52 @@ pub enum FsError {
     #[error("Cannot read directory '{path}': {source}")]
     ReadDir {
         path: PathBuf,
+        #[source]
         source: std::io::Error,
     },
 
     #[error("Cannot iterate directory '{path}': {source}")]
     ReadDirEntry {
         path: PathBuf,
+        #[source]
         source: std::io::Error,
     },
 
     #[error("Cannot remove directory '{path}': {source}")]
     RemoveDir {
         path: PathBuf,
+        #[source]
         source: std::io::Error,
     },
 
     #[error("Cannot read metadata '{path}': {source}")]
     Metadata {
         path: PathBuf,
+        #[source]
         source: std::io::Error,
     },
 
-    #[error("Cannot set permission '{path}': {source}")]
+    #[error("Cannot set mode '{path}' to {mode}: {source}")]
+    SetMode {
+        path: PathBuf,
+        mode: u32,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("Cannot set permissions '{path}': {source}")]
     SetPermissions {
         path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("Cannot change owner '{path}' to uid {uid} + gid {gid}: {source}")]
+    ChangeOwner {
+        path: PathBuf,
+        uid: u32,
+        gid: u32,
+        #[source]
         source: std::io::Error,
     },
 
@@ -68,30 +95,35 @@ pub enum FsError {
     #[error("Cannot create file '{path}': {source}")]
     CreateFile {
         path: PathBuf,
+        #[source]
         source: std::io::Error,
     },
 
     #[error("Cannot open file '{path}': {source}")]
     OpenFile {
         path: PathBuf,
+        #[source]
         source: std::io::Error,
     },
 
     #[error("Cannot determine if path exists '{path}': {source}")]
     PathExists {
         path: PathBuf,
+        #[source]
         source: std::io::Error,
     },
 
     #[error("Cannot write file '{path}': {source}")]
     WriteFile {
         path: PathBuf,
+        #[source]
         source: std::io::Error,
     },
 
     #[error("Cannot read file '{path}': {source}")]
     ReadFile {
         path: PathBuf,
+        #[source]
         source: std::io::Error,
     },
 
@@ -99,12 +131,20 @@ pub enum FsError {
     RenameFile {
         from: PathBuf,
         to: PathBuf,
+        #[source]
         source: std::io::Error,
     },
 
     #[error("Cannot delete file '{path}': {source}")]
     RemoveFile {
         path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("Failed to set file times: {source}")]
+    SetFileTimes {
+        #[source]
         source: std::io::Error,
     },
 }
@@ -214,11 +254,29 @@ pub async fn set_file_mode<P: AsRef<Path>>(path: P, mode: u32) -> Result<(), FsE
     permissions.set_mode(mode);
     fs::set_permissions(p, permissions)
         .await
-        .map_err(|source| FsError::SetPermissions {
+        .map_err(|source| FsError::SetMode {
             path: p.to_path_buf(),
+            mode,
             source,
         })?;
     Ok(())
+}
+
+#[cfg(unix)]
+pub async fn change_owner<P: AsRef<Path>>(path: P, uid: u32, gid: u32) -> Result<(), FsError> {
+    let p = path.as_ref();
+    let std_file = &std::fs::File::open(p).map_err(|source| FsError::OpenFile {
+        path: p.to_path_buf(),
+        source,
+    })?;
+    std::os::unix::fs::fchown(std_file, Some(uid), Some(gid)).map_err(|error| {
+        FsError::ChangeOwner {
+            path: p.to_path_buf(),
+            uid,
+            gid,
+            source: error,
+        }
+    })
 }
 
 pub async fn create_file<P: AsRef<Path>>(path: P) -> Result<tokio::fs::File, FsError> {
@@ -261,7 +319,68 @@ pub async fn write_file<P: AsRef<Path>>(path: P, data: &[u8]) -> Result<(), FsEr
         .map_err(|source| FsError::WriteFile {
             path: p.to_path_buf(),
             source,
-        })
+        })?;
+    file.flush().await.map_err(|source| FsError::WriteFile {
+        path: p.to_path_buf(),
+        source,
+    })?;
+    Ok(())
+}
+
+pub async fn write_file_atomic<P: AsRef<Path>>(path: P, data: &[u8]) -> Result<(), FsError> {
+    let dest_path = path.as_ref();
+    let temp_path = temporary_path_for(dest_path);
+
+    // Write file contents to temporary path in same directory as destination path.
+    write_file(&temp_path, data).await?;
+
+    if path_exists(dest_path).await? {
+        // Copy metadata from destination path.
+        copy_metadata(&temp_path, dest_path).await?;
+    }
+
+    // Rename temporary path to destination path.
+    rename_file(&temp_path, dest_path).await?;
+
+    Ok(())
+}
+
+pub async fn copy_metadata<Src: AsRef<Path>, Dest: AsRef<Path>>(
+    src: Src,
+    dest: Dest,
+) -> Result<(), FsError> {
+    let src = src.as_ref();
+    let dest = dest.as_ref();
+
+    let src_metadata = fs::metadata(src)
+        .await
+        .map_err(|source| FsError::Metadata {
+            path: src.to_path_buf(),
+            source,
+        })?;
+
+    // Copy permissions.
+    set_permissions(dest, src_metadata.permissions())
+        .await
+        .map_err(|source| FsError::SetPermissions {
+            path: dest.to_path_buf(),
+            source,
+        })?;
+
+    // Copy ownership
+    change_owner(dest, src_metadata.uid(), src_metadata.gid()).await?;
+
+    // Copy file times
+    let atime = FileTime::from_last_access_time(&src_metadata);
+    let mtime = FileTime::from_last_modification_time(&src_metadata);
+    let std_file = &std::fs::File::open(dest).map_err(|source| FsError::OpenFile {
+        path: dest.to_path_buf(),
+        source,
+    })?;
+    filetime::set_file_handle_times(std_file, Some(atime), Some(mtime))
+        .map_err(|source| FsError::SetFileTimes { source })?;
+
+    Ok(())
 }
 
 pub async fn read_file_to_string<P: AsRef<Path>>(path: P) -> Result<String, FsError> {
@@ -294,4 +413,13 @@ pub async fn remove_file<P: AsRef<Path>>(path: P) -> Result<(), FsError> {
             path: p.to_path_buf(),
             source,
         })
+}
+
+fn temporary_path_for(path: &Path) -> PathBuf {
+    let time = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+
+    path.with_extension(format!("{time}.tmp"))
 }
