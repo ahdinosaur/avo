@@ -1,3 +1,4 @@
+use nix::unistd::{Group, User};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -5,7 +6,7 @@ use std::time::SystemTime;
 
 use filetime::FileTime;
 use thiserror::Error;
-use tokio::fs::{self, set_permissions};
+use tokio::fs::{self};
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
@@ -65,8 +66,8 @@ pub enum FsError {
         source: std::io::Error,
     },
 
-    #[error("Cannot set mode '{path}' to {mode}: {source}")]
-    SetMode {
+    #[error("Cannot change mode '{path}' to {mode}: {source}")]
+    ChangeMode {
         path: PathBuf,
         mode: u32,
         #[source]
@@ -80,14 +81,34 @@ pub enum FsError {
         source: std::io::Error,
     },
 
-    #[error("Cannot change owner '{path}' to uid {uid} + gid {gid}: {source}")]
+    #[error("Cannot change owner '{path}' to user {uid:?} + group {gid:?}: {source}")]
     ChangeOwner {
         path: PathBuf,
-        uid: u32,
-        gid: u32,
+        uid: Option<u32>,
+        gid: Option<u32>,
         #[source]
         source: std::io::Error,
     },
+
+    #[error("Failed to get user from name: {user}")]
+    UserFromName {
+        user: String,
+        #[source]
+        source: nix::Error,
+    },
+
+    #[error("User not found: {user}")]
+    UserNotFound { user: String },
+
+    #[error("Failed to get group from name: {group}")]
+    GroupFromName {
+        group: String,
+        #[source]
+        source: nix::Error,
+    },
+
+    #[error("Group not found: {group}")]
+    GroupNotFound { group: String },
 
     #[error("Cannot write directory '{path}' (read-only)")]
     ReadOnlyDir { path: PathBuf },
@@ -127,6 +148,14 @@ pub enum FsError {
         source: std::io::Error,
     },
 
+    #[error("Cannot copy file from '{from}' to '{to}': {source}")]
+    CopyFile {
+        from: PathBuf,
+        to: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
     #[error("Cannot rename file from '{from}' to '{to}': {source}")]
     RenameFile {
         from: PathBuf,
@@ -138,6 +167,14 @@ pub enum FsError {
     #[error("Cannot delete file '{path}': {source}")]
     RemoveFile {
         path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("Cannot create symlink from '{from}' to '{to}': {source}")]
+    CreateSymlink {
+        from: PathBuf,
+        to: PathBuf,
         #[source]
         source: std::io::Error,
     },
@@ -242,7 +279,7 @@ pub async fn setup_directory_access<P: AsRef<Path>>(path: P) -> Result<(), FsErr
     Ok(())
 }
 
-pub async fn set_file_mode<P: AsRef<Path>>(path: P, mode: u32) -> Result<(), FsError> {
+pub async fn change_mode<P: AsRef<Path>>(path: P, mode: u32) -> Result<(), FsError> {
     let p = path.as_ref();
     let mut permissions = fs::metadata(p)
         .await
@@ -254,7 +291,7 @@ pub async fn set_file_mode<P: AsRef<Path>>(path: P, mode: u32) -> Result<(), FsE
     permissions.set_mode(mode);
     fs::set_permissions(p, permissions)
         .await
-        .map_err(|source| FsError::SetMode {
+        .map_err(|source| FsError::ChangeMode {
             path: p.to_path_buf(),
             mode,
             source,
@@ -263,20 +300,63 @@ pub async fn set_file_mode<P: AsRef<Path>>(path: P, mode: u32) -> Result<(), FsE
 }
 
 #[cfg(unix)]
-pub async fn change_owner<P: AsRef<Path>>(path: P, uid: u32, gid: u32) -> Result<(), FsError> {
+pub async fn change_owner_by_id<P: AsRef<Path>>(
+    path: P,
+    uid: Option<u32>,
+    gid: Option<u32>,
+) -> Result<(), FsError> {
     let p = path.as_ref();
+
     let std_file = &std::fs::File::open(p).map_err(|source| FsError::OpenFile {
         path: p.to_path_buf(),
         source,
     })?;
-    std::os::unix::fs::fchown(std_file, Some(uid), Some(gid)).map_err(|error| {
-        FsError::ChangeOwner {
-            path: p.to_path_buf(),
-            uid,
-            gid,
-            source: error,
-        }
+
+    std::os::unix::fs::fchown(std_file, uid, gid).map_err(|source| FsError::ChangeOwner {
+        path: p.to_path_buf(),
+        uid,
+        gid,
+        source,
     })
+}
+
+#[cfg(unix)]
+pub async fn change_owner<P: AsRef<Path>>(
+    path: P,
+    user: Option<&str>,
+    group: Option<&str>,
+) -> Result<(), FsError> {
+    let uid = match user {
+        Some(user) => Some(
+            User::from_name(user)
+                .map_err(|source| FsError::UserFromName {
+                    user: user.into(),
+                    source,
+                })?
+                .ok_or_else(|| FsError::UserNotFound { user: user.into() })?
+                .uid
+                .as_raw(),
+        ),
+        None => None,
+    };
+
+    let gid = match group {
+        Some(group) => Some(
+            Group::from_name(group)
+                .map_err(|source| FsError::GroupFromName {
+                    group: group.into(),
+                    source,
+                })?
+                .ok_or_else(|| FsError::GroupNotFound {
+                    group: group.into(),
+                })?
+                .gid
+                .as_raw(),
+        ),
+        None => None,
+    };
+
+    change_owner_by_id(path, uid, gid).await
 }
 
 pub async fn create_file<P: AsRef<Path>>(path: P) -> Result<tokio::fs::File, FsError> {
@@ -360,7 +440,7 @@ pub async fn copy_metadata<Src: AsRef<Path>, Dest: AsRef<Path>>(
         })?;
 
     // Copy permissions.
-    set_permissions(dest, src_metadata.permissions())
+    fs::set_permissions(dest, src_metadata.permissions())
         .await
         .map_err(|source| FsError::SetPermissions {
             path: dest.to_path_buf(),
@@ -368,7 +448,7 @@ pub async fn copy_metadata<Src: AsRef<Path>, Dest: AsRef<Path>>(
         })?;
 
     // Copy ownership
-    change_owner(dest, src_metadata.uid(), src_metadata.gid()).await?;
+    change_owner_by_id(dest, Some(src_metadata.uid()), Some(src_metadata.gid())).await?;
 
     // Copy file times
     let atime = FileTime::from_last_access_time(&src_metadata);
@@ -393,6 +473,56 @@ pub async fn read_file_to_string<P: AsRef<Path>>(path: P) -> Result<String, FsEr
         })
 }
 
+pub async fn copy_file_atomic<F: AsRef<Path>, T: AsRef<Path>>(
+    from: F,
+    to: T,
+) -> Result<(), FsError> {
+    let from_path = from.as_ref();
+    let to_path = to.as_ref();
+
+    let temp_path = temporary_path_for(to_path);
+
+    {
+        let mut source_file =
+            fs::File::open(from_path)
+                .await
+                .map_err(|source| FsError::OpenFile {
+                    path: from_path.to_path_buf(),
+                    source,
+                })?;
+        let mut destination_file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(&temp_path)
+            .await
+            .map_err(|source| FsError::OpenFile {
+                path: temp_path.to_path_buf(),
+                source,
+            })?;
+
+        tokio::io::copy(&mut source_file, &mut destination_file)
+            .await
+            .map_err(|source| FsError::CopyFile {
+                from: from_path.to_path_buf(),
+                to: temp_path.to_path_buf(),
+                source,
+            })?;
+        destination_file
+            .flush()
+            .await
+            .map_err(|source| FsError::CopyFile {
+                from: from_path.to_path_buf(),
+                to: temp_path.to_path_buf(),
+                source,
+            })?;
+    }
+
+    rename_file(from_path, to_path).await?;
+
+    Ok(())
+}
+
 pub async fn rename_file<F: AsRef<Path>, T: AsRef<Path>>(from: F, to: T) -> Result<(), FsError> {
     let from_p = from.as_ref();
     let to_p = to.as_ref();
@@ -411,6 +541,19 @@ pub async fn remove_file<P: AsRef<Path>>(path: P) -> Result<(), FsError> {
         .await
         .map_err(|source| FsError::RemoveFile {
             path: p.to_path_buf(),
+            source,
+        })
+}
+
+pub async fn create_symlink<F: AsRef<Path>, T: AsRef<Path>>(from: F, to: T) -> Result<(), FsError> {
+    let from_path = from.as_ref();
+    let to_path = to.as_ref();
+
+    fs::symlink(from_path, to_path)
+        .await
+        .map_err(|source| FsError::CreateSymlink {
+            from: from_path.to_path_buf(),
+            to: to_path.to_path_buf(),
             source,
         })
 }

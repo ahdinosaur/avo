@@ -1,5 +1,7 @@
 //! Parameter schemas and values.
 
+use std::path::Path;
+
 use displaydoc::Display;
 use indexmap::IndexMap;
 use rimu::{from_serde_value, SerdeValue, SerdeValueError, SourceId, Span, Spanned, Value};
@@ -14,8 +16,8 @@ pub enum ParamType {
     Number,
     List { item: Box<Spanned<ParamType>> },
     Object { value: Box<Spanned<ParamType>> },
-    LocalPath,
-    RemotePath,
+    Path,
+    HostPath,
 }
 
 #[derive(Debug, Clone)]
@@ -152,6 +154,8 @@ impl FromRimu for ParamType {
             "boolean" => Ok(ParamType::Boolean),
             "string" => Ok(ParamType::String),
             "number" => Ok(ParamType::Number),
+            "path" => Ok(ParamType::Path),
+            "host-path" => Ok(ParamType::Number),
             "list" => {
                 let item = object
                     .swap_remove("item")
@@ -295,7 +299,7 @@ impl FromRimu for ParamTypes {
     }
 }
 
-#[derive(Debug, Clone, Error, Display)]
+#[derive(Debug, Error, Display)]
 pub enum ValidateValueError {
     /// Value does not match expected type
     TypeMismatch {
@@ -305,16 +309,26 @@ pub enum ValidateValueError {
     /// Invalid list item at index {index}: {error:?}
     ListItem {
         index: usize,
+        #[source]
         error: Box<ValidateValueError>,
     },
     /// Invalid object entry for key "{key}": {error:?}
     ObjectEntry {
         key: String,
+        #[source]
         error: Box<ValidateValueError>,
     },
+    /// Host path error "{path}": {error:?}
+    HostPathError {
+        path: String,
+        #[source]
+        error: std::io::Error,
+    },
+    /// Host path doesn't exist: "{path}"
+    HostPathNotExists { path: String },
 }
 
-#[derive(Debug, Clone, Error, Display)]
+#[derive(Debug, Error, Display)]
 pub enum ParamValidationError {
     /// Missing required parameter "{key}"
     MissingParam {
@@ -333,13 +347,13 @@ pub enum ParamValidationError {
     },
 }
 
-#[derive(Debug, Clone, Error, Display)]
+#[derive(Debug, Error, Display)]
 #[displaydoc("Parameters struct did not match all fields")]
 pub struct ParamsStructValidationError {
     errors: Vec<ParamValidationError>,
 }
 
-#[derive(Debug, Clone, Error, Display)]
+#[derive(Debug, Error, Display)]
 pub enum ParamsValidationError {
     /// Parameter values without parameter types
     ValuesWithoutTypes,
@@ -385,13 +399,36 @@ fn validate_type(
             _ => Err(mismatch(param_type, value)),
         },
 
-        ParamType::LocalPath => {
-            if let Value::String(path) = value_inner && path {
-                Ok(())
-            } else {
-                Err(mismatch(param_type, value)),
+        ParamType::Path => {
+            #[allow(clippy::collapsible_if)]
+            if let Value::String(path) = value_inner {
+                if is_like_unix_path(path) {
+                    return Ok(());
+                }
             }
-        },
+            Err(mismatch(param_type, value))
+        }
+
+        ParamType::HostPath => {
+            if let Value::String(path_str) = value_inner {
+                let path = Path::new(path_str);
+                let exists =
+                    path.try_exists()
+                        .map_err(|error| ValidateValueError::HostPathError {
+                            path: path_str.into(),
+                            error,
+                        })?;
+                if exists {
+                    Ok(())
+                } else {
+                    Err(ValidateValueError::HostPathNotExists {
+                        path: path_str.into(),
+                    })
+                }
+            } else {
+                Err(mismatch(param_type, value))
+            }
+        }
 
         ParamType::List { item } => {
             let Value::List(items) = value_inner else {
@@ -427,6 +464,10 @@ fn validate_type(
             Ok(())
         }
     }
+}
+
+fn is_like_unix_path(path: &str) -> bool {
+    !path.is_empty() && !path.contains('\\') && !path.contains(':') && path.contains('/')
 }
 
 fn validate_struct(
